@@ -1,0 +1,269 @@
+import { HttpError, chunk } from '../http.ts';
+import type {
+  AdsDailyMetric,
+  Item,
+  ItemVariation,
+  MarketplaceConnector,
+  Order,
+  TokenProvider,
+  VisitsDaily,
+} from '../types.ts';
+import { MercadoLivreClient } from './client.ts';
+
+/* ---------- Tipos parciais das respostas da API do ML ---------- */
+interface MlAttribute { id: string; value_name: string | null }
+interface MlVariation {
+  id: number;
+  price: number;
+  available_quantity: number;
+  sold_quantity: number;
+  seller_custom_field: string | null;
+  attribute_combinations: unknown;
+  attributes?: MlAttribute[];
+}
+interface MlItem {
+  id: string;
+  title: string;
+  price: number;
+  status: string;
+  category_id: string;
+  listing_type_id: string;
+  shipping?: { logistic_type?: string };
+  available_quantity: number;
+  sold_quantity: number;
+  health?: number | null;
+  permalink: string;
+  thumbnail: string;
+  date_created: string;
+  seller_custom_field: string | null;
+  attributes?: MlAttribute[];
+  variations?: MlVariation[];
+}
+interface MlOrder {
+  id: number;
+  pack_id: number | null;
+  status: string;
+  date_created: string;
+  date_closed: string | null;
+  last_updated?: string | null;
+  date_last_updated?: string | null;
+  total_amount: number;
+  paid_amount: number | null;
+  currency_id: string;
+  buyer?: { id: number };
+  shipping?: { id: number | null };
+  tags: string[];
+  order_items: {
+    item: { id: string; title: string; variation_id: number | null; seller_sku: string | null; seller_custom_field?: string | null };
+    quantity: number;
+    unit_price: number;
+    sale_fee: number | null;
+    listing_type_id: string | null;
+  }[];
+}
+interface Paging { total: number; offset: number; limit: number }
+
+const skuFrom = (customField: string | null | undefined, attrs?: MlAttribute[]) =>
+  customField || attrs?.find((a) => a.id === 'SELLER_SKU')?.value_name || null;
+
+/** Formato de data aceito pelos filtros do ML. */
+const mlDate = (d: Date) => d.toISOString().replace('Z', '-00:00');
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+export class MercadoLivreConnector implements MarketplaceConnector {
+  readonly channel = 'mercadolivre' as const;
+  private readonly api: MercadoLivreClient;
+
+  constructor(private readonly sellerId: string, getToken: TokenProvider) {
+    this.api = new MercadoLivreClient(getToken);
+  }
+
+  me() {
+    return this.api.get<{ id: number; nickname: string; seller_reputation?: unknown }>('/users/me');
+  }
+
+  /* ----------------------------- Anúncios ----------------------------- */
+  async *listItems(): AsyncIterable<Item[]> {
+    let scrollId: string | undefined;
+    for (;;) {
+      const page = await this.api.get<{ results: string[]; scroll_id?: string }>(
+        `/users/${this.sellerId}/items/search`,
+        { search_type: 'scan', limit: 100, scroll_id: scrollId },
+      );
+      if (!page.results.length) return;
+      scrollId = page.scroll_id;
+      const items: Item[] = [];
+      for (const ids of chunk(page.results, 20)) {
+        const multi = await this.api.get<{ code: number; body: MlItem }[]>('/items', { ids: ids.join(',') });
+        for (const r of multi) if (r.code === 200) items.push(this.toItem(r.body));
+      }
+      yield items;
+      if (!scrollId) return;
+    }
+  }
+
+  private toItem(it: MlItem): Item {
+    const variations: ItemVariation[] = (it.variations ?? []).map((v) => ({
+      variationId: String(v.id),
+      sku: skuFrom(v.seller_custom_field, v.attributes),
+      price: v.price,
+      availableQty: v.available_quantity,
+      soldQty: v.sold_quantity,
+      attributes: v.attribute_combinations,
+    }));
+    return {
+      channel: 'mercadolivre',
+      itemId: it.id,
+      title: it.title,
+      sku: skuFrom(it.seller_custom_field, it.attributes),
+      price: it.price,
+      status: it.status,
+      categoryId: it.category_id,
+      listingType: it.listing_type_id,
+      logisticType: it.shipping?.logistic_type ?? null,
+      availableQty: it.available_quantity,
+      soldQty: it.sold_quantity,
+      health: it.health ?? null,
+      permalink: it.permalink,
+      thumbnail: it.thumbnail,
+      dateCreated: it.date_created,
+      variations,
+      raw: it,
+    };
+  }
+
+  /* ------------------------------ Pedidos ----------------------------- */
+  async *listOrders(from: Date, to: Date): AsyncIterable<Order[]> {
+    const LIMIT = 50;
+    const MAX_OFFSET = 9000; // a busca do ML não pagina além de ~10.000 registros
+    const search = (offset: number, f: Date, t: Date) =>
+      this.api.get<{ results: MlOrder[]; paging: Paging }>('/orders/search', {
+        seller: this.sellerId,
+        'order.date_last_updated.from': mlDate(f),
+        'order.date_last_updated.to': mlDate(t),
+        sort: 'date_asc',
+        limit: LIMIT,
+        offset,
+      });
+
+    const first = await search(0, from, to);
+    if (first.paging.total > MAX_OFFSET && to.getTime() - from.getTime() > 60_000) {
+      // Muitos pedidos: divide o período ao meio e busca cada metade
+      const mid = new Date((from.getTime() + to.getTime()) / 2);
+      yield* this.listOrders(from, mid);
+      yield* this.listOrders(new Date(mid.getTime() + 1), to);
+      return;
+    }
+    yield first.results.map((o) => this.toOrder(o));
+    for (let offset = LIMIT; offset < first.paging.total; offset += LIMIT) {
+      const page = await search(offset, from, to);
+      if (!page.results.length) break;
+      yield page.results.map((o) => this.toOrder(o));
+    }
+  }
+
+  private toOrder(o: MlOrder): Order {
+    return {
+      channel: 'mercadolivre',
+      orderId: String(o.id),
+      packId: o.pack_id ? String(o.pack_id) : null,
+      status: o.status,
+      dateCreated: o.date_created,
+      dateClosed: o.date_closed,
+      dateLastUpdated: o.date_last_updated ?? o.last_updated ?? null,
+      totalAmount: o.total_amount,
+      paidAmount: o.paid_amount,
+      currency: o.currency_id,
+      buyerId: o.buyer?.id ? String(o.buyer.id) : null,
+      shipmentId: o.shipping?.id ? String(o.shipping.id) : null,
+      tags: o.tags ?? [],
+      items: o.order_items.map((li, i) => ({
+        lineNo: i + 1,
+        itemId: li.item.id,
+        variationId: li.item.variation_id ? String(li.item.variation_id) : null,
+        sku: li.item.seller_sku ?? li.item.seller_custom_field ?? null,
+        title: li.item.title,
+        quantity: li.quantity,
+        unitPrice: li.unit_price,
+        saleFee: li.sale_fee,
+        listingType: li.listing_type_id,
+      })),
+      raw: o,
+    };
+  }
+
+  /* ------------------------------- Frete ------------------------------ */
+  async getShipmentSellerCost(shipmentId: string): Promise<number | null> {
+    try {
+      const c = await this.api.get<{ senders?: { cost: number }[] }>(`/shipments/${shipmentId}/costs`, {}, { 'x-format-new': 'true' });
+      return (c.senders ?? []).reduce((s, x) => s + (x.cost ?? 0), 0);
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 404 || err.status === 403)) return null;
+      throw err;
+    }
+  }
+
+  /* ------------------------------ Visitas ----------------------------- */
+  async getVisits(itemId: string, days: number): Promise<VisitsDaily[]> {
+    const r = await this.api.get<{ results: { date: string; total: number }[] }>(
+      `/items/${itemId}/visits/time_window`,
+      { last: days, unit: 'day' },
+    );
+    return r.results.map((x) => ({ itemId, day: x.date.slice(0, 10), visits: x.total }));
+  }
+
+  /* ------------------------- Mercado Ads (PADS) ----------------------- */
+  // ATENÇÃO (validar na Fase 1): a API de Product Ads pode exigir liberação de
+  // escopo no app do ML. Buscamos dia a dia para que cada resultado seja o
+  // total daquele dia por anúncio. O ML guarda ~90 dias de histórico de Ads.
+  private advertiser?: { id: number; siteId: string } | null;
+
+  private async getAdvertiser() {
+    if (this.advertiser !== undefined) return this.advertiser;
+    const r = await this.api.get<{ advertisers: { advertiser_id: number; site_id: string }[] }>(
+      '/advertising/advertisers',
+      { product_id: 'PADS' },
+      { 'Api-Version': '1' },
+    );
+    const a = r.advertisers?.[0];
+    this.advertiser = a ? { id: a.advertiser_id, siteId: a.site_id } : null;
+    return this.advertiser;
+  }
+
+  async *listAdsMetrics(from: Date, to: Date): AsyncIterable<AdsDailyMetric[]> {
+    const adv = await this.getAdvertiser();
+    if (!adv) return;
+    const metrics = 'prints,clicks,cost,direct_amount,indirect_amount,direct_units_quantity,indirect_units_quantity,organic_units_quantity';
+    for (let d = new Date(from); d <= to; d = new Date(d.getTime() + 86_400_000)) {
+      const day = ymd(d);
+      for (let offset = 0; ; offset += 50) {
+        const r = await this.api.get<{
+          paging: Paging;
+          results: { item_id: string; campaign_id?: number; metrics?: Record<string, number> }[];
+        }>(
+          `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/ads/search`,
+          { date_from: day, date_to: day, metrics, limit: 50, offset },
+          { 'api-version': '2' },
+        );
+        const rows = r.results
+          .map((x) => ({ x, m: x.metrics ?? {} }))
+          .filter(({ m }) => (m.prints ?? 0) > 0 || (m.cost ?? 0) > 0)
+          .map(({ x, m }) => ({
+            itemId: x.item_id,
+            day,
+            campaignId: x.campaign_id ? String(x.campaign_id) : null,
+            impressions: m.prints ?? 0,
+            clicks: m.clicks ?? 0,
+            cost: m.cost ?? 0,
+            directAmount: m.direct_amount ?? 0,
+            indirectAmount: m.indirect_amount ?? 0,
+            directUnits: m.direct_units_quantity ?? 0,
+            indirectUnits: m.indirect_units_quantity ?? 0,
+            organicUnits: m.organic_units_quantity ?? 0,
+          }));
+        if (rows.length) yield rows;
+        if (offset + 50 >= (r.paging?.total ?? 0)) break;
+      }
+    }
+  }
+}

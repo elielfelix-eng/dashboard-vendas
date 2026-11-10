@@ -1,0 +1,18 @@
+{
+  "name": "dashboard-marketplaces",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "jobs"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "sync": "npm run sync -w jobs --",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

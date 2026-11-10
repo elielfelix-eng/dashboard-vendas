@@ -1,0 +1,42 @@
+name: Sincronizacao de dados
+
+on:
+  schedule:
+    # Horário em UTC. 11h/16h/20h UTC = 08h/13h/17h em Brasília.
+    - cron: '0 11,16,20 * * *'
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'O que sincronizar'
+        type: choice
+        options: [all, mercadolivre]
+        default: all
+
+# Nunca roda duas sincronizações ao mesmo tempo (protege o refresh token)
+concurrency:
+  group: sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Sincronizar
+        run: npm run sync -- --source="$SOURCE"
+        env:
+          SOURCE: ${{ inputs.source || 'all' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          BACKFILL_DAYS: '365'

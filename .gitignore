@@ -1,0 +1,24 @@
+# Dependências e builds
+node_modules/
+.next/
+dist/
+out/
+.vercel/
+*.tsbuildinfo
+
+# SEGREDOS — nunca versionar
+.env
+.env.*
+!.env.example
+
+# Gateway (Python)
+gateway/.venv/
+gateway/build/
+gateway/dist/
+gateway/config.local.*
+__pycache__/
+
+# Diversos
+*.log
+.DS_Store
+Thumbs.db

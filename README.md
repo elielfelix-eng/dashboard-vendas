@@ -41,6 +41,14 @@ Baixe em https://git-scm.com/download/win e instale com as opções padrão.
    ```
 7. Anote, em *Project Settings*: a **Project URL**, a **anon/publishable key** e a **connection string** do *Transaction pooler* (porta 6543).
 
+### 3.1 Enviar o código para o GitHub (antes da Vercel)
+No VS Code, abra o terminal (**Ctrl+'**) e rode (troque `SEU-USUARIO` pelo seu usuário do GitHub):
+```
+git remote add origin https://github.com/SEU-USUARIO/dashboard-vendas.git
+git push -u origin main
+```
+Na primeira vez abre uma janela de login do GitHub: autorize. Depois, confira no site do GitHub se os arquivos apareceram.
+
 ### 4. Vercel (publica o site)
 1. Crie a conta em https://vercel.com usando o login do GitHub.
 2. *Add New > Project*, escolha o repositório e defina **Root Directory = `apps/web`**.

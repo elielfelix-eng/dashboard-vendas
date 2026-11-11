@@ -8,10 +8,16 @@ const MESSAGES: Record<string, { text: string; ok: boolean }> = {
   falha: { text: 'Não foi possível concluir a conexão. Tente novamente.', ok: false },
 };
 
-export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string }> }) {
+export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string }> }) {
   await requireAdmin();
   const params = await searchParams;
-  const msg = MESSAGES[params.ok ?? params.erro ?? ''];
+  const msg = params.erro === 'config'
+    ? {
+        text: `Configuração do Mercado Livre incompleta na Vercel: ${(params.faltando ?? '').replace(/[^A-Z_, ()a-z]/g, '')}. ` +
+          'Corrija em Settings > Environment Variables e faça Redeploy. O ML_REDIRECT_URI deve terminar em /api/oauth/mercadolivre/callback.',
+        ok: false,
+      }
+    : MESSAGES[params.ok ?? params.erro ?? ''];
 
   const supabase = await createClient();
   const { data: accounts } = await supabase

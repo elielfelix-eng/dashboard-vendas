@@ -1,12 +1,20 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { buildAuthorizeUrl, createPkcePair, createState } from '@dash/connectors';
 import { getCurrentUser } from '@/lib/auth';
-import { ML_OAUTH_COOKIE, mlApp } from '@/lib/mercadolivre';
+import { ML_OAUTH_COOKIE, mlApp, mlConfigProblems } from '@/lib/mercadolivre';
 
 /** Inicia a conexão com o ML (somente admin). */
 export async function GET(req: NextRequest) {
   const ctx = await getCurrentUser();
   if (!ctx || ctx.profile?.role !== 'admin') return NextResponse.redirect(new URL('/', req.url));
+
+  const problems = mlConfigProblems();
+  if (problems.length) {
+    const url = new URL('/configuracoes/conexoes', req.url);
+    url.searchParams.set('erro', 'config');
+    url.searchParams.set('faltando', problems.join(', '));
+    return NextResponse.redirect(url);
+  }
 
   const { verifier, challenge } = createPkcePair();
   const state = createState();

@@ -33,7 +33,7 @@ def go(cfg, pings=None, **kw):
         cfg,
         source_connect=lambda _s: make_erp(),
         target_connect=connect_target,
-        get_secret=lambda _n: "x",
+        get_secret=lambda _n: "senha-teste",
         ping=pings.append,
         **kw,
     )
@@ -70,7 +70,7 @@ def test_ping_que_falha_nao_derruba(target_cfg, clean_db):
         cfg,
         source_connect=lambda _s: make_erp(),
         target_connect=connect_target,
-        get_secret=lambda _n: "x",
+        get_secret=lambda _n: "senha-teste",
         ping=boom,
     )
     assert rc == 0
@@ -93,8 +93,42 @@ def test_erp_inacessivel(target_cfg, clean_db, query):
         raise RuntimeError("PWD=segredo123;falhou")
 
     cfg = make_config(target_cfg, {"faixas": GOOD})
-    rc = run(cfg, source_connect=falha, target_connect=connect_target, get_secret=lambda _n: "x", ping=lambda _u: None)
+    rc = run(cfg, source_connect=falha, target_connect=connect_target, get_secret=lambda _n: "senha-teste", ping=lambda _u: None)
     assert rc == 1
     status, stats, err = query("select status, stats, error from core.sync_runs")[0]
     assert status == "error" and stats == {"faixas": -1}
     assert "segredo123" not in err
+
+
+def test_falha_no_registro_inicial(target_cfg, clean_db, pg):
+    pings = []
+
+    def alvo_sem_sync_runs(cfg, pw):
+        c = connect_target(cfg, pw)
+        c.execute("alter table core.sync_runs rename to sync_runs_off")
+        c.commit()
+        return c
+
+    cfg = make_config(target_cfg, {"faixas": GOOD}, url="http://hc/abc")
+    try:
+        rc = run(cfg, source_connect=lambda _s: make_erp(), target_connect=alvo_sem_sync_runs,
+                 get_secret=lambda _n: "senha-teste", ping=pings.append)
+    finally:
+        import psycopg
+
+        with psycopg.connect(**pg, prepare_threshold=None) as c:
+            c.execute("alter table core.sync_runs_off rename to sync_runs")
+    assert rc == 2
+    assert pings == ["http://hc/abc/start", "http://hc/abc/fail"]
+
+
+def test_dataset_invalido_no_destino_e_depois_valido(target_cfg, clean_db, query):
+    cfg = make_config(
+        target_cfg,
+        {"ruim": "select product_id, qty_start, price, created_at, product_id as coluna_x from faixas", "faixas": GOOD},
+    )
+    assert go(cfg) == 1
+    status, stats, err = query("select status, stats, error from core.sync_runs")[0]
+    assert (status, stats) == ("error", {"ruim": -1, "faixas": 2})
+    assert "coluna_x" in err
+    assert query("select count(*) from erp.cost_tiers")[0][0] == 2

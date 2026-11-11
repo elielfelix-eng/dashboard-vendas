@@ -26,7 +26,7 @@ def connect_target(target_cfg: TargetConfig, password: str) -> psycopg.Connectio
         application_name="brinde-gateway",
         connect_timeout=30,
         autocommit=False,
-        prepare_threshold=None,  # compativel com pooler (pgbouncer) e com o PGlite dos testes
+        prepare_threshold=None,  # sem prepared statements: seguro com pooler e com o PGlite dos testes
     )
     try:
         conn.execute("SET TIME ZONE 'America/Sao_Paulo'")
@@ -35,6 +35,11 @@ def connect_target(target_cfg: TargetConfig, password: str) -> psycopg.Connectio
         conn.close()
         raise
     return conn
+
+
+def set_local_timezone(conn: psycopg.Connection) -> None:
+    """Fuso valido so na transacao atual (sobrevive ao pooler em modo transacao)."""
+    conn.execute("select set_config('TimeZone', 'America/Sao_Paulo', true)")
 
 
 def _table_columns(conn: psycopg.Connection, schema: str, table: str) -> set[str]:
@@ -50,6 +55,7 @@ def _table_columns(conn: psycopg.Connection, schema: str, table: str) -> set[str
 def write_dataset(conn: psycopg.Connection, dataset: Dataset, columns: list[str], rows: list[tuple]) -> int:
     schema, table = dataset.target_table.split(".", 1)
     try:
+        set_local_timezone(conn)
         existing = _table_columns(conn, schema, table)
         if not existing:
             raise DatasetError(f"Tabela de destino '{dataset.target_table}' nao existe.")
@@ -60,6 +66,11 @@ def write_dataset(conn: psycopg.Connection, dataset: Dataset, columns: list[str]
                 f"{dataset.target_table}: {', '.join(unknown)}."
             )
         inject_source = dataset.mode == "replace_source"
+        if not inject_source and "source" in existing:
+            raise DatasetError(
+                f"Dataset '{dataset.name}': {dataset.target_table} tem coluna 'source'; "
+                "replace_all apagaria linhas de outras origens. Use mode = 'replace_source'."
+            )
         if inject_source:
             if "source" in columns:
                 raise DatasetError(

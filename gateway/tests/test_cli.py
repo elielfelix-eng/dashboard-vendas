@@ -1,5 +1,19 @@
 from brinde_gateway import cli
 
+CONFIG = """[source]
+odbc_dsn = "x"
+[target]
+host = "h"
+port = 5432
+dbname = "d"
+user = "u"
+[[datasets]]
+name = "a"
+target_table = "erp.a"
+mode = "replace_all"
+query = "select 1"
+"""
+
 
 def test_set_secret_grava(monkeypatch, capsys):
     gravado = {}
@@ -22,4 +36,17 @@ def test_run_config_inexistente(tmp_path, monkeypatch, capsys):
     rc = cli.main(["run", "--config", str(tmp_path / "nao_existe.toml")])
     assert rc != 0
     assert "nao encontrado" in capsys.readouterr().err
-    cli._setup_logging(False)  # libera o arquivo de log
+
+
+def test_erro_inesperado_vira_codigo_1(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("BRINDE_GATEWAY_HOME", str(tmp_path))
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(CONFIG, encoding="utf-8")
+
+    def boom(_config):
+        raise RuntimeError("PWD=segredo123;x")
+
+    monkeypatch.setattr(cli.runner, "run", boom)
+    assert cli.main(["run", "--config", str(cfg)]) == 1
+    err = capsys.readouterr().err
+    assert "Erro inesperado" in err and "segredo123" not in err

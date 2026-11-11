@@ -120,4 +120,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command != "set-secret" and args.config is None:
         args.config = _default_config()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except Exception as exc:
+        # Ultima barreira: registra (mascarado, sem segredos) no log e sai com codigo 1.
+        log.error("Erro inesperado: %s", _source.mask(f"{type(exc).__name__}: {exc}"))
+        return 1

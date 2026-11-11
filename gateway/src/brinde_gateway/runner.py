@@ -39,6 +39,13 @@ def _describe(exc: BaseException, secrets_to_hide: list[str]) -> str:
     return " ".join(text.split())[:500]
 
 
+def _safe_rollback(conn) -> None:
+    try:
+        conn.rollback()
+    except Exception:
+        pass
+
+
 def run(
     config: Config,
     *,
@@ -60,10 +67,17 @@ def run(
         return 2
 
     try:
-        with conn.cursor() as cur:
-            cur.execute("insert into core.sync_runs (source, status) values ('erp', 'running') returning id")
-            run_id = cur.fetchone()[0]
-        conn.commit()
+        try:
+            _target.set_local_timezone(conn)
+            with conn.cursor() as cur:
+                cur.execute("insert into core.sync_runs (source, status) values ('erp', 'running') returning id")
+                run_id = cur.fetchone()[0]
+            conn.commit()
+        except Exception as exc:
+            log.error("Nao foi possivel registrar o inicio da execucao: %s", _describe(exc, [password]))
+            _safe_rollback(conn)
+            _safe_ping(ping, url, "/fail")
+            return 2
         log.info("Execucao %s iniciada (%d datasets).", run_id, len(config.datasets))
 
         stats: dict[str, int] = {}
@@ -92,10 +106,7 @@ def run(
                     msg = _describe(exc, [password])
                     errors.append(f"{ds.name}: {msg}")
                     log.error("Dataset '%s' falhou: %s", ds.name, msg)
-                    try:
-                        conn.rollback()
-                    except psycopg.Error:
-                        pass
+                    _safe_rollback(conn)
         finally:
             if src is not None:
                 try:
@@ -104,15 +115,27 @@ def run(
                     pass
 
         ok = not errors
-        with conn.cursor() as cur:
-            cur.execute(
-                "update core.sync_runs set status = %s, finished_at = now(), stats = %s, error = %s "
-                "where id = %s",
-                ("success" if ok else "error", Jsonb(stats), None if ok else "; ".join(errors), run_id),
-            )
-        conn.commit()
+        # Melhor esforco: se nao der para registrar o resultado, loga, avisa o healthcheck
+        # e retorna 1 (os datasets ja foram processados; a linha 'running' pode ficar sem fechar).
+        try:
+            _target.set_local_timezone(conn)
+            with conn.cursor() as cur:
+                cur.execute(
+                    "update core.sync_runs set status = %s, finished_at = now(), stats = %s, error = %s "
+                    "where id = %s",
+                    ("success" if ok else "error", Jsonb(stats), None if ok else "; ".join(errors), run_id),
+                )
+            conn.commit()
+        except Exception as exc:
+            log.error("Nao foi possivel registrar o resultado da execucao: %s", _describe(exc, [password]))
+            _safe_rollback(conn)
+            _safe_ping(ping, url, "/fail")
+            return 1
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     if ok:
         log.info("Execucao concluida com sucesso.")

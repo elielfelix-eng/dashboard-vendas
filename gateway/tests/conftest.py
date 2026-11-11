@@ -81,3 +81,15 @@ def query(pg):
             return conn.execute(sql_text, params).fetchall()
 
     return _q
+
+
+@pytest.fixture(autouse=True)
+def _limpa_handlers_de_log():
+    """Remove/fecha handlers do logger do gateway criados por cli._setup_logging."""
+    yield
+    import logging
+
+    lg = logging.getLogger("brinde_gateway")
+    for h in list(lg.handlers):
+        lg.removeHandler(h)
+        h.close()

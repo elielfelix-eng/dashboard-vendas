@@ -40,15 +40,27 @@ def test_segunda_gravacao_substitui(conn):
     assert [r[0] for r in tiers(conn)] == ["B"]
 
 
-def test_replace_all_apaga_tudo(conn):
-    conn.execute(
-        "insert into erp.cost_tiers (product_id, qty_start, price, created_at, source) "
-        "values ('M1', 1, 9, '2026-01-01', 'manual')"
-    )
+def test_replace_all_recusado_em_tabela_com_source(conn):
+    with pytest.raises(DatasetError, match="replace_source"):
+        write_dataset(conn, ds("replace_all"), COLS, [("A", 1, 1, datetime(2026, 1, 1))])
+
+
+def test_replace_all_em_tabela_sem_source(conn):
+    conn.execute("create table if not exists erp.estoque_teste (sku text, qtd int)")
+    conn.execute("delete from erp.estoque_teste")
+    conn.execute("insert into erp.estoque_teste values ('velho', 1)")
     conn.commit()
-    cols = COLS + ["source"]
-    write_dataset(conn, ds("replace_all"), cols, [("A", 1, 1, datetime(2026, 1, 1), "csv")])
-    assert [(r[0], r[1]) for r in tiers(conn)] == [("A", "csv")]
+    d = Dataset(name="estoque", target_table="erp.estoque_teste", mode="replace_all", query="select 1")
+    assert write_dataset(conn, d, ["sku", "qtd"], [("a", 1), ("b", 2)]) == 2
+    assert conn.execute("select sku from erp.estoque_teste order by sku").fetchall() == [("a",), ("b",)]
+
+
+def test_fuso_correto_mesmo_com_sessao_em_utc(conn):
+    conn.execute("set time zone 'UTC'")
+    conn.commit()
+    write_dataset(conn, ds(), COLS, [("A", 1, 1, datetime(2026, 10, 1, 0, 0))])
+    conn.execute("set time zone 'UTC'")
+    assert conn.execute("select to_char(created_at, 'YYYY-MM-DD HH24:MI') from erp.cost_tiers").fetchone()[0] == "2026-10-01 03:00"
 
 
 def test_coluna_desconhecida(conn):

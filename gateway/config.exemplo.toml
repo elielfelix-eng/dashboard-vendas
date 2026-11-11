@@ -5,6 +5,8 @@
 # Conexao ODBC com o SQL Server do ERP (sem senha; a senha vem do segredo "sqlserver").
 # Troque o driver (17 ou 18), o servidor e o banco.
 connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=NOME-OU-IP-DO-SERVIDOR,1433;Database=NOME_DO_BANCO;UID=gateway_leitura;TrustServerCertificate=yes"
+# Opcional: tempo maximo (segundos) de cada consulta ao ERP. Padrao: 600.
+# query_timeout_seconds = 600
 # Alternativa: odbc_dsn = "NomeDoDSN"   (use so um entre connection_string e odbc_dsn)
 
 [target]
@@ -25,3 +27,6 @@ target_table = "erp.cost_tiers"
 mode = "replace_source"
 # Caminho relativo a pasta deste config.toml.
 query_file = "consultas/faixas_custo.sql"
+# Opcional: se a consulta devolver 0 linhas, o gateway NAO apaga os dados anteriores (da erro).
+# Coloque true so se um resultado vazio for esperado (isso esvazia as linhas do ERP no painel).
+# allow_empty = false

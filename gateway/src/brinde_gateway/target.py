@@ -65,6 +65,11 @@ def write_dataset(conn: psycopg.Connection, dataset: Dataset, columns: list[str]
                 f"Dataset '{dataset.name}': colunas da consulta inexistentes em "
                 f"{dataset.target_table}: {', '.join(unknown)}."
             )
+        if not rows and not dataset.allow_empty:
+            raise DatasetError(
+                f"Dataset '{dataset.name}': consulta devolveu 0 linhas; dados anteriores mantidos "
+                "(use allow_empty = true se isso for esperado)."
+            )
         inject_source = dataset.mode == "replace_source"
         if not inject_source and "source" in existing:
             raise DatasetError(

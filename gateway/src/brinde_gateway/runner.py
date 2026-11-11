@@ -70,6 +70,19 @@ def run(
         try:
             _target.set_local_timezone(conn)
             with conn.cursor() as cur:
+                try:
+                    # Melhor esforco: fecha execucoes antigas que ficaram 'running' (processo morto).
+                    cur.execute("savepoint limpeza_orfas")
+                    cur.execute(
+                        "update core.sync_runs set status = 'error', "
+                        "error = 'execucao interrompida (sem finalizacao)', finished_at = now() "
+                        "where source = 'erp' and status = 'running' "
+                        "and started_at < now() - interval '2 hours'"
+                    )
+                    cur.execute("release savepoint limpeza_orfas")
+                except Exception:
+                    log.warning("Nao foi possivel limpar execucoes antigas sem finalizacao (ignorado).")
+                    cur.execute("rollback to savepoint limpeza_orfas")
                 cur.execute("insert into core.sync_runs (source, status) values ('erp', 'running') returning id")
                 run_id = cur.fetchone()[0]
             conn.commit()

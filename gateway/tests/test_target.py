@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import psycopg.errors
 import pytest
 
 from brinde_gateway.config import Dataset
@@ -75,7 +76,7 @@ def test_source_na_consulta_em_replace_source(conn):
 
 def test_erro_no_meio_faz_rollback(conn):
     write_dataset(conn, ds(), COLS, [("A", 1, 1, datetime(2026, 1, 1))])
-    with pytest.raises(Exception):
+    with pytest.raises(psycopg.errors.NotNullViolation):
         write_dataset(conn, ds(), COLS, [("B", 1, 1, datetime(2026, 1, 1)), ("C", 1, None, datetime(2026, 1, 1))])
     assert [r[0] for r in tiers(conn)] == ["A"]
 
@@ -86,3 +87,18 @@ def test_datetime_sem_fuso_e_horario_de_brasilia(conn):
         cur.execute("set time zone 'UTC'")
         cur.execute("select to_char(created_at, 'YYYY-MM-DD HH24:MI') from erp.cost_tiers")
         assert cur.fetchone()[0] == "2026-10-01 03:00"
+
+
+def test_zero_linhas_mantem_dados_anteriores(conn):
+    write_dataset(conn, ds(), COLS, [("A", 1, 1, datetime(2026, 1, 1))])
+    with pytest.raises(DatasetError, match="0 linhas"):
+        write_dataset(conn, ds(), COLS, [])
+    assert [r[0] for r in tiers(conn)] == ["A"]
+
+
+def test_zero_linhas_com_allow_empty_esvazia(conn):
+    from dataclasses import replace
+
+    write_dataset(conn, ds(), COLS, [("A", 1, 1, datetime(2026, 1, 1))])
+    assert write_dataset(conn, replace(ds(), allow_empty=True), COLS, []) == 0
+    assert tiers(conn) == []

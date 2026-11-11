@@ -50,3 +50,55 @@ def test_erro_inesperado_vira_codigo_1(monkeypatch, tmp_path, capsys):
     assert cli.main(["run", "--config", str(cfg)]) == 1
     err = capsys.readouterr().err
     assert "Erro inesperado" in err and "segredo123" not in err
+
+
+def test_set_secret_interrompido(monkeypatch, capsys):
+    def interrompe(prompt=""):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.getpass, "getpass", interrompe)
+    assert cli.main(["set-secret", "supabase"]) == 1
+    assert "cancelada" in capsys.readouterr().err
+
+    def eof(prompt=""):
+        raise EOFError
+
+    monkeypatch.setattr(cli.getpass, "getpass", eof)
+    assert cli.main(["set-secret", "supabase"]) == 1
+
+
+def _prepara_test(monkeypatch, tmp_path):
+    monkeypatch.setenv("BRINDE_GATEWAY_HOME", str(tmp_path))
+    cfg = tmp_path / "c.toml"
+    cfg.write_text(CONFIG, encoding="utf-8")
+    monkeypatch.setattr(cli._secrets, "get_secret", lambda n: "senha-xyz")
+
+    def sem_erp(_cfg):
+        raise RuntimeError("sem erp")
+
+    monkeypatch.setattr(cli._source, "connect_source", sem_erp)
+    return cfg
+
+
+def test_test_mostra_motivo_mascarado_do_supabase(monkeypatch, tmp_path, capsys):
+    cfg = _prepara_test(monkeypatch, tmp_path)
+
+    def falha(_t, _p):
+        raise RuntimeError("password authentication failed senha-xyz PWD=abc;")
+
+    monkeypatch.setattr(cli._target, "connect_target", falha)
+    assert cli.main(["test", "--config", str(cfg)]) == 2
+    out = capsys.readouterr().out
+    assert "password authentication failed" in out
+    assert "senha-xyz" not in out and "PWD=abc" not in out
+
+
+def test_test_permissao_negada_sugere_administrador(monkeypatch, tmp_path, capsys):
+    cfg = _prepara_test(monkeypatch, tmp_path)
+
+    def nega(_t, _p):
+        raise PermissionError(13, "Acesso negado")
+
+    monkeypatch.setattr(cli._target, "connect_target", nega)
+    cli.main(["test", "--config", str(cfg)])
+    assert "administrador" in capsys.readouterr().out

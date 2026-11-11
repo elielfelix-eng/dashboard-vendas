@@ -3,7 +3,10 @@
 -- Os nomes das colunas (aliases) sao obrigatorios e devem ficar exatamente assim.
 -- O gateway acrescenta sozinho a coluna "source" = 'erp'.
 SELECT
-    CAST(p.codigo_modelo AS varchar(60)) AS product_id,   -- TROCAR: codigo do modelo (ex.: BLA68), igual ao modelo do SKU do Mercado Livre
+    -- TROCAR: codigo do modelo (ex.: BLA68). Precisa ser IGUAL ao modelo do SKU do Mercado Livre
+    -- (parte antes do primeiro "-"), em maiusculas e sem espacos: campos char(n) do SQL Server
+    -- guardam espacos no final e a comparacao no painel e exata e sensivel a maiusculas.
+    UPPER(LTRIM(RTRIM(CAST(p.codigo_modelo AS varchar(60))))) AS product_id,
     f.quantidade_inicial                 AS qty_start,    -- TROCAR: quantidade inicial da faixa
     f.quantidade_final                   AS qty_end,      -- TROCAR: quantidade final da faixa (pode ser NULL na ultima)
     f.preco_unitario                     AS price,        -- TROCAR: custo por unidade nessa faixa

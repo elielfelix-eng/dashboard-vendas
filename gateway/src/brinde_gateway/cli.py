@@ -52,6 +52,9 @@ def _cmd_run(args) -> int:
     except ConfigError as exc:
         log.error("Configuracao invalida: %s", exc)
         return 2
+    except PermissionError:
+        log.error("Sem permissao para ler a configuracao; execute como administrador.")
+        return 2
     return runner.run(config)
 
 
@@ -62,16 +65,24 @@ def _cmd_test(args) -> int:
     except ConfigError as exc:
         log.error("Configuracao invalida: %s", exc)
         return 2
+    except PermissionError:
+        log.error("Sem permissao para ler a configuracao; execute como administrador.")
+        return 2
     code = 0
+    password = ""
     try:
-        conn = _target.connect_target(config.target, _secrets.get_secret("supabase"))
+        password = _secrets.get_secret("supabase")
+        conn = _target.connect_target(config.target, password)
         conn.close()
         print("Supabase: conexao OK")
     except (_secrets.SecretMissing, _secrets.SecretError) as exc:
         print(f"Supabase: falha - {exc}")
         code = 2
+    except PermissionError:
+        print("Supabase: falha - sem permissao para ler os segredos/configuracao; execute como administrador.")
+        code = 2
     except Exception as exc:
-        print(f"Supabase: falha - {type(exc).__name__}")
+        print(f"Supabase: falha - {runner._describe(exc, [password])}")
         code = 2
     try:
         src = _source.connect_source(config.source)
@@ -97,8 +108,14 @@ def _cmd_set_secret(args) -> int:
     try:
         value = getpass.getpass(f"Valor do segredo '{args.name}': ")
         _secrets.set_secret(args.name, value)
+    except (KeyboardInterrupt, EOFError):
+        print("Operacao cancelada; nada foi gravado.", file=sys.stderr)
+        return 1
     except _secrets.SecretError as exc:
         print(f"Erro: {exc}", file=sys.stderr)
+        return 2
+    except PermissionError:
+        print("Erro: sem permissao para gravar o segredo; execute como administrador.", file=sys.stderr)
         return 2
     print(f"Segredo '{args.name}' gravado.")
     return 0

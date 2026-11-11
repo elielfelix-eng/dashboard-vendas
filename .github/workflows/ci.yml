@@ -37,6 +37,7 @@ jobs:
   gateway:
     name: Testar o gateway do ERP (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

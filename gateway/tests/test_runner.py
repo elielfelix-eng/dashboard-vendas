@@ -132,3 +132,17 @@ def test_dataset_invalido_no_destino_e_depois_valido(target_cfg, clean_db, query
     assert (status, stats) == ("error", {"ruim": -1, "faixas": 2})
     assert "coluna_x" in err
     assert query("select count(*) from erp.cost_tiers")[0][0] == 2
+
+
+def test_marca_execucoes_antigas_sem_finalizacao(target_cfg, clean_db, pg, query):
+    import psycopg
+
+    with psycopg.connect(**pg, prepare_threshold=None) as c:
+        c.execute("insert into core.sync_runs (source, status, started_at) values "
+                  "('erp', 'running', now() - interval '3 hours'), "
+                  "('erp', 'running', now() - interval '30 minutes')")
+    assert go(make_config(target_cfg, {"faixas": GOOD})) == 0
+    rows = query("select status, error, finished_at is not null from core.sync_runs order by id")
+    assert rows[0] == ("error", "execucao interrompida (sem finalizacao)", True)
+    assert rows[1] == ("running", None, False)
+    assert rows[2][0] == "success"

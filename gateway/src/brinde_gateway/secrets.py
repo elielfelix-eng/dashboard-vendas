@@ -99,6 +99,10 @@ def _load_store() -> dict:
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        raise SecretError(
+            f"Sem permissao para ler o arquivo de segredos ({path}); execute como administrador."
+        ) from None
     except (OSError, ValueError):
         raise SecretError(f"Arquivo de segredos ilegivel ou corrompido: {path}") from None
     if not isinstance(data, dict):

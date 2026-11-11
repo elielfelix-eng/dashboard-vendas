@@ -122,3 +122,34 @@ def test_query_file_missing(tmp_path):
 def test_config_file_missing(tmp_path):
     with pytest.raises(ConfigError, match="nao encontrado"):
         load_config(tmp_path / "x.toml")
+
+
+def _com(base, source_extra="", dataset_extra=""):
+    base = base.replace('UID=gateway_leitura"', 'UID=gateway_leitura"' + source_extra)
+    return base.replace('mode = "replace_source"', 'mode = "replace_source"' + dataset_extra)
+
+
+def test_defaults_allow_empty_e_timeout(tmp_path):
+    cfg = load_config(write(tmp_path, BASE))
+    assert cfg.datasets[0].allow_empty is False
+    assert cfg.source.query_timeout_seconds == 600
+
+
+def test_allow_empty_e_timeout_validos(tmp_path):
+    text = _com(BASE, "\nquery_timeout_seconds = 90", "\nallow_empty = true")
+    cfg = load_config(write(tmp_path, text))
+    assert cfg.datasets[0].allow_empty is True
+    assert cfg.source.query_timeout_seconds == 90
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", '"10"', "true", "1.5"])
+def test_timeout_invalido(tmp_path, bad):
+    text = _com(BASE, f"\nquery_timeout_seconds = {bad}")
+    with pytest.raises(ConfigError, match="query_timeout_seconds"):
+        load_config(write(tmp_path, text))
+
+
+def test_allow_empty_invalido(tmp_path):
+    text = _com(BASE, "", '\nallow_empty = "sim"')
+    with pytest.raises(ConfigError, match="allow_empty"):
+        load_config(write(tmp_path, text))

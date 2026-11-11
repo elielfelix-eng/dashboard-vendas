@@ -71,7 +71,8 @@ $gatilhos = @(
     (New-ScheduledTaskTrigger -Daily -At '16:45')
 )
 $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-$config = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+$config = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 Register-ScheduledTask -TaskName $nomeTarefa -Action $acao -Trigger $gatilhos `
     -Principal $principal -Settings $config `
     -Description 'Envia dados do ERP para o painel (Supabase) tres vezes ao dia.' -Force | Out-Null

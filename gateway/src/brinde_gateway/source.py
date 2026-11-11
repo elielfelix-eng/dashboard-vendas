@@ -35,7 +35,10 @@ def build_connection_string(source_cfg: SourceConfig) -> str:
 
 
 def connect_source(source_cfg: SourceConfig):
-    return pyodbc.connect(build_connection_string(source_cfg), readonly=True, timeout=30)
+    conn = pyodbc.connect(build_connection_string(source_cfg), readonly=True, timeout=30)
+    # "timeout=30" acima so vale para o login; este vale para cada consulta.
+    conn.timeout = source_cfg.query_timeout_seconds
+    return conn
 
 
 def fetch(dataset: Dataset, conn) -> tuple[list[str], list[tuple]]:

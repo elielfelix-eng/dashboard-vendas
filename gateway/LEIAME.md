@@ -26,7 +26,7 @@ Peça ao DBA do ERP (ou faça você mesmo no SQL Server Management Studio):
 2. Troque `NOME_DO_BANCO` pelo nome do banco do ERP e `<SENHA_FORTE>` por uma senha forte que **só o DBA** vai conhecer.
 3. Execute o script. Ele cria o usuário `gateway_leitura`, que só tem permissão de **leitura** e só enxerga o schema `painel`.
 4. O DBA precisa criar, dentro do schema `painel`, as **views** com os dados que o painel vai ler (por exemplo `painel.faixas_custo`). Use `consultas\faixas_custo.exemplo.sql` como guia do formato.
-5. Anote o **nome ou IP do servidor** e o **nome do banco**. Você vai usar no passo 6. A senha, o DBA digita depois (passo 5) ou informa a você de forma segura.
+5. Anote o **nome ou IP do servidor** e o **nome do banco**. Você vai usar no passo 6. A senha do `gateway_leitura` é só do DBA: ele deve entregá-la a você por um canal seguro (gerenciador de senhas, não e-mail nem chat) ou digitá-la pessoalmente quando você rodar o `set-secret` (passo 5).
 
 ---
 
@@ -35,12 +35,12 @@ Peça ao DBA do ERP (ou faça você mesmo no SQL Server Management Studio):
 No Supabase, o papel `gateway_writer` já existe (criado pela migration 0005), mas sem senha. Defina uma:
 
 1. Acesse o painel do Supabase > seu projeto > **SQL Editor** > **New query**.
-2. Digite o comando abaixo, trocando `SENHA_FORTE_AQUI` por uma senha forte gerada por você (use um gerenciador de senhas) e clique em **Run**:
+2. Digite o comando abaixo, trocando `SENHA_FORTE_AQUI` por uma senha forte gerada por você (use um gerenciador de senhas) e clique em **Run**. Use **somente letras e números** na senha (sem aspas, espaços ou símbolos: uma aspa simples `'` quebra o comando):
 
    ```sql
    alter role gateway_writer with password 'SENHA_FORTE_AQUI';
    ```
-3. **Apague o texto da consulta** depois de executar (não deixe a senha salva no editor).
+3. Depois de executar, **apague o texto** e também **exclua a consulta salva**: o Supabase guarda cada consulta do SQL Editor como um "snippet" na lista da esquerda. Clique nos três pontinhos ao lado dela e escolha **Delete**, para a senha não ficar guardada lá.
 4. Anote onde achar os dados de conexão: **Project Settings > Database > Connection string > aba "Transaction pooler"**. Você precisa de:
    - **host** (algo como `aws-0-xxxx.pooler.supabase.com`);
    - **porta**: `6543`;
@@ -98,8 +98,12 @@ No mesmo PowerShell de administrador:
 Agora a consulta das faixas de custo:
 
 1. Em `C:\ProgramData\BrindeGateway\consultas\` já existe `faixas_custo.exemplo.sql`.
-2. Copie para `faixas_custo.sql` (mesma pasta) e peça ao DBA para trocar os trechos marcados com `-- TROCAR:` pelas tabelas/views reais do ERP.
+2. Essa pasta é protegida, então não crie o arquivo pelo Explorador de Arquivos (ele pede permissão e costuma falhar). Faça como no `config.toml`: abra o **Bloco de Notas como administrador**, use **Arquivo > Abrir**, abra o `faixas_custo.exemplo.sql` (escolha "Todos os arquivos" no filtro), copie o texto todo, ajuste os trechos marcados com `-- TROCAR:` (ou peça ao DBA) e salve com **Arquivo > Salvar como**, nome `faixas_custo.sql`, na mesma pasta. Alternativa: no PowerShell de administrador, `Copy-Item C:\ProgramData\BrindeGateway\consultasaixas_custo.exemplo.sql C:\ProgramData\BrindeGateway\consultasaixas_custo.sql`, e então edite com o Bloco de Notas como administrador.
 3. A consulta precisa devolver exatamente as colunas: `product_id` (modelo do produto, igual ao modelo do SKU do Mercado Livre), `qty_start`, `qty_end`, `price`, `created_at`, `expired_at`.
+
+4. O `product_id` precisa ser **igual** ao modelo do SKU do Mercado Livre (ex.: `BLA68`), com letras maiúsculas e sem espaços sobrando. Alguns campos do SQL Server guardam espaços no final (`char(n)`) ou misturam maiúsculas e minúsculas, e aí o custo deixa de casar em silêncio. Por isso o exemplo usa `UPPER(LTRIM(RTRIM(...)))`: mantenha isso.
+5. **Proteção contra consulta vazia:** se a consulta devolver 0 linhas, o gateway **não apaga** os custos que já estão no painel: ele registra erro ("consulta devolveu 0 linhas; dados anteriores mantidos"). Se um dia o resultado vazio for esperado, acrescente `allow_empty = true` no `[[datasets]]` do `config.toml`.
+6. **Tempo limite da consulta:** cada consulta ao ERP pode levar até 600 segundos (10 min). Para mudar, acrescente em `[source]` a linha `query_timeout_seconds = 300` (número de segundos, maior que 0).
 
 ---
 
@@ -176,6 +180,7 @@ Remove a tarefa e o programa. Ele pergunta se também quer apagar a pasta `C:\Pr
 | `ERP: falha - ...` (servidor não encontrado / timeout) | Nome/IP do servidor errado, firewall bloqueando a porta 1433 ou máquina fora da rede do ERP. |
 | `ERP: falha - ...` (certificado SSL) | Mantenha `TrustServerCertificate=yes` no `connection_string`. |
 | `faixas_custo: falha - ...` | Erro na consulta SQL (nome de tabela/coluna errado) ou o usuário sem permissão no schema `painel`. Peça ao DBA. |
+| O antivírus bloqueou ou apagou o `BrindeGateway.exe` | Programas empacotados assim (PyInstaller) às vezes são marcados como suspeitos por engano. Adicione uma **exceção** no antivírus para a pasta `C:\Program Files\BrindeGateway` e reinstale. |
 | A tarefa não rodou no horário | A máquina estava desligada (ela roda ao ligar), ou veja o "Resultado da última execução" no Agendador de Tarefas e o arquivo de log. |
 
 Códigos de saída do programa (aparecem no Agendador de Tarefas): `0` = tudo certo; `1` = alguma consulta falhou ou erro inesperado; `2` = não foi possível conectar ao Supabase ou a configuração é inválida.

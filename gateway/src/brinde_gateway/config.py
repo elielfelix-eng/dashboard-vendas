@@ -19,6 +19,7 @@ class ConfigError(Exception):
 @dataclass(frozen=True)
 class SourceConfig:
     connection_string: str
+    query_timeout_seconds: int = 600
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class Dataset:
     target_table: str
     mode: str
     query: str
+    allow_empty: bool = False
 
 
 @dataclass(frozen=True)
@@ -68,9 +70,12 @@ def _parse_source(data: dict) -> SourceConfig:
         raise ConfigError("Em [source] informe 'connection_string' ou 'odbc_dsn', nao ambos.")
     if not has_cs and not has_dsn:
         raise ConfigError("Em [source] informe 'connection_string' ou 'odbc_dsn'.")
+    timeout = s.get("query_timeout_seconds", 600)
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        raise ConfigError("Campo 'source.query_timeout_seconds' invalido (inteiro maior que 0).")
     if has_cs:
-        return SourceConfig(_required_str(s, "connection_string", "source"))
-    return SourceConfig("DSN=" + _required_str(s, "odbc_dsn", "source"))
+        return SourceConfig(_required_str(s, "connection_string", "source"), timeout)
+    return SourceConfig("DSN=" + _required_str(s, "odbc_dsn", "source"), timeout)
 
 
 def _parse_target(data: dict) -> TargetConfig:
@@ -123,7 +128,10 @@ def _parse_dataset(raw: object, index: int, base_dir: Path) -> Dataset:
         query = path.read_text(encoding="utf-8").strip()
         if not query:
             raise ConfigError(f"Arquivo 'query_file' do {where} esta vazio: {path}")
-    return Dataset(name=name, target_table=table, mode=mode, query=query)
+    allow_empty = raw.get("allow_empty", False)
+    if not isinstance(allow_empty, bool):
+        raise ConfigError(f"Campo 'allow_empty' do {where} invalido (use true ou false).")
+    return Dataset(name=name, target_table=table, mode=mode, query=query, allow_empty=allow_empty)
 
 
 def load_config(path: str | Path) -> Config:

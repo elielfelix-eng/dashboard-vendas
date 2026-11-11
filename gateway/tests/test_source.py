@@ -33,11 +33,22 @@ def test_mask():
 
 @pytest.fixture
 def captured(monkeypatch):
-    calls = []
+    class Calls(list):
+        conns: list
+
+    calls = Calls()
+
+    class FakeConn:
+        timeout = 0
 
     def fake(conn_str, **kw):
         calls.append((conn_str, kw))
-        return object()
+        conn = FakeConn()
+        calls_conns.append(conn)
+        return conn
+
+    calls_conns = []
+    calls.conns = calls_conns
 
     monkeypatch.setattr(source.pyodbc, "connect", fake)
     return calls
@@ -83,3 +94,9 @@ def test_connect_off_windows_without_secret(captured, monkeypatch):
         sec.get_secret("sqlserver")
     connect_source(SourceConfig("DSN=ERP"))
     assert captured[0][0] == "DSN=ERP"
+
+
+def test_connect_define_timeout_da_consulta(captured):
+    connect_source(SourceConfig("DSN=ERP"))
+    connect_source(SourceConfig("DSN=ERP", query_timeout_seconds=45))
+    assert [c.timeout for c in captured.conns] == [600, 45]

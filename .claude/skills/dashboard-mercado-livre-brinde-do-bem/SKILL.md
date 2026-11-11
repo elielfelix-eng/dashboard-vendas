@@ -121,6 +121,8 @@ Comandos: `BrindeGateway.exe run|test|set-secret NOME [--config caminho]`. Home:
 
 Arquivos (`gateway/`): `src/brinde_gateway/` (código), `tests/`, `build.ps1`, `install.ps1`, `uninstall.ps1`, `config.exemplo.toml`, `consultas/faixas_custo.exemplo.sql` (aliases `product_id, qty_start, qty_end, price, created_at, expired_at`), `sqlserver/usuario_leitura.sql`, `LEIAME.md` (guia para o dono). Testes: `gateway/.venv/Scripts/python.exe -m pytest gateway/tests -q` e `npm run test:sql`; CI no job `gateway`.
 
+Opções do `config.toml`: por dataset, `allow_empty` (padrão `false`: consulta com 0 linhas dá erro e mantém os dados anteriores, em vez de apagar tudo); em `[source]`, `query_timeout_seconds` (padrão 600; vale para cada consulta, o `timeout` de 30 s só cobre o login). No início de cada execução o gateway marca como `error` ("execucao interrompida (sem finalizacao)") as linhas `core.sync_runs` `source='erp'` ainda `running` há mais de 2 h. O `product_id` da consulta deve vir como `UPPER(LTRIM(RTRIM(...)))` (char(n) e caixa quebram o casamento com o modelo do SKU). **Nova tabela `erp.*` com RLS ligado precisa de policy própria para `gateway_writer`** (os grants padrão não bastam) — ver `0005_gateway.sql`.
+
 De-para ML × ERP: o **modelo** do SKU (ex.: `BLA68` em `BLA68-AMA-K0010-V1`) é o `productId` da tabela de custos. Custos são **por faixa de quantidade com vigência** (`qtyStart`, `qtyEnd`, `price`, `createdAt`, `expiredAt`) — a view do ERP precisa entregar esse formato.
 
 Pendente do usuário:

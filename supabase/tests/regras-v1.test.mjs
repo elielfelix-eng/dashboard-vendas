@@ -14,16 +14,7 @@ const eq = (label, got, exp) => {
 const one = async (q, p = []) => (await db.query(q, p)).rows[0];
 
 // Stubs do ambiente Supabase (auth, papéis, funções de perfil)
-await db.exec(`
-  create role authenticated; create role anon; create role service_role;
-  create schema auth; create function auth.uid() returns uuid language sql as 'select null::uuid';
-  create schema core; create schema mkt; create schema erp; create schema analytics; create schema config; create schema map; create schema crm;
-  create table core.accounts (id uuid primary key default gen_random_uuid());
-  create type core.app_role as enum ('admin','gestor','comercial','visualizador','vendedor');
-  create function core.can_see_channel(ch text) returns boolean language sql as 'select true';
-  create function core.can_see_costs() returns boolean language sql as 'select true';
-  create function core.my_role() returns core.app_role language sql as $$ select 'admin'::core.app_role $$;
-`);
+await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0002_marketplaces.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0003_regras_v1.sql`, 'utf8'));
 console.log('Migrations 0002 + 0003 aplicadas');

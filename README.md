@@ -58,7 +58,9 @@ Na primeira vez abre uma janela de login do GitHub: autorize. Depois, confira no
 ### 5. Mercado Livre (app já criado)
 Em https://developers.mercadolivre.com.br > *Meus aplicativos* > seu app:
 - **Redirect URI**: `https://SEU-SITE.vercel.app/api/oauth/mercadolivre/callback`
-- Ative o **PKCE** e marque os escopos de **leitura** (pedidos, anúncios, envios, métricas e **publicidade/Ads**).
+- Em **Fluxos OAuth**, marque **Authorization Code** e **Refresh Token** (obrigatório para as atualizações automáticas). Desmarque **Client Credentials** (não é usado).
+- Em **PKCE necessário**, marque **pkce**.
+- Em **Permissões**, deixe tudo em **Leitura** (inclusive *Publicidade de um produto* e *Venda e envios*).
 - Anote o **Client ID** e a **Client Secret**.
 
 ### 6. Segredos no GitHub (para as atualizações automáticas)

@@ -29,7 +29,8 @@ O Brinde do Bem é a unidade de negócio da ONG Vocação que vende brindes para
 apps/web               Next.js 15 (login, menu, Conexões, OAuth ML)
 packages/connectors    Interface MarketplaceConnector + mercadolivre/ + shopee/ (stub)
 jobs                   Sincronização (tsx) — rodada pelo GitHub Actions
-supabase/migrations    0001_core.sql, 0002_marketplaces.sql (aplicar colando o CONTEÚDO no SQL Editor)
+supabase/migrations    0001_core.sql, 0002_marketplaces.sql, 0003_regras_v1.sql (aplicar colando o CONTEÚDO no SQL Editor, em ordem)
+supabase/tests         regras-v1.test.mjs (npm run test:sql)
 ```
 
 Schemas: `core` (perfis, contas, tokens no Vault, sync_runs), `mkt` (items, orders, order_items, visits_daily, ads_*), e previstos `erp`, `crm`, `map`, `config`, `analytics`. Schemas `core` e `mkt` estão expostos na Data API.
@@ -60,19 +61,32 @@ select count(*) pedidos_pagos, sum(total_amount) receita from mkt.orders
    and coalesce(date_closed, date_created) at time zone 'America/Sao_Paulo' >= '2026-10-01'
    and coalesce(date_closed, date_created) at time zone 'America/Sao_Paulo' <  '2026-11-01';
 ```
-Enquanto a classificação pago/dividido/devolvido/cancelado não estiver implementada, só "pagos" é comparável. Status das execuções: `select * from core.sync_runs order by started_at desc limit 10;`
+Comparação completa com o painel (vendas brutas, quantidade, unidades, canceladas, devolvidas, Ads, Seguidores):
+```sql
+select vendas_brutas, vendas_qtd, unidades_vendidas, cancelados, canceladas_valor,
+       devolvidas, devolvidas_valor, product_ads, seguidores, receita, margem_liquida
+  from analytics.ml_meses where mes = '2026-10-01';
+```
+Status das execuções: `select * from core.sync_runs order by started_at desc limit 10;`
 
-## Lacunas da implementação atual em relação à V1 (backlog da Fase 2)
-1. **Fatura (billing)** não é sincronizada → faltam comissão, frete real, parcelamento, Seguidores, estornos, DIFAL e outras. Criar `mkt.billing_details` e o sync com re-leitura de períodos incompletos.
-2. **Classificação do pedido**: buscar `/shipments/{id}` dos cancelados (status/substatus) e `cancel_detail`; gravar a classe (pago/dividido/devolvido/cancelado).
-3. **Data da venda**: KPIs devem usar `coalesce(date_closed, date_created)` em America/Sao_Paulo.
-4. **SKU**: extrair modelo, cor, kit e versão (`MODELO-COR-Knnnn-Vn`) para `mkt.order_items`.
-5. **Ads**: o conector usa `product_ads/ads/search` (por anúncio, não validado). A V1 validou `product_ads/campaigns/search` com `aggregation_type=DAILY` — usar este para o total diário e manter o por-anúncio só se a API responder.
-6. **429**: `fetchJson` usa espera exponencial curta; o ML pede 10 s × tentativa.
-7. **Custos por faixa** (`erp.cost_tiers` por modelo + regras de faixa) e alertas `sem_custo` / `faixa_atual`.
-8. Comissão isenta desde 10/2026 (`sale_fee` = 0) — não tratar como erro.
+## Fase 2b — regras da V1 implementadas (migration 0003)
+| Regra | Onde |
+|---|---|
+| SKU → modelo, cor, kit, versão, unidades | colunas geradas em `mkt.order_items` |
+| Classificação pago/dividido/devolvido/cancelado | `analytics.ml_pedidos.classe` (+ `syncCancelledShipments`) |
+| Data da venda (aprovação, Brasília) | `ml_pedidos.data_venda` / `mes` |
+| Fatura com re-leitura de período incompleto | `mkt.billing_*`, `syncBilling`, view `analytics.ml_fatura` |
+| Publicidade −1 dia; API de Ads prevalece nos dias cobertos | `ml_fatura.data_ref`, `analytics.ml_meses` |
+| Ads por campanha (endpoint da V1) | `mkt.ads_campaign_daily`, `listAdsCampaignDaily` |
+| Estimativas para pedidos não faturados | `ml_pedidos.frete_estimado` |
+| Custos por faixa + alertas | `erp.cost_tiers`, `analytics.resolve_unit_cost`, `analytics.ml_alertas` |
+| 429 do ML: 10 s × tentativa | `MercadoLivreClient` |
 
-A V1 está em `Dash_V1/` (só a skill/plugin, sem os scripts). As regras foram copiadas para regras-de-negocio.md.
+Testes: `npm run test:sql` (Postgres em memória, PGlite) — roda no CI. **Ao mudar regra de negócio, atualize o teste em `supabase/tests/regras-v1.test.mjs`.**
+
+Ainda não validado com a API real: o formato da resposta da fatura (`charge_info.detail_sub_type` como código) e do `campaigns/search`. Se vierem vazios, inspecione a coluna `raw` em `mkt.billing_details` / `mkt.ads_campaign_daily`.
+
+Comissão isenta desde 10/2026 (`sale_fee` = 0) — não é erro. A V1 está em `Dash_V1/` (só skill/plugin; fora do Git).
 
 ## Problemas já resolvidos (consultar antes de investigar)
 | Sintoma | Causa | Solução |
@@ -91,7 +105,7 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 ## Status das fases
 - [x] Fase 0 — contas, migrations, deploy, ML conectado, 1ª sincronização OK
 - [ ] Validar números da 1ª carga contra outubro/2026 e confirmar dados de Ads
-- [ ] Fase 2b — fechar as lacunas da V1 (lista acima)
+- [x] Fase 2b — regras da V1 em código e testadas (falta aplicar 0003 e conferir com outubro/2026)
 - [ ] Fase 3 — Gateway ERP (ver seção abaixo)
 - [ ] Fase 4 — Páginas de KPI (Vendas, Rentabilidade, Ads com ACOS de equilíbrio, Novos Produtos/simulador)
 - [ ] Fase 5 — Bitrix24 (webhook somente leitura, usuário técnico)

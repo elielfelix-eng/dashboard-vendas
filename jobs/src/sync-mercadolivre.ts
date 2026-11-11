@@ -34,8 +34,19 @@ export async function syncMercadoLivre(sql: Sql) {
       stats.items = await syncItems(sql, ml, acc.id);
       stats.orders = await syncOrders(sql, ml, acc.id, from, to);
       stats.shipping = await syncShippingCosts(sql, ml);
+      stats.cancelled_shipments = await syncCancelledShipments(sql, ml);
+      try {
+        stats.billing_rows = await syncBilling(sql, ml);
+      } catch (err) {
+        console.warn('[ML] Falha ao buscar a fatura (será tentada de novo):', (err as Error).message);
+        stats.billing_rows = -1;
+      }
       stats.visits = await syncVisits(sql, ml, isFirstRun ? 90 : 3);
-      stats.ads = await syncAds(sql, ml, isFirstRun ? 89 : 3);
+      // Ads: a API guarda 90 dias (inclui hoje). Na 1ª vez (ou se a tabela estiver vazia), busca tudo.
+      const [{ n: adsDays }] = await sql<{ n: number }[]>`
+        select count(distinct day)::int as n from mkt.ads_campaign_daily where channel = 'mercadolivre'`;
+      stats.ads_campaign_days = await syncAdsCampaigns(sql, ml, adsDays === 0 ? 89 : 3);
+      stats.ads_items = await syncAds(sql, ml, isFirstRun ? 89 : 3);
 
       await sql`update core.sync_runs set status = 'success', finished_at = now(), stats = ${sql.json(stats)} where id = ${run.id}`;
       console.log(`[ML ${acc.nickname}] OK`, stats);
@@ -86,6 +97,8 @@ async function saveOrders(sql: Sql, orders: Order[], accountId: string) {
       date_created: o.dateCreated, date_closed: o.dateClosed, date_last_updated: o.dateLastUpdated,
       total_amount: o.totalAmount, paid_amount: o.paidAmount, currency: o.currency, buyer_id: o.buyerId,
       shipment_id: o.shipmentId, tags: o.tags, raw: sql.json(o.raw as never),
+      // Pedido alterado: a situação do envio é buscada de novo (só para cancelados)
+      shipment_status: null, shipment_substatus: null,
     })), ['channel', 'order_id']);
     // Itens do pedido: apaga e regrava (um pedido pode mudar)
     for (const o of orders) await t`delete from mkt.order_items where channel = ${o.channel} and order_id = ${o.orderId}`;
@@ -112,6 +125,85 @@ async function syncShippingCosts(sql: Sql, ml: MercadoLivreConnector) {
        where o.channel = 'mercadolivre' and o.shipment_id = ${p.shipment_id}`;
   }
   return pending.length;
+}
+
+/** Situação do envio dos cancelados, para separar devolvido / dividido / cancelado. */
+async function syncCancelledShipments(sql: Sql, ml: MercadoLivreConnector) {
+  const pending = await sql<{ shipment_id: string }[]>`
+    select distinct shipment_id from mkt.orders
+     where channel = 'mercadolivre' and status = 'cancelled'
+       and shipment_id is not null and shipment_status is null
+     limit 3000`;
+  for (const p of pending) {
+    const s = await ml.getShipmentStatus(p.shipment_id);
+    await sql`
+      update mkt.orders
+         set shipment_status = ${s?.status ?? 'sem_envio'}, shipment_substatus = ${s?.substatus ?? null}
+       where channel = 'mercadolivre' and shipment_id = ${p.shipment_id}`;
+  }
+  return pending.length;
+}
+
+/**
+ * Fatura do ML: relê sempre os 2 períodos mais recentes (ainda podem mudar)
+ * e busca os mais antigos só se ainda não estiverem no banco.
+ */
+async function syncBilling(sql: Sql, ml: MercadoLivreConnector) {
+  const periods = (await ml.listBillingPeriods()).sort((a, b) => b.key.localeCompare(a.key));
+  const stored = new Set(
+    (await sql<{ period_key: string }[]>`select period_key from mkt.billing_periods where channel = 'mercadolivre'`)
+      .map((r) => r.period_key),
+  );
+  let total = 0;
+  for (const [i, p] of periods.entries()) {
+    if (i >= 2 && stored.has(p.key)) continue;
+    const rows = await ml.getBillingDetails(p.key);
+    await sql.begin(async (tx) => {
+      const t = tx as unknown as Sql;
+      await t`delete from mkt.billing_details where channel = 'mercadolivre' and period_key = ${p.key}`;
+      // Mesma linha repetida na resposta: fica a última
+      const unique = [...new Map(rows.map((r) => [r.detailId, r])).values()];
+      await upsert(t, 'mkt.billing_details', unique.map((r) => ({
+        channel: 'mercadolivre', period_key: p.key, detail_id: r.detailId, created_at: r.createdAt,
+        detail_type: r.detailType, code: r.code, amount: r.amount, order_id: r.orderId,
+        description: r.description, raw: sql.json(r.raw as never),
+      })), ['channel', 'period_key', 'detail_id']);
+      await upsert(t, 'mkt.billing_periods', [{
+        channel: 'mercadolivre', period_key: p.key, date_from: p.dateFrom?.slice(0, 10) ?? null,
+        date_to: p.dateTo?.slice(0, 10) ?? null, rows_count: unique.length, fetched_at: new Date(),
+        raw: sql.json(p.raw as never),
+      }], ['channel', 'period_key']);
+    });
+    total += rows.length;
+    console.log(`[ML] fatura ${p.key}: ${rows.length} linhas`);
+  }
+  return total;
+}
+
+/** Product Ads por campanha (endpoint validado na V1). */
+async function syncAdsCampaigns(sql: Sql, ml: MercadoLivreConnector, days: number) {
+  const to = new Date();
+  const from = new Date(Date.now() - days * DAY);
+  let total = 0;
+  try {
+    for await (const batch of ml.listAdsCampaignDaily(from, to)) {
+      // Soma linhas repetidas da mesma campanha/dia
+      const agg = new Map<string, { campaign_id: string; day: string; cost: number; raw: unknown }>();
+      for (const r of batch) {
+        const k = `${r.campaignId}|${r.day}`;
+        const cur = agg.get(k);
+        if (cur) cur.cost += r.cost;
+        else agg.set(k, { campaign_id: r.campaignId, day: r.day, cost: r.cost, raw: r.raw });
+      }
+      total += await upsert(sql, 'mkt.ads_campaign_daily', [...agg.values()].map((r) => ({
+        channel: 'mercadolivre', campaign_id: r.campaign_id, day: r.day, cost: r.cost, raw: sql.json(r.raw as never),
+      })), ['channel', 'campaign_id', 'day']);
+    }
+  } catch (err) {
+    console.warn('[ML] Falha ao buscar Ads por campanha:', (err as Error).message);
+    return -1;
+  }
+  return total;
 }
 
 async function syncVisits(sql: Sql, ml: MercadoLivreConnector, days: number) {
@@ -142,7 +234,7 @@ async function syncAds(sql: Sql, ml: MercadoLivreConnector, days: number) {
     }
   } catch (err) {
     // Ads não pode derrubar a sincronização de vendas; fica registrado no log
-    console.warn('[ML] Falha ao buscar Ads (verificar permissão do app):', (err as Error).message);
+    console.warn('[ML] Falha ao buscar Ads por anúncio (opcional):', (err as Error).message);
     return -1;
   }
   return total;

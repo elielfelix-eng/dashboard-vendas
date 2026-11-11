@@ -31,3 +31,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Testar regras de negocio (SQL)
+        run: npm run test:sql

@@ -266,4 +266,129 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       }
     }
   }
+
+  /**
+   * Ads por campanha (endpoint validado na V1, bate com o painel de Publicidade).
+   * Busca dia a dia para que cada resultado seja o custo daquele dia.
+   */
+  async *listAdsCampaignDaily(from: Date, to: Date): AsyncIterable<MlAdsCampaignDay[]> {
+    const adv = await this.getAdvertiser();
+    if (!adv) return;
+    for (let d = new Date(from); d <= to; d = new Date(d.getTime() + 86_400_000)) {
+      const day = ymd(d);
+      const rows: MlAdsCampaignDay[] = [];
+      for (let offset = 0; ; offset += 50) {
+        const r = await this.api.get<{
+          paging?: Paging;
+          results?: { id?: number | string; campaign_id?: number | string; date?: string; cost?: number; metrics?: { cost?: number } }[];
+        }>(
+          `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/campaigns/search`,
+          { date_from: day, date_to: day, metrics: 'cost', aggregation_type: 'DAILY', limit: 50, offset },
+          { 'api-version': '2' },
+        );
+        for (const x of r.results ?? []) {
+          const cost = Number(x.metrics?.cost ?? x.cost ?? 0);
+          rows.push({ campaignId: String(x.id ?? x.campaign_id ?? 'total'), day: x.date?.slice(0, 10) ?? day, cost, raw: x });
+        }
+        if (offset + 50 >= (r.paging?.total ?? 0)) break;
+      }
+      if (rows.length) yield rows;
+    }
+  }
+
+  /* ------------------------ Envio dos cancelados ---------------------- */
+  async getShipmentStatus(shipmentId: string): Promise<{ status: string | null; substatus: string | null } | null> {
+    try {
+      const s = await this.api.get<{ status?: string; substatus?: string | null }>(
+        `/shipments/${shipmentId}`, {}, { 'x-format-new': 'true' },
+      );
+      return { status: s.status ?? null, substatus: s.substatus ?? null };
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 404 || err.status === 403)) return null;
+      throw err;
+    }
+  }
+
+  /* ------------------------------- Fatura ------------------------------ */
+  async listBillingPeriods(): Promise<MlBillingPeriod[]> {
+    const r = await this.api.get<{ results?: { key?: string; period?: { date_from?: string; date_to?: string } }[] }>(
+      '/billing/integration/monthly/periods',
+      { group: 'ML', document_type: 'BILL', limit: 12 },
+    );
+    return (r.results ?? [])
+      .filter((p) => p.key)
+      .map((p) => ({ key: p.key!, dateFrom: p.period?.date_from ?? null, dateTo: p.period?.date_to ?? null, raw: p }));
+  }
+
+  private async readBillingDetailsOnce(key: string): Promise<MlBillingDetail[]> {
+    const LIMIT = 1000;
+    const out: MlBillingDetail[] = [];
+    for (let offset = 0; ; offset += LIMIT) {
+      const r = await this.api.get<{ results?: MlRawBillingDetail[] }>(
+        `/billing/integration/periods/key/${encodeURIComponent(key)}/group/ML/details`,
+        { document_type: 'BILL', limit: LIMIT, offset },
+      );
+      const page = r.results ?? [];
+      page.forEach((x, i) => out.push(toBillingDetail(key, x, offset + i)));
+      if (page.length < LIMIT) break;
+    }
+    return out;
+  }
+
+  /**
+   * A API às vezes devolve um período incompleto: lê de novo até duas leituras
+   * seguidas terem o mesmo número de linhas e fica com a mais completa.
+   */
+  async getBillingDetails(key: string, maxReads = 5): Promise<MlBillingDetail[]> {
+    let best: MlBillingDetail[] = [];
+    let previous = -1;
+    for (let i = 0; i < maxReads; i++) {
+      const rows = await this.readBillingDetailsOnce(key);
+      if (rows.length > best.length) best = rows;
+      if (rows.length === previous) break;
+      previous = rows.length;
+    }
+    return best;
+  }
+}
+
+export interface MlAdsCampaignDay { campaignId: string; day: string; cost: number; raw: unknown }
+export interface MlBillingPeriod { key: string; dateFrom: string | null; dateTo: string | null; raw: unknown }
+export interface MlBillingDetail {
+  detailId: string;
+  periodKey: string;
+  createdAt: string | null;
+  detailType: string | null; // CHARGE | BONUS
+  code: string | null;       // ex.: CVVML, PADS, CDLIT
+  amount: number;
+  orderId: string | null;
+  description: string | null;
+  raw: unknown;
+}
+interface MlRawBillingDetail {
+  charge_info?: {
+    detail_id?: number | string;
+    creation_date_time?: string;
+    detail_type?: string;
+    detail_sub_type?: string;
+    detail_amount?: number;
+    transaction_detail?: string;
+  };
+  sales_info?: { order_id?: number | string }[];
+}
+
+function toBillingDetail(periodKey: string, x: MlRawBillingDetail, index: number): MlBillingDetail {
+  const ci = x.charge_info ?? {};
+  const orderId = x.sales_info?.[0]?.order_id;
+  return {
+    detailId: ci.detail_id != null ? String(ci.detail_id) : `${periodKey}#${index}`,
+    periodKey,
+    createdAt: ci.creation_date_time ?? null,
+    detailType: ci.detail_type ?? null,
+    code: ci.detail_sub_type ?? null,
+    amount: Number(ci.detail_amount ?? 0),
+    orderId: orderId != null ? String(orderId) : null,
+    description: ci.transaction_detail ?? null,
+    raw: x,
+  };
 }

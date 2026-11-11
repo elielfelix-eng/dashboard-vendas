@@ -14,7 +14,12 @@ export class MercadoLivreClient {
 
     const call = async (force: boolean) => {
       const token = await this.getToken(force);
-      return fetchJson<T>(url, { headers: { Authorization: `Bearer ${token}`, accept: 'application/json', ...headers } });
+      return fetchJson<T>(
+        url,
+        { headers: { Authorization: `Bearer ${token}`, accept: 'application/json', ...headers } },
+        // O ML pede espera crescente de 10 s × tentativa no 429 (local_rate_limited)
+        { retries: 5, rateLimitDelay: (attempt) => 10_000 * (attempt + 1) },
+      );
     };
 
     try {

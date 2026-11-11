@@ -30,7 +30,8 @@ Baixe em https://git-scm.com/download/win e instale com as opções padrão.
 1. Crie a conta em https://supabase.com e um projeto novo (região **South America (São Paulo)**). Guarde a senha do banco num gerenciador de senhas.
 2. Em *SQL Editor > New query*, cole o **conteúdo** (não o nome) de cada arquivo e clique em **Run**, nesta ordem:
    - abra `supabase/migrations/0001_core.sql` no VS Code, **Ctrl+A**, **Ctrl+C**, cole no SQL Editor e clique em **Run** → deve aparecer "Success";
-   - em uma **nova query**, faça o mesmo com `supabase/migrations/0002_marketplaces.sql`.
+   - em uma **nova query**, faça o mesmo com `supabase/migrations/0002_marketplaces.sql`;
+   - depois, do mesmo jeito, `supabase/migrations/0003_regras_v1.sql` (fatura, Ads por campanha, custos por faixa e cálculo de margem).
 3. Em *Project Settings > Data API > Exposed schemas*, adicione: `core` e `mkt`.
 4. Em *Authentication > Sign In / Providers*, **desative "Allow new users to sign up"** (só entra quem você cadastrar).
 5. Em *Authentication > Users > Add user*, crie o seu usuário (e-mail + senha, marque "Auto confirm").

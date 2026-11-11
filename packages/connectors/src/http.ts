@@ -19,7 +19,12 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function fetchJson<T>(
   url: string | URL,
   init: RequestInit = {},
-  opts: { label?: string; retries?: number } = {},
+  opts: {
+    label?: string;
+    retries?: number;
+    /** Espera (ms) após um 429 na tentativa `attempt` (0, 1, 2...). */
+    rateLimitDelay?: (attempt: number) => number;
+  } = {},
 ): Promise<T> {
   const retries = opts.retries ?? 4;
   const label = opts.label ?? safeLabel(url);
@@ -37,7 +42,9 @@ export async function fetchJson<T>(
     const retryable = res.status === 429 || res.status >= 500;
     if (!retryable || attempt >= retries) throw new HttpError(res.status, body, label);
     const retryAfter = Number(res.headers.get('retry-after'));
-    await sleep(retryAfter > 0 ? retryAfter * 1000 : 1000 * 2 ** attempt);
+    if (retryAfter > 0) await sleep(retryAfter * 1000);
+    else if (res.status === 429 && opts.rateLimitDelay) await sleep(opts.rateLimitDelay(attempt));
+    else await sleep(1000 * 2 ** attempt);
   }
 }
 

@@ -10,7 +10,8 @@
     "dev": "npm run dev -w web",
     "build": "npm run build -w web",
     "sync": "npm run sync -w jobs --",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:sql": "node supabase/tests/regras-v1.test.mjs"
   },
   "overrides": {
     "postcss": "^8.5.32"

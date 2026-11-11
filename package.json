@@ -12,6 +12,9 @@
     "sync": "npm run sync -w jobs --",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
+  "overrides": {
+    "postcss": "^8.5.32"
+  },
   "engines": {
     "node": ">=22"
   }

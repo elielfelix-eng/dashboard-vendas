@@ -8,10 +8,21 @@ const MESSAGES: Record<string, { text: string; ok: boolean }> = {
   falha: { text: 'Não foi possível concluir a conexão. Tente novamente.', ok: false },
 };
 
-export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string }> }) {
+const ETAPAS: Record<string, string> = {
+  token: 'troca da autorização por tokens no Mercado Livre (confira ML_CLIENT_ID, ML_CLIENT_SECRET, Redirect URI e PKCE no app do ML)',
+  conta: 'leitura dos dados da conta no Mercado Livre',
+  banco: 'gravação no banco de dados (confira a DATABASE_URL na Vercel)',
+};
+
+export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string; etapa?: string; detalhe?: string }> }) {
   await requireAdmin();
   const params = await searchParams;
-  const msg = params.erro === 'config'
+  const msg = params.erro === 'falha' && params.etapa
+    ? {
+        text: `Não foi possível concluir a conexão. Etapa: ${ETAPAS[params.etapa] ?? params.etapa}. Detalhe: ${params.detalhe ?? '—'}`,
+        ok: false,
+      }
+    : params.erro === 'config'
     ? {
         text: `Configuração do Mercado Livre incompleta na Vercel: ${(params.faltando ?? '').replace(/[^A-Z_, ()a-z]/g, '')}. ` +
           'Corrija em Settings > Environment Variables e faça Redeploy. O ML_REDIRECT_URI deve terminar em /api/oauth/mercadolivre/callback.',

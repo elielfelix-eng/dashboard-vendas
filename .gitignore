@@ -22,3 +22,7 @@ __pycache__/
 *.log
 .DS_Store
 Thumbs.db
+
+# Diagnósticos com dados de pedidos (não versionar)
+diagnostico/
+Dash_V1/

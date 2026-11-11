@@ -3,6 +3,7 @@
 --   SKU (modelo/cor/kit), classificação do pedido, fatura do ML,
 --   Ads por campanha, custos por faixa e views de margem.
 -- Referência: .claude/skills/dashboard-mercado-livre-brinde-do-bem/regras-de-negocio.md
+-- Pode ser executado mais de uma vez: pula o que já existe e recria as views.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -10,33 +11,34 @@
 --    Colunas calculadas automaticamente a partir do SKU (inclui dados já gravados)
 -- ---------------------------------------------------------------------
 alter table mkt.order_items
-  add column modelo text generated always as (nullif(split_part(sku, '-', 1), '')) stored,
-  add column cor text generated always as (
+  add column if not exists modelo text generated always as (nullif(split_part(sku, '-', 1), '')) stored,
+  add column if not exists cor text generated always as (
     case when split_part(sku, '-', 2) ~ '^(K\d+|V\d+)?$' then null else split_part(sku, '-', 2) end
   ) stored,
-  add column kit_units integer generated always as (((regexp_match(sku, '-K(\d+)(?:-|$)'))[1])::integer) stored,
-  add column versao text generated always as ((regexp_match(sku, '-(V\d+)(?:-|$)'))[1]) stored,
+  add column if not exists kit_units integer generated always as (((regexp_match(sku, '-K(\d+)(?:-|$)'))[1])::integer) stored,
+  add column if not exists versao text generated always as ((regexp_match(sku, '-(V\d+)(?:-|$)'))[1]) stored,
   -- unidades físicas = unidades do kit × quantidade comprada (sem kit = 1)
-  add column units integer generated always as (
+  add column if not exists units integer generated always as (
     quantity * coalesce(((regexp_match(sku, '-K(\d+)(?:-|$)'))[1])::integer, 1)
   ) stored;
 
-create index on mkt.order_items (modelo);
+create index if not exists order_items_modelo_idx on mkt.order_items (modelo);
 
 -- ---------------------------------------------------------------------
 -- 2. Dados para classificar o pedido (pago / dividido / devolvido / cancelado)
 -- ---------------------------------------------------------------------
 alter table mkt.orders
-  add column cancel_detail_code text generated always as (raw -> 'cancel_detail' ->> 'code') stored,
-  add column shipment_status text,
-  add column shipment_substatus text;
+  add column if not exists cancel_detail_code text generated always as (raw -> 'cancel_detail' ->> 'code') stored,
+  add column if not exists shipment_status text,
+  add column if not exists shipment_substatus text;
 
-create index on mkt.orders (shipment_id) where status = 'cancelled' and shipment_status is null;
+drop index if exists mkt.orders_shipment_id_idx1; -- nome automático de uma execução anterior
+create index if not exists orders_cancelled_ship_pending_idx on mkt.orders (shipment_id) where status = 'cancelled' and shipment_status is null;
 
 -- ---------------------------------------------------------------------
 -- 3. Fatura do Mercado Livre
 -- ---------------------------------------------------------------------
-create table mkt.billing_periods (
+create table if not exists mkt.billing_periods (
   channel    text not null default 'mercadolivre',
   period_key text not null,
   date_from  date,
@@ -47,7 +49,7 @@ create table mkt.billing_periods (
   primary key (channel, period_key)
 );
 
-create table mkt.billing_details (
+create table if not exists mkt.billing_details (
   channel     text not null default 'mercadolivre',
   period_key  text not null,
   detail_id   text not null,
@@ -60,12 +62,12 @@ create table mkt.billing_details (
   raw         jsonb,
   primary key (channel, period_key, detail_id)
 );
-create index on mkt.billing_details (order_id) where order_id is not null;
+create index if not exists billing_details_order_id_idx on mkt.billing_details (order_id) where order_id is not null;
 
 -- ---------------------------------------------------------------------
 -- 4. Product Ads por campanha e por dia (API, 90 dias)
 -- ---------------------------------------------------------------------
-create table mkt.ads_campaign_daily (
+create table if not exists mkt.ads_campaign_daily (
   channel     text not null default 'mercadolivre',
   campaign_id text not null,
   day         date not null,
@@ -78,6 +80,9 @@ create table mkt.ads_campaign_daily (
 alter table mkt.billing_periods enable row level security;
 alter table mkt.billing_details enable row level security;
 alter table mkt.ads_campaign_daily enable row level security;
+drop policy if exists "fatura: quem ve custos" on mkt.billing_periods;
+drop policy if exists "fatura: quem ve custos" on mkt.billing_details;
+drop policy if exists "canal liberado" on mkt.ads_campaign_daily;
 create policy "fatura: quem ve custos" on mkt.billing_periods for select to authenticated
   using (core.can_see_costs() and core.can_see_channel(channel));
 create policy "fatura: quem ve custos" on mkt.billing_details for select to authenticated
@@ -89,7 +94,7 @@ grant select on mkt.billing_periods, mkt.billing_details, mkt.ads_campaign_daily
 -- ---------------------------------------------------------------------
 -- 5. Custos por faixa (virão do ERP pelo gateway; equivalente ao custos.csv da V1)
 -- ---------------------------------------------------------------------
-create table erp.cost_tiers (
+create table if not exists erp.cost_tiers (
   id         bigserial primary key,
   product_id text not null,              -- modelo do SKU (ex.: BLA68)
   qty_start  integer not null,
@@ -100,9 +105,11 @@ create table erp.cost_tiers (
   source     text not null default 'manual',
   loaded_at  timestamptz not null default now()
 );
-create index on erp.cost_tiers (product_id);
+create index if not exists cost_tiers_product_id_idx on erp.cost_tiers (product_id);
 
 alter table erp.cost_tiers enable row level security;
+drop policy if exists "custos: quem ve custos" on erp.cost_tiers;
+drop policy if exists "custos: admin altera" on erp.cost_tiers;
 create policy "custos: quem ve custos" on erp.cost_tiers for select to authenticated using (core.can_see_costs());
 create policy "custos: admin altera" on erp.cost_tiers for all to authenticated
   using (core.my_role() = 'admin') with check (core.my_role() = 'admin');
@@ -181,6 +188,8 @@ language sql immutable as $$
     else 'outras'
   end
 $$;
+
+drop view if exists analytics.ml_alertas, analytics.ml_meses, analytics.ml_pedidos, analytics.ml_fatura cascade;
 
 -- Linhas da fatura com valor assinado e data de referência
 -- (publicidade é cobrada na madrugada seguinte: volta 1 dia)

@@ -66,6 +66,11 @@ Colunas: `productId` (modelo), `qtyStart`, `qtyEnd`, `price` (por unidade), `cre
 - **Publicidade** (PADS, CDLIT) é cobrada na madrugada seguinte ao consumo: voltar **1 dia** na `creation_date_time`. Nos dias cobertos pela API de Ads, Product Ads vem da **API** (bate com o painel de Publicidade). Seguidores não tem API: o dia de hoje só aparece na fatura de amanhã.
 - **Estornos** de publicidade: coluna própria, no mês do estorno.
 - Pedidos ainda não faturados: estimar comissão = `sale_fee × qtd` e frete = custo de envio do pedido (`frete_estimado = true`).
+- **Carrinho (vários pedidos no mesmo envio)** — *correção em relação à V1, que contava o frete em dobro*:
+  - o custo do envio (`/shipments/{id}/costs`) é rateado só entre os pedidos **não cancelados** do envio;
+  - se a fatura já cobrou o frete em **algum** pedido do envio, os outros ficam com frete **0** e não são "estimados" (o ML cobra o frete do carrinho uma vez só).
+  - Diferenças conhecidas contra a V1 por causa disso: setembro/2026 −R$ 101,50 (pedido 2000018525336576) e novembro/2026 −R$ 158,04 (pedidos 2000019457170756/758).
+- **Product Ads**: diferença de centavos contra a V1 (−R$ 0,42 em 09/2026, −R$ 0,53 em 10/2026) é aceitável (arredondamento da API).
 - **Comissão isenta desde outubro/2026** (benefício ONG): `sale_fee` vem 0 a partir daí.
 
 ## Margem

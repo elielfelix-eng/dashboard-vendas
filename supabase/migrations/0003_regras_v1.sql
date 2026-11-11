@@ -253,6 +253,14 @@ fat as (
     from analytics.ml_fatura f
    where f.order_id is not null
    group by f.order_id
+),
+-- Envios cujo frete já foi cobrado na fatura de algum dos pedidos do carrinho:
+-- os outros pedidos do mesmo envio não recebem frete estimado (seria cobrança em dobro).
+envio_faturado as (
+  select distinct o.shipment_id
+    from analytics.ml_fatura f
+    join mkt.orders o on o.channel = 'mercadolivre' and o.order_id = f.order_id
+   where f.categoria = 'frete' and o.shipment_id is not null
 )
 select b.order_id,
        b.pack_id,
@@ -266,12 +274,13 @@ select b.order_id,
        coalesce(i.unidades, 0)::integer as unidades,
        coalesce(i.valor_venda, 0) as valor_venda,
        case when b.classe = 'pago' then coalesce(i.valor_venda, 0) else 0 end as receita,
-       (f.order_id is null and b.classe = 'pago') as frete_estimado,
+       (f.order_id is null and b.classe = 'pago' and ef.shipment_id is null) as frete_estimado,
        -- Pedido ainda não faturado: estimativas (comissão = sale_fee × qtd; frete = custo do envio)
        case when f.order_id is not null then coalesce(f.comissao, 0)
             when b.classe = 'pago' then coalesce(i.comissao_estimada, 0) else 0 end as comissao,
        case when f.order_id is not null then coalesce(f.frete, 0)
-            when b.classe = 'pago' then coalesce(b.shipping_cost_seller, 0) else 0 end as frete,
+            when b.classe = 'pago' and ef.shipment_id is null then coalesce(b.shipping_cost_seller, 0)
+            else 0 end as frete,
        coalesce(f.parcelamento, 0) as parcelamento,
        coalesce(f.product_ads, 0) as product_ads,
        coalesce(f.seguidores, 0) as seguidores,
@@ -283,7 +292,8 @@ select b.order_id,
        case when b.classe = 'pago' then i.alerta_custo end as alerta_custo
   from base b
   left join itens i on i.order_id = b.order_id
-  left join fat f on f.order_id = b.order_id;
+  left join fat f on f.order_id = b.order_id
+  left join envio_faturado ef on ef.shipment_id = b.shipment_id;
 
 -- ---------------------------------------------------------------------
 -- 8. Resumo mensal (equivalente ao ml_meses.json da V1)

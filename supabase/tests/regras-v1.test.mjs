@@ -100,6 +100,20 @@ eq('pedido faturado usa fatura', await one(`select comissao::float, frete::float
   { comissao: 7.2, frete: 10, frete_estimado: false });
 eq('pedido não faturado usa estimativa', await one(`select comissao::float, frete::float, frete_estimado from analytics.ml_pedidos where order_id='1'`),
   { comissao: 12, frete: 12.5, frete_estimado: true });
+// Carrinho: pedidos 7 e 8 no mesmo envio s7; a fatura cobrou o frete só no 8
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, shipment_id, shipping_cost_seller, raw) values
+ ('mercadolivre','7','paid','2026-08-10 12:00+00','2026-08-10 12:00+00', 10, 's7', 50, '{}'),
+ ('mercadolivre','8','paid','2026-08-10 12:00+00','2026-08-10 12:00+00', 10, 's7', 50, '{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price, sale_fee) values
+ ('mercadolivre','7',1,'MLB2','GFT10-AZU','y',1,10,0), ('mercadolivre','8',1,'MLB2','GFT10-AZU','y',1,10,0);
+insert into mkt.billing_details (period_key, detail_id, created_at, detail_type, code, amount, order_id) values
+ ('2026-08','s7f','2026-08-11 10:00+00','CHARGE','CXDE', 100.00, '8');
+`);
+eq('carrinho: frete já cobrado em outro pedido do envio -> 0', await one(`select frete::float, frete_estimado from analytics.ml_pedidos where order_id='7'`),
+  { frete: 0, frete_estimado: false });
+eq('carrinho: pedido faturado mantém o frete da fatura', await one(`select frete::float from analytics.ml_pedidos where order_id='8'`), { frete: 100 });
+
 eq('custo do produto (2 kits de 10 = 20 un x R$4)', await one(`select custo_produto::float, custo_unitario::float from analytics.ml_pedidos where order_id='1'`),
   { custo_produto: 80, custo_unitario: 4 });
 
@@ -116,7 +130,7 @@ eq('resumo de outubro', out, {
   difal: 2, outras: 1, comissao: 7.2, frete: 10, custo_produto: 0, margem_liquida: -65.2,
 });
 eq('alerta sem_custo', (await db.query(`select tipo, codigo, qtd_pedidos from analytics.ml_alertas`)).rows,
-  [{ tipo: 'sem_custo', codigo: 'GFT10', qtd_pedidos: 1 }]);
+  [{ tipo: 'sem_custo', codigo: 'GFT10', qtd_pedidos: 3 }]); // pedidos 2, 7 e 8
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

@@ -118,10 +118,14 @@ async function syncShippingCosts(sql: Sql, ml: MercadoLivreConnector) {
      limit 3000`;
   for (const p of pending) {
     const cost = await ml.getShipmentSellerCost(p.shipment_id);
-    // Rateia o frete entre os pedidos do mesmo envio (carrinho)
+    // Rateia o frete entre os pedidos ATIVOS do mesmo envio (carrinho).
+    // Cancelados (ex.: "dividido") ficam com 0, para o pago receber o custo inteiro.
     await sql`
-      update mkt.orders o set shipping_cost_seller = round(${cost ?? 0}::numeric / n.cnt, 2)
-        from (select count(*) as cnt from mkt.orders where channel = 'mercadolivre' and shipment_id = ${p.shipment_id}) n
+      update mkt.orders o
+         set shipping_cost_seller = case when o.status = 'cancelled' then 0
+                                         else round(${cost ?? 0}::numeric / greatest(n.cnt, 1), 2) end
+        from (select count(*) filter (where status <> 'cancelled') as cnt
+                from mkt.orders where channel = 'mercadolivre' and shipment_id = ${p.shipment_id}) n
        where o.channel = 'mercadolivre' and o.shipment_id = ${p.shipment_id}`;
   }
   return pending.length;
@@ -161,8 +165,19 @@ async function syncBilling(sql: Sql, ml: MercadoLivreConnector) {
     await sql.begin(async (tx) => {
       const t = tx as unknown as Sql;
       await t`delete from mkt.billing_details where channel = 'mercadolivre' and period_key = ${p.key}`;
-      // Mesma linha repetida na resposta: fica a última
-      const unique = [...new Map(rows.map((r) => [r.detailId, r])).values()];
+      // Linha idêntica repetida na resposta: descarta. Mesmo id com conteúdo
+      // diferente: mantém as duas (com sufixo), para não perder cobranças.
+      const seen = new Map<string, string>();
+      const unique: typeof rows = [];
+      for (const r of rows) {
+        const body = JSON.stringify(r.raw);
+        let id = r.detailId;
+        let n = 1;
+        while (seen.has(id) && seen.get(id) !== body) id = `${r.detailId}#${++n}`;
+        if (seen.get(id) === body) continue;
+        seen.set(id, body);
+        unique.push({ ...r, detailId: id });
+      }
       await upsert(t, 'mkt.billing_details', unique.map((r) => ({
         channel: 'mercadolivre', period_key: p.key, detail_id: r.detailId, created_at: r.createdAt,
         detail_type: r.detailType, code: r.code, amount: r.amount, order_id: r.orderId,

@@ -323,14 +323,18 @@ export class MercadoLivreConnector implements MarketplaceConnector {
   private async readBillingDetailsOnce(key: string): Promise<MlBillingDetail[]> {
     const LIMIT = 1000;
     const out: MlBillingDetail[] = [];
-    for (let offset = 0; ; offset += LIMIT) {
-      const r = await this.api.get<{ results?: MlRawBillingDetail[] }>(
+    // Avança pelo que veio de fato (a API pode devolver menos que o limite por página)
+    // e só para quando atingir o total informado ou receber uma página vazia.
+    for (let offset = 0; ; ) {
+      const r = await this.api.get<{ results?: MlRawBillingDetail[]; total?: number; paging?: { total?: number } }>(
         `/billing/integration/periods/key/${encodeURIComponent(key)}/group/ML/details`,
         { document_type: 'BILL', limit: LIMIT, offset },
       );
       const page = r.results ?? [];
       page.forEach((x, i) => out.push(toBillingDetail(key, x, offset + i)));
-      if (page.length < LIMIT) break;
+      offset += page.length;
+      const total = r.total ?? r.paging?.total;
+      if (!page.length || (total != null && offset >= total)) break;
     }
     return out;
   }

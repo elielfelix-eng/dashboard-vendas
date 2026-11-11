@@ -52,12 +52,34 @@ def test_connect_appends_secret(captured, monkeypatch):
     monkeypatch.setenv("BRINDE_GATEWAY_SQLSERVER", "pw1")
     connect_source(SourceConfig("DSN=ERP;UID=u"))
     connect_source(SourceConfig("DSN=ERP;UID=u;"))
-    assert captured[0][0] == "DSN=ERP;UID=u;PWD=pw1"
-    assert captured[1][0] == "DSN=ERP;UID=u;PWD=pw1"
+    assert captured[0][0] == "DSN=ERP;UID=u;PWD={pw1}"
+    assert captured[1][0] == "DSN=ERP;UID=u;PWD={pw1}"
 
 
-@pytest.mark.parametrize("cs", ["DSN=ERP;UID=u;PWD=x", "DSN=ERP;Password=x", "DSN=ERP;Trusted_Connection=yes"])
+@pytest.mark.parametrize("cs", ["DSN=ERP;UID=u;PWD=x", "DSN=ERP;Password=x", "DSN=ERP;Trusted_Connection=yes", "DSN=ERP;Trusted_Connection=true"])
 def test_connect_does_not_duplicate_auth(captured, monkeypatch, cs):
     monkeypatch.setenv("BRINDE_GATEWAY_SQLSERVER", "pw1")
     connect_source(SourceConfig(cs))
     assert captured[0][0] == cs
+
+
+def test_connect_quotes_password_with_special_chars(captured, monkeypatch):
+    monkeypatch.setenv("BRINDE_GATEWAY_SQLSERVER", "a;b}c")
+    connect_source(SourceConfig("DSN=ERP;UID=u"))
+    assert captured[0][0] == "DSN=ERP;UID=u;PWD={a;b}}c}"
+
+
+def test_mask_brace_quoted():
+    assert mask("DSN=ERP;PWD={a;b}}c};UID=u") == "DSN=ERP;PWD=***;UID=u"
+    assert mask("DSN=ERP;Password={a;b}}c}") == "DSN=ERP;Password=***"
+    assert "b" not in mask("PWD={a;b}}c}").replace("PWD", "")
+
+
+def test_connect_off_windows_without_secret(captured, monkeypatch):
+    from brinde_gateway import secrets as sec
+
+    monkeypatch.setattr(sec, "_is_windows", lambda: False)
+    with pytest.raises(sec.SecretMissing):
+        sec.get_secret("sqlserver")
+    connect_source(SourceConfig("DSN=ERP"))
+    assert captured[0][0] == "DSN=ERP"

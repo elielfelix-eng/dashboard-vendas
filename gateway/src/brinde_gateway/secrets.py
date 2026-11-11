@@ -38,8 +38,12 @@ def secrets_path() -> Path:
     return home_dir() / "secrets.json"
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
 def _require_windows() -> None:
-    if sys.platform != "win32":
+    if not _is_windows():
         raise SecretError(
             "Segredos em arquivo (DPAPI) so funcionam no Windows; "
             "fora dele use a variavel de ambiente BRINDE_GATEWAY_<NOME>."
@@ -56,8 +60,17 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
     buf = ctypes.create_string_buffer(data, len(data))
     blob_in = DATA_BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
     blob_out = DATA_BLOB()
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    pblob = ctypes.POINTER(DATA_BLOB)
+    crypt32.CryptProtectData.argtypes = [
+        pblob, wintypes.LPCWSTR, pblob, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, pblob,
+    ]
+    crypt32.CryptProtectData.restype = wintypes.BOOL
+    crypt32.CryptUnprotectData.argtypes = [
+        pblob, ctypes.c_void_p, pblob, ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, pblob,
+    ]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
     kernel32.LocalFree.argtypes = [ctypes.c_void_p]
     kernel32.LocalFree.restype = ctypes.c_void_p
     if protect:
@@ -73,7 +86,7 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
             ctypes.byref(blob_out),
         )
     if not ok:
-        raise SecretError(f"Falha na protecao DPAPI do segredo (codigo {ctypes.GetLastError()}).")
+        raise SecretError(f"Falha na protecao DPAPI do segredo (codigo {ctypes.get_last_error()}).")
     try:
         return ctypes.string_at(blob_out.pbData, blob_out.cbData)
     finally:
@@ -98,7 +111,12 @@ def get_secret(name: str) -> str:
     env = os.environ.get(f"BRINDE_GATEWAY_{name.upper()}")
     if env:
         return env
-    _require_windows()
+    if not _is_windows():
+        # Fora do Windows nao existe arquivo de segredos: so a variavel de ambiente vale.
+        raise SecretMissing(
+            f"Segredo '{name}' nao configurado. Defina a variavel de ambiente "
+            f"BRINDE_GATEWAY_{name.upper()} (arquivo de segredos so existe no Windows)."
+        )
     encoded = _load_store().get(name)
     if not encoded:
         raise SecretMissing(

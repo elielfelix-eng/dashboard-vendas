@@ -9,8 +9,11 @@ import pyodbc
 from .config import Dataset, SourceConfig
 from .secrets import SecretMissing, get_secret
 
-_PWD_RE = re.compile(r"(?i)(\b(?:pwd|password)\s*=)([^;]*)")
-_HAS_AUTH_RE = re.compile(r"(?i)(\bpwd\s*=|\bpassword\s*=|\btrusted_connection\s*=\s*yes)")
+# Valor entre chaves (com "}}" como escape de "}") ou ate o proximo ";".
+_PWD_RE = re.compile(r"(?i)(\b(?:pwd|password)\s*=\s*)(\{(?:[^}]|\}\})*\}|[^;]*)")
+_HAS_AUTH_RE = re.compile(
+    r"(?i)(\bpwd\s*=|\bpassword\s*=|\btrusted_connection\s*=\s*(?:yes|true)\b)"
+)
 
 
 def mask(conn_str: str) -> str:
@@ -28,7 +31,7 @@ def build_connection_string(source_cfg: SourceConfig) -> str:
         return conn_str
     if not conn_str.endswith(";"):
         conn_str += ";"
-    return f"{conn_str}PWD={password}"
+    return conn_str + "PWD={" + password.replace("}", "}}") + "}"
 
 
 def connect_source(source_cfg: SourceConfig):

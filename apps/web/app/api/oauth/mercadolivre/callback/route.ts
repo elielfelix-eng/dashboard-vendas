@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     await sql.begin(async (tx) => {
       const [acc] = await tx<{ id: string }[]>`
         insert into core.accounts (channel, external_id, nickname)
-        values ('mercadolivre', ${tokens.externalUserId}, ${me.nickname})
+        values ('mercadolivre', ${tokens.externalUserId}, ${me.nickname ?? null})
         on conflict (channel, external_id) do update set nickname = excluded.nickname, active = true
         returning id`;
       await tx`select core.save_oauth_tokens(${acc.id}, ${tokens.accessToken}, ${tokens.refreshToken}, ${tokens.expiresAt}, ${tokens.scope ?? null})`;

@@ -53,6 +53,11 @@ async function tokenRequest(params: Record<string, string>): Promise<OAuthTokens
     },
     { label: 'ML /oauth/token', retries: 2 },
   );
+  if (!data.refresh_token) {
+    throw new Error(
+      'O Mercado Livre nao enviou o refresh token. Ative a permissao offline_access (acesso offline) no app do ML e conecte de novo.',
+    );
+  }
   return {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,

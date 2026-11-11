@@ -1,14 +1,20 @@
 ---
 name: dashboard-mercado-livre-brinde-do-bem
-description: Contexto e procedimentos do Painel de Vendas da Brinde do Bem (Mercado Livre, Shopee, ERP SQL Server via gateway, Bitrix24) publicado com Supabase + Vercel + GitHub Actions. Use ao trabalhar neste repositório - novas fases, sincronização, validação de dados, deploy, conexões OAuth, diagnóstico de erros ou dúvidas do usuário sobre o painel.
+description: Contexto, regras de negócio e procedimentos do Painel de Vendas do Brinde do Bem (Mercado Livre, Shopee, ERP SQL Server via gateway, Bitrix24) publicado com Supabase + Vercel + GitHub Actions. Use ao trabalhar neste repositório - sincronização, cálculo de margem/custos por faixa, classificação de pedidos, fatura e Ads do ML, validação contra o painel do ML, deploy, OAuth, diagnóstico de erros ou dúvidas do usuário sobre o painel.
 ---
 
 # Painel de Vendas — Brinde do Bem
+
+O Brinde do Bem é a unidade de negócio da ONG Vocação que vende brindes para financiar os projetos da Vocação. Loja ML: **BRINDESVOCACAO** (seller 494288862, anunciante Product Ads 2757617).
+
+**Regras de negócio validadas** (SKU/kit, data da venda, classificação de pedidos, custos por faixa, códigos da fatura, margem, números de referência): leia [regras-de-negocio.md](regras-de-negocio.md) antes de mexer em sincronização, cálculo ou KPIs.
 
 ## Como falar com o usuário
 - Sempre em **português**, linguagem simples: o usuário é leigo em programação.
 - Passo a passo numerado, com o nome exato dos botões/menus. Telas de Supabase, Vercel, GitHub e ML mudam com frequência: se o usuário não achar algo, ofereça caminhos alternativos e peça print.
 - **Nunca peça** senhas, `DATABASE_URL`, `ML_CLIENT_SECRET` ou tokens no chat. URL do Supabase e chave publishable/anon podem aparecer.
+- **Nunca** imprima, comite ou grave em arquivos do projeto chaves de acesso ou o conteúdo de arquivos de credenciais.
+- Antes de dar um número como certo, compare com o painel do Mercado Livre.
 
 ## Onde as coisas estão
 | Item | Local |
@@ -47,14 +53,26 @@ npm audit
 ```
 
 ## Validar dados sincronizados (SQL Editor do Supabase)
-Comparar pedidos pagos e faturamento do mês passado com o relatório de vendas do ML:
+Referência: **outubro/2026** no painel do ML (ver tabela em regras-de-negocio.md). Usar a data de aprovação (`date_closed`) em horário de Brasília:
 ```sql
-select count(*) pedidos, sum(total_amount) faturamento from mkt.orders
+select count(*) pedidos_pagos, sum(total_amount) receita from mkt.orders
  where status = 'paid'
-   and date_created >= date_trunc('month', now() - interval '1 month')
-   and date_created <  date_trunc('month', now());
+   and coalesce(date_closed, date_created) at time zone 'America/Sao_Paulo' >= '2026-10-01'
+   and coalesce(date_closed, date_created) at time zone 'America/Sao_Paulo' <  '2026-11-01';
 ```
-Status das execuções: `select * from core.sync_runs order by started_at desc limit 10;`
+Enquanto a classificação pago/dividido/devolvido/cancelado não estiver implementada, só "pagos" é comparável. Status das execuções: `select * from core.sync_runs order by started_at desc limit 10;`
+
+## Lacunas da implementação atual em relação à V1 (backlog da Fase 2)
+1. **Fatura (billing)** não é sincronizada → faltam comissão, frete real, parcelamento, Seguidores, estornos, DIFAL e outras. Criar `mkt.billing_details` e o sync com re-leitura de períodos incompletos.
+2. **Classificação do pedido**: buscar `/shipments/{id}` dos cancelados (status/substatus) e `cancel_detail`; gravar a classe (pago/dividido/devolvido/cancelado).
+3. **Data da venda**: KPIs devem usar `coalesce(date_closed, date_created)` em America/Sao_Paulo.
+4. **SKU**: extrair modelo, cor, kit e versão (`MODELO-COR-Knnnn-Vn`) para `mkt.order_items`.
+5. **Ads**: o conector usa `product_ads/ads/search` (por anúncio, não validado). A V1 validou `product_ads/campaigns/search` com `aggregation_type=DAILY` — usar este para o total diário e manter o por-anúncio só se a API responder.
+6. **429**: `fetchJson` usa espera exponencial curta; o ML pede 10 s × tentativa.
+7. **Custos por faixa** (`erp.cost_tiers` por modelo + regras de faixa) e alertas `sem_custo` / `faixa_atual`.
+8. Comissão isenta desde 10/2026 (`sale_fee` = 0) — não tratar como erro.
+
+A V1 está em `Dash_V1/` (só a skill/plugin, sem os scripts). As regras foram copiadas para regras-de-negocio.md.
 
 ## Problemas já resolvidos (consultar antes de investigar)
 | Sintoma | Causa | Solução |
@@ -72,7 +90,8 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 
 ## Status das fases
 - [x] Fase 0 — contas, migrations, deploy, ML conectado, 1ª sincronização OK
-- [ ] Validar números da 1ª carga contra o relatório do ML e confirmar dados de Ads
+- [ ] Validar números da 1ª carga contra outubro/2026 e confirmar dados de Ads
+- [ ] Fase 2b — fechar as lacunas da V1 (lista acima)
 - [ ] Fase 3 — Gateway ERP (ver seção abaixo)
 - [ ] Fase 4 — Páginas de KPI (Vendas, Rentabilidade, Ads com ACOS de equilíbrio, Novos Produtos/simulador)
 - [ ] Fase 5 — Bitrix24 (webhook somente leitura, usuário técnico)
@@ -82,9 +101,11 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 ## ERP (SQL Server) — a preencher
 O ERP é próprio (SQL Server), ligado 24h. O gateway roda em **outra máquina da rede** (estilo Power BI Gateway): Python + pyodbc, serviço do Windows, usuário SQL somente leitura sobre views criadas para o painel, envio só de saída para o schema `erp` com o papel restrito `gateway_writer`. Horários de envio: 07:45, 12:45 e 16:45.
 
+De-para ML × ERP: o **modelo** do SKU (ex.: `BLA68` em `BLA68-AMA-K0010-V1`) é o `productId` da tabela de custos. Custos são **por faixa de quantidade com vigência** (`qtyStart`, `qtyEnd`, `price`, `createdAt`, `expiredAt`) — a view do ERP precisa entregar esse formato.
+
 Pendente do usuário:
 - Driver/DSN, servidor e banco (sem senha)
-- Tabelas/colunas de produtos, custos, estoque, notas fiscais e financeiro
-- Exemplos de código ML (MLB/SKU) × código ERP para o de-para
+- Tabela/consulta do ERP que gera as faixas de custo (equivalente ao `custos.csv` da V1), além de estoque, notas fiscais e financeiro
+- Confirmar se o código do modelo no ERP é igual ao modelo do SKU do ML
 - % de imposto por canal e custo de embalagem
 - Bitrix24: campo que liga o negócio ao ERP (nº pedido/NF ou CNPJ/CPF)

@@ -55,8 +55,8 @@ Regra (`analytics.resolve_unit_cost`, migration 0006), N peças na data D, datas
 - `expired_at` não é usado. Custo do produto = preço × peças. **Só pedidos pagos têm custo.**
 - Exemplos reais BLA68: 12 peças em 15/10/2026 → R$ 4,14 (tabela 19/08, faixa 11–2549); 10 peças → R$ 4,18; 30 peças em 01/03/2026 → R$ 4,90 (tabela 12/02, faixa 1–254).
 - Próximo passo planejado: custo real pela NF de entrada (XML), com a cotação como reserva.
-- **De-para de modelo** (migration 0007, `map.modelo_de_para` + `analytics.modelo_erp`): quando o modelo do SKU do anúncio não existe no ERP, o custo usa o `modelo_erp` indicado, para vendas até a data `ate` (vazio = sempre). Primeiro caso: SQM148 → BMS148 até 12/11/2026 (SKU errado no anúncio). Nas telas da Fase 4, agrupar por `analytics.modelo_erp(modelo, data)`.
-- Modelos sem custo encontrados em 11/2026: CMT44 (só cotação de 2017; a view filtra ≥ 2019), KON09 (sem cotação no ERP).
+- **De-para de referência** (migration 0007, `map.modelo_de_para` + `analytics.ref_erp`): SKU errado no anúncio → o dashboard **mostra e custeia** a referência do ERP. `ml_pedidos.sku/modelo/cor` já vêm corrigidos; o SKU original fica em `ml_pedidos.sku_anuncio`; `ml_alertas.codigo` também usa a referência do ERP. Campos: `modelo_anuncio`, `cor_anuncio` (vazio = qualquer), `modelo_erp`, `cor_erp` (vazio = mantém), `sku_erp` (SKU inteiro; vazio = troca só modelo/cor), `ate` (vazio = sempre). Unidades do kit continuam vindo do SKU original. Casos (12/11/2026, vendas até essa data): SQM148 → BMS148; CMT44-CDE-67..72 → BOB01-PDR. A 0007 substitui as views ml_pedidos/ml_meses/ml_alertas da 0003 — ordem de aplicação 0003 → 0006 → 0007. Telas da Fase 4 devem ler modelo/sku dessas views.
+- A view `painel.faixas_custo` aceita qualquer fornecedor quando o produto não tem fornecedor padrão (casos KON09, BOB01).
 
 ## Custos do Mercado Livre (fatura)
 | Categoria | Códigos |

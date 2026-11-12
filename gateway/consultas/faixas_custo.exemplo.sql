@@ -1,17 +1,10 @@
--- Modelo da consulta de faixas de custo. Copie para faixas_custo.sql (na pasta "consultas",
--- ao lado do config.toml) e troque tudo o que estiver marcado com "-- TROCAR:".
--- Os nomes das colunas (aliases) sao obrigatorios e devem ficar exatamente assim.
+-- Consulta de custos do gateway. Copie para faixas_custo.sql (na pasta "consultas",
+-- ao lado do config.toml). Le a view criada por sqlserver\view_faixas_custo.sql.
+-- Os nomes das colunas sao obrigatorios e devem ficar exatamente assim.
 -- O gateway acrescenta sozinho a coluna "source" = 'erp'.
-SELECT
-    -- TROCAR: codigo do modelo (ex.: BLA68). Precisa ser IGUAL ao modelo do SKU do Mercado Livre
-    -- (parte antes do primeiro "-"), em maiusculas e sem espacos: campos char(n) do SQL Server
-    -- guardam espacos no final e a comparacao no painel e exata e sensivel a maiusculas.
-    UPPER(LTRIM(RTRIM(CAST(p.codigo_modelo AS varchar(60))))) AS product_id,
-    f.quantidade_inicial                 AS qty_start,    -- TROCAR: quantidade inicial da faixa
-    f.quantidade_final                   AS qty_end,      -- TROCAR: quantidade final da faixa (pode ser NULL na ultima)
-    f.preco_unitario                     AS price,        -- TROCAR: custo por unidade nessa faixa
-    f.data_cadastro                      AS created_at,   -- TROCAR: data em que a faixa passou a valer
-    f.data_expiracao                     AS expired_at    -- TROCAR: data em que deixou de valer (NULL se vigente)
-FROM painel.faixas_custo AS f                              -- TROCAR: view/tabela do ERP com as faixas
-JOIN painel.produtos AS p ON p.id = f.produto_id           -- TROCAR: tabela de produtos (ou remova o JOIN)
-WHERE f.preco_unitario IS NOT NULL
+--
+-- product_id = modelo do SKU do Mercado Livre (ex.: BLA68), em maiusculas e sem espacos
+-- qty_start / qty_end = faixa de pecas da cotacao; price = custo por peca;
+-- created_at = data da cotacao (o painel usa a mais recente ate a data da venda).
+SELECT product_id, qty_start, qty_end, price, created_at
+FROM painel.faixas_custo

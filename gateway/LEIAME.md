@@ -25,7 +25,7 @@ Peça ao DBA do ERP (ou faça você mesmo no SQL Server Management Studio):
 1. Abra o arquivo `sqlserver\usuario_leitura.sql` (está na pasta do gateway).
 2. Troque `NOME_DO_BANCO` pelo nome do banco do ERP e `<SENHA_FORTE>` por uma senha forte que **só o DBA** vai conhecer.
 3. Execute o script. Ele cria o usuário `gateway_leitura`, que só tem permissão de **leitura** e só enxerga o schema `painel`.
-4. O DBA precisa criar, dentro do schema `painel`, as **views** com os dados que o painel vai ler (por exemplo `painel.faixas_custo`). Use `consultas\faixas_custo.exemplo.sql` como guia do formato.
+4. Em seguida, execute `sqlserver\view_faixas_custo.sql` (no banco `NewFord`). Ele cria a view `painel.faixas_custo` com o histórico de cotações de compra do fornecedor padrão, que é o que o painel usa para o custo dos produtos.
 5. Anote o **nome ou IP do servidor** e o **nome do banco**. Você vai usar no passo 6. A senha do `gateway_leitura` é só do DBA: ele deve entregá-la a você por um canal seguro (gerenciador de senhas, não e-mail nem chat) ou digitá-la pessoalmente quando você rodar o `set-secret` (passo 5).
 
 ---
@@ -98,10 +98,10 @@ No mesmo PowerShell de administrador:
 Agora a consulta das faixas de custo:
 
 1. Em `C:\ProgramData\BrindeGateway\consultas\` já existe `faixas_custo.exemplo.sql`.
-2. Essa pasta é protegida, então não crie o arquivo pelo Explorador de Arquivos (ele pede permissão e costuma falhar). Faça como no `config.toml`: abra o **Bloco de Notas como administrador**, use **Arquivo > Abrir**, abra o `faixas_custo.exemplo.sql` (escolha "Todos os arquivos" no filtro), copie o texto todo, ajuste os trechos marcados com `-- TROCAR:` (ou peça ao DBA) e salve com **Arquivo > Salvar como**, nome `faixas_custo.sql`, na mesma pasta. Alternativa: no PowerShell de administrador, `Copy-Item C:\ProgramData\BrindeGateway\consultasaixas_custo.exemplo.sql C:\ProgramData\BrindeGateway\consultasaixas_custo.sql`, e então edite com o Bloco de Notas como administrador.
-3. A consulta precisa devolver exatamente as colunas: `product_id` (modelo do produto, igual ao modelo do SKU do Mercado Livre), `qty_start`, `qty_end`, `price`, `created_at`, `expired_at`.
+2. Essa pasta é protegida, então não crie o arquivo pelo Explorador de Arquivos (ele pede permissão e costuma falhar). Faça como no `config.toml`: abra o **Bloco de Notas como administrador**, use **Arquivo > Abrir**, abra o `faixas_custo.exemplo.sql` (escolha "Todos os arquivos" no filtro), copie o texto todo (ele já lê a view `painel.faixas_custo` do passo 2, não precisa mudar nada) e salve com **Arquivo > Salvar como**, nome `faixas_custo.sql`, na mesma pasta. Alternativa: no PowerShell de administrador, `Copy-Item C:\ProgramData\BrindeGateway\consultas\faixas_custo.exemplo.sql C:\ProgramData\BrindeGateway\consultas\faixas_custo.sql`.
+3. A consulta devolve as colunas `product_id` (modelo do produto, igual ao modelo do SKU do Mercado Livre), `qty_start` e `qty_end` (faixa de peças da cotação), `price` (custo por peça) e `created_at` (data da cotação). O painel usa, para cada venda, a cotação mais recente até a data da venda cuja faixa contém as peças vendidas.
 
-4. O `product_id` precisa ser **igual** ao modelo do SKU do Mercado Livre (ex.: `BLA68`), com letras maiúsculas e sem espaços sobrando. Alguns campos do SQL Server guardam espaços no final (`char(n)`) ou misturam maiúsculas e minúsculas, e aí o custo deixa de casar em silêncio. Por isso o exemplo usa `UPPER(LTRIM(RTRIM(...)))`: mantenha isso.
+4. O `product_id` precisa ser **igual** ao modelo do SKU do Mercado Livre (ex.: `BLA68`), com letras maiúsculas e sem espaços sobrando. Alguns campos do SQL Server guardam espaços no final (`char(n)`) ou misturam maiúsculas e minúsculas, e aí o custo deixa de casar em silêncio. Por isso a view usa `UPPER(LTRIM(RTRIM(...)))`: mantenha isso.
 5. **Proteção contra consulta vazia:** se a consulta devolver 0 linhas, o gateway **não apaga** os custos que já estão no painel: ele registra erro ("consulta devolveu 0 linhas; dados anteriores mantidos"). Se um dia o resultado vazio for esperado, acrescente `allow_empty = true` no `[[datasets]]` do `config.toml`.
 6. **Tempo limite da consulta:** cada consulta ao ERP pode levar até 600 segundos (10 min). Para mudar, acrescente em `[source]` a linha `query_timeout_seconds = 300` (número de segundos, maior que 0).
 

@@ -17,7 +17,8 @@ const one = async (q, p = []) => (await db.query(q, p)).rows[0];
 await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0002_marketplaces.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0003_regras_v1.sql`, 'utf8'));
-console.log('Migrations 0002 + 0003 aplicadas');
+await db.exec(readFileSync(`${repo}/supabase/migrations/0006_custo_por_cotacao.sql`, 'utf8'));
+console.log('Migrations 0002 + 0003 + 0006 aplicadas');
 
 // ---------------- Custos por faixa ----------------
 await db.exec(`
@@ -34,16 +35,7 @@ insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, e
  ('TIE1', 1, 100, 1.50, '2026-02-01', null),
  ('TIE1', 1, 100, 1.20, '2026-02-01', null);
 `);
-const cost = (m, d, u) => one(`select price::float as price, flag from analytics.resolve_unit_cost($1, $2::timestamptz, $3)`, [m, d, u]);
-eq('faixa que contém (10 un, mar)', await cost('BLA68', '2026-03-01', 10), { price: 4, flag: null });
-eq('acima da última (120 un)', await cost('BLA68', '2026-03-01', 120), { price: 3, flag: null });
-eq('faixa vencida substituída (5 un, jul)', await cost('BLA68', '2026-07-01', 5), { price: 5.5, flag: null });
-eq('faixa antiga ainda vale (5 un, mar)', await cost('BLA68', '2026-03-01', 5), { price: 5, flag: null });
-eq('buraco entre faixas -> abaixo (15 un)', await cost('GAP1', '2026-03-01', 15), { price: 2, flag: null });
-eq('abaixo da primeira (3 un)', await cost('LOW1', '2026-03-01', 3), { price: 7, flag: null });
-eq('sem faixa na data -> faixa_atual', await cost('NEW1', '2026-01-15', 5), { price: 9, flag: 'faixa_atual' });
-eq('modelo sem faixa -> sem_custo', await cost('XXX', '2026-03-01', 5), { price: 0, flag: 'sem_custo' });
-eq('empate: mais recente, depois maior preço', await cost('TIE1', '2026-03-01', 5), { price: 1.5, flag: null });
+// A regra de escolha da cotação é testada em custo-cotacao.test.mjs (migration 0006).
 
 // ---------------- Pedidos ----------------
 await db.exec(`

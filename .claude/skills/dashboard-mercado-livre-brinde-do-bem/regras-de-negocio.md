@@ -40,14 +40,21 @@ Data da **aprovação do pagamento** (`date_closed`; se faltar, `date_created`),
 - **Vendas brutas** = preço × qtd de pago + cancelado + devolvido (sem divididos). Qtd de vendas e unidades seguem a mesma regra.
 - **Vendas líquidas (receita)** = só pagos. É a base da margem.
 
-## Custo do produto (tabela de faixas)
-Colunas: `productId` (modelo), `qtyStart`, `qtyEnd`, `price` (por unidade), `createdAt`, `expiredAt` (opcional). Na V1 vinha de `custos.csv` (separador `;` ou `,`, decimal com vírgula, datas ISO ou dd/mm/aaaa); no projeto atual virá do ERP pelo gateway.
+## Custo do produto (cotação de compra) — substitui a regra de faixas com validade da V1
+Origem: tabela `Cotacoes` do ERP (banco NewFord, SQL Server 2008), via view `painel.faixas_custo` → gateway → `erp.cost_tiers`. Definido com o dono em 11/2026:
+- O Brinde do Bem **compra do fornecedor a cada venda**, então a faixa é escolhida pelas **peças do pedido** (kit × quantidade).
+- Só o **fornecedor padrão** (`Cotacoes.IdFornecedor = Produtos.Id_FornecedorPadrao`); preço > 0 (preços baixos como 0,10 são válidos); sem personalização.
+- `Produtos.Referencia` = modelo do SKU; o custo é o mesmo para todas as cores.
+- Dois tipos de linha na `Cotacoes`: tabela do fornecedor (faixas `Qtd..Qtd_Fin`, mesmo dia, `Validade` preenchida) e cotação pontual (`Qtd = Qtd_Fin`, `Validade = 1900`). Linhas antigas sem `Qtd_Fin` → faixa de uma quantidade. `Validade`, `IdStatus`, IPI/ST/Frete não são usados.
 
-- **Faixa válida**: `createdAt <= data do pedido` e (`expiredAt` vazio **ou** data do pedido < `expiredAt`).
-- Entre as válidas, vale a que contém as unidades. Acima da última → última; abaixo da primeira → primeira; num buraco → faixa imediatamente abaixo. Empate → cadastro mais recente, depois maior preço.
-- **Sem faixa válida na data** → usar faixas com `expiredAt` vazio (vigentes hoje) e alertar `faixa_atual`.
-- **Modelo sem nenhuma faixa** → custo 0 e alerta `sem_custo`.
-- Custo do produto = preço da faixa × unidades. **Só pedidos pagos têm custo.**
+Regra (`analytics.resolve_unit_cost`, migration 0006), N peças na data D, datas em Brasília:
+1. Cotações até D cuja faixa contém N → a mais recente (empate no horário → maior preço).
+2. Nenhuma contém N → a cotação mais recente até D; no mesmo dia, a faixa mais próxima de N.
+3. Nenhuma cotação até D → a primeira depois de D, alerta `faixa_atual`.
+4. Modelo sem cotação → custo 0, alerta `sem_custo`. Não há alerta de "custo antigo" (o dono não quer).
+- `expired_at` não é usado. Custo do produto = preço × peças. **Só pedidos pagos têm custo.**
+- Exemplos reais BLA68: 12 peças em 15/10/2026 → R$ 4,14 (tabela 19/08, faixa 11–2549); 10 peças → R$ 4,18; 30 peças em 01/03/2026 → R$ 4,90 (tabela 12/02, faixa 1–254).
+- Próximo passo planejado: custo real pela NF de entrada (XML), com a cotação como reserva.
 
 ## Custos do Mercado Livre (fatura)
 | Categoria | Códigos |

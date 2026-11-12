@@ -16,26 +16,48 @@ drop function if exists analytics.dash_itens(text, date, date);
 drop function if exists analytics.dash_resumo(text, date, date);
 drop function if exists analytics.dash_serie(text, date, date, text);
 drop function if exists analytics.dash_custos_periodo(text, date, date);
+drop function if exists analytics.dash_ads_periodo(text, date, date);
 drop view if exists analytics.dash_pedidos_base;
+drop function if exists analytics.dash_pedidos_base();
 
 -- ---------------------------------------------------------------------
--- Pedidos com canal, imposto e embalagem (vigencia por data da venda)
+-- Pedidos com canal, imposto e embalagem (vigencia por data da venda).
+-- E uma FUNCAO (nao view) de proposito: reaplicar a 0003/0007 recria ml_pedidos com
+-- "drop ... cascade", o que apagaria uma view dependente e derrubaria o dashboard.
+-- Sem a permissao 'custos': custo do produto, alerta, imposto e embalagem voltam nulos.
 -- ---------------------------------------------------------------------
-create view analytics.dash_pedidos_base with (security_invoker = true) as
-select p.*,
-       'mercadolivre'::text as channel,
-       case when p.classe = 'pago' then p.receita * coalesce(pc.imposto_pct, 0) / 100 else 0 end as imposto,
-       case when p.classe = 'pago' then coalesce(pc.embalagem_pedido, 0) + coalesce(pc.embalagem_peca, 0) * p.unidades
-            else 0 end as embalagem
-  from analytics.ml_pedidos p
-  left join lateral (
-    select c.imposto_pct, c.embalagem_pedido, c.embalagem_peca
-      from core.parametros_custo c
-     where c.channel = 'mercadolivre' and c.vigente_desde <= p.data_venda
-     order by c.vigente_desde desc
-     limit 1
-  ) pc on true
- where core.can_see_channel('mercadolivre');
+create function analytics.dash_pedidos_base()
+returns table (
+  order_id text, classe text, sale_ts timestamptz, data_venda date, sku text, sku_anuncio text,
+  qtd integer, unidades integer, valor_venda numeric, receita numeric,
+  comissao numeric, frete numeric, parcelamento numeric, product_ads numeric, seguidores numeric,
+  estornos numeric, difal numeric, outras numeric, custo_produto numeric, alerta_custo text,
+  channel text, imposto numeric, embalagem numeric
+)
+language sql stable security invoker set search_path = '' as $$
+  select p.order_id::text, p.classe::text, p.sale_ts::timestamptz, p.data_venda::date, p.sku::text, p.sku_anuncio::text,
+         p.qtd::integer, p.unidades::integer, p.valor_venda::numeric, p.receita::numeric,
+         p.comissao::numeric, p.frete::numeric, p.parcelamento::numeric, p.product_ads::numeric, p.seguidores::numeric,
+         p.estornos::numeric, p.difal::numeric, p.outras::numeric,
+         case when v.ve then p.custo_produto::numeric end,
+         case when v.ve then p.alerta_custo::text end,
+         'mercadolivre'::text,
+         case when not v.ve then null
+              when p.classe = 'pago' then p.receita * coalesce(pc.imposto_pct, 0) / 100 else 0 end,
+         case when not v.ve then null
+              when p.classe = 'pago' then coalesce(pc.embalagem_pedido, 0) + coalesce(pc.embalagem_peca, 0) * p.unidades
+              else 0 end
+    from analytics.ml_pedidos p
+   cross join (select core.has_perm('custos') as ve) v
+    left join lateral (
+      select c.imposto_pct, c.embalagem_pedido, c.embalagem_peca
+        from core.parametros_custo c
+       where c.channel = 'mercadolivre' and c.vigente_desde <= p.data_venda
+       order by c.vigente_desde desc
+       limit 1
+    ) pc on true
+   where core.can_see_channel('mercadolivre')
+$$;
 
 -- ---------------------------------------------------------------------
 -- Custos do periodo sem pedido (fatura) + Product Ads da API
@@ -64,6 +86,29 @@ language sql stable security invoker set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------
+-- Product Ads do periodo para QUALQUER perfil que veja o canal.
+-- A fatura do ML so e legivel por quem ve custos (RLS da 0003); o investimento em Ads,
+-- porem, aparece para todos na Visao Geral (cartao Ads/TACOS). Esta funcao roda com os
+-- direitos do dono e devolve so o total agregado: fatura ligada a pedidos do periodo
+-- (pela data da venda) + fatura sem pedido antes da API + Ads da API.
+-- ---------------------------------------------------------------------
+create function analytics.dash_ads_periodo(p_canal text, p_de date, p_ate date)
+returns numeric
+language sql stable security definer set search_path = '' as $$
+  select case
+    when p_canal in ('consolidado', 'mercadolivre') and core.can_see_channel('mercadolivre') then
+      coalesce((select sum(f.valor)
+                  from analytics.ml_fatura f
+                  join mkt.orders o on o.channel = 'mercadolivre' and o.order_id = f.order_id
+                 where f.categoria = 'product_ads'
+                   and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between p_de and p_ate), 0)
+      + coalesce((select sum(c.valor) from analytics.dash_custos_periodo(p_canal, p_de, p_ate) c
+                   where c.categoria = 'product_ads'), 0)
+    else 0
+  end
+$$;
+
+-- ---------------------------------------------------------------------
 -- Resumo do periodo (cartoes) - sempre 1 linha
 -- ---------------------------------------------------------------------
 create function analytics.dash_resumo(p_canal text, p_de date, p_ate date)
@@ -76,7 +121,7 @@ returns table (
 )
 language sql stable security invoker set search_path = '' as $$
   with b as (
-    select * from analytics.dash_pedidos_base
+    select * from analytics.dash_pedidos_base()
      where (p_canal = 'consolidado' or channel = p_canal) and data_venda between p_de and p_ate
   ),
   v as (
@@ -109,7 +154,8 @@ language sql stable security invoker set search_path = '' as $$
   t as (
     select v.*,
            v.comissao + c.comissao as t_comissao, v.frete + c.frete as t_frete,
-           v.parcelamento + c.parcelamento as t_parcelamento, v.product_ads + c.product_ads as t_product_ads,
+           v.parcelamento + c.parcelamento as t_parcelamento,
+           analytics.dash_ads_periodo(p_canal, p_de, p_ate) as t_product_ads,
            v.seguidores + c.seguidores as t_seguidores, v.estornos + c.estornos as t_estornos,
            v.difal + c.difal as t_difal, v.outras + c.outras as t_outras,
            core.has_perm('custos') as ve_custos
@@ -153,7 +199,7 @@ language sql stable security invoker set search_path = '' as $$
            sum(b.valor_venda) filter (where b.classe in ('pago', 'cancelado', 'devolvido')) as vendas_brutas,
            count(*) filter (where b.classe in ('pago', 'cancelado', 'devolvido'))::integer as pedidos,
            sum(b.receita) as receita
-      from analytics.dash_pedidos_base b
+      from analytics.dash_pedidos_base() b
      where (p_canal = 'consolidado' or b.channel = p_canal) and b.data_venda between p_de and p_ate
      group by 1
   )
@@ -174,11 +220,11 @@ language sql stable security invoker set search_path = '' as $$
   select b.order_id, b.classe, r.modelo, r.sku, oi.kit_units, oi.quantity,
          oi.unit_price * oi.quantity,
          case when b.classe = 'pago' then oi.unit_price * oi.quantity else 0 end,
-         case when b.classe = 'pago' then coalesce(c.price, 0) * oi.units else 0 end,
+         case when not v.ve then null when b.classe = 'pago' then coalesce(c.price, 0) * oi.units else 0 end,
          w.peso * (b.comissao + b.frete + b.parcelamento + b.product_ads + b.seguidores + b.estornos + b.difal + b.outras),
          w.peso * (b.imposto + b.embalagem),
-         (b.classe = 'pago' and c.flag = 'sem_custo')
-    from analytics.dash_pedidos_base b
+         case when v.ve then (b.classe = 'pago' and c.flag = 'sem_custo') end
+    from analytics.dash_pedidos_base() b
     join mkt.order_items oi on oi.channel = b.channel and oi.order_id = b.order_id
     cross join lateral analytics.ref_erp(oi.sku, oi.modelo, oi.cor, b.sale_ts) r
     left join lateral analytics.resolve_unit_cost(r.modelo, b.sale_ts, oi.units) c on true
@@ -187,6 +233,7 @@ language sql stable security invoker set search_path = '' as $$
                   else 1.0 / (select count(*) from mkt.order_items x where x.channel = b.channel and x.order_id = b.order_id)
              end as peso
     ) w
+   cross join (select core.has_perm('custos') as ve) v
    where (p_canal = 'consolidado' or b.channel = p_canal) and b.data_venda between p_de and p_ate
 $$;
 
@@ -306,7 +353,7 @@ language sql stable security invoker set search_path = '' as $$
   select b.order_id, b.data_venda, b.sku, b.sku_anuncio, b.qtd, b.valor_venda, b.classe,
          case when v.ve then b.custo_produto end,
          case when v.ve then b.alerta_custo end
-    from analytics.dash_pedidos_base b
+    from analytics.dash_pedidos_base() b
    cross join (select core.has_perm('custos') as ve) v
    where (p_canal = 'consolidado' or b.channel = p_canal)
      and b.data_venda between p_de and p_ate
@@ -318,7 +365,8 @@ language sql stable security invoker set search_path = '' as $$
    order by b.data_venda desc, b.order_id
 $$;
 
-grant select on analytics.dash_pedidos_base to authenticated;
+grant execute on function analytics.dash_pedidos_base() to authenticated;
+grant execute on function analytics.dash_ads_periodo(text, date, date) to authenticated;
 grant execute on function analytics.dash_custos_periodo(text, date, date),
                           analytics.dash_resumo(text, date, date),
                           analytics.dash_serie(text, date, date, text),

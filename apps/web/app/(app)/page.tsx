@@ -3,6 +3,7 @@ import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indica
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { PainelAtencao } from '@/components/painel-atencao';
+import { canalMetaVisaoGeral } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, num, pct, variacao } from '@/lib/formato';
 import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -27,7 +28,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
       dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, 'dia'),
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.sincronizacoes(),
-      perms.has('metas') ? dash.metas(canal, Number(hoje.slice(0, 4))) : Promise.resolve([]),
+      perms.has('metas') ? dash.metas(canalMetaVisaoGeral(canal), Number(hoje.slice(0, 4))) : Promise.resolve([]),
     ]);
     dados = { atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas };
   } catch (e) {

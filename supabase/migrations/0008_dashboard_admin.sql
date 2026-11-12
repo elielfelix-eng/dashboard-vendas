@@ -80,7 +80,8 @@ on conflict (channel, vigente_desde) do nothing;
 alter table core.parametros_custo enable row level security;
 drop policy if exists "parametros: leitura" on core.parametros_custo;
 drop policy if exists "parametros: admin altera" on core.parametros_custo;
-create policy "parametros: leitura" on core.parametros_custo for select to authenticated using (true);
+create policy "parametros: leitura" on core.parametros_custo for select to authenticated
+  using (core.has_perm('custos') or core.has_perm('configuracoes'));
 create policy "parametros: admin altera" on core.parametros_custo for all to authenticated
   using (core.my_role() = 'admin') with check (core.my_role() = 'admin');
 grant select, insert, update, delete on core.parametros_custo to authenticated;

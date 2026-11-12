@@ -25,6 +25,9 @@ declare
   v_proj   numeric;
   v_cresc  numeric;
   v_edit   boolean;
+  v_meses  date[] := '{}';
+  v_vals   numeric[] := '{}';
+  v_i      integer;
 begin
   if not core.has_perm('metas') then
     return;
@@ -49,6 +52,16 @@ begin
     return;
   end if;
 
+  -- Receita mensal calculada UMA vez (a base de pedidos e cara); so canais com vendas no painel.
+  if p_canal = 'mercadolivre' then
+    select coalesce(array_agg(x.m order by x.m), '{}'), coalesce(array_agg(x.r order by x.m), '{}')
+      into v_meses, v_vals
+      from (select date_trunc('month', b.data_venda)::date as m, sum(b.receita) as r
+              from analytics.dash_pedidos_base() b
+             where b.channel = p_canal and b.data_venda >= v_inicio and b.data_venda < (v_atual + interval '1 month')
+             group by 1) x;
+  end if;
+
   v_m := v_inicio;
   while v_m <= v_fim loop
     mes := v_m;
@@ -56,8 +69,8 @@ begin
               where mt.channel = p_canal and mt.ano = extract(year from v_m) and mt.mes = extract(month from v_m));
 
     if v_m <= v_atual then
-      realizado := coalesce((select sum(b.receita) from analytics.dash_pedidos_base b
-                              where b.channel = p_canal and date_trunc('month', b.data_venda) = v_m), 0);
+      v_i := array_position(v_meses, v_m);
+      realizado := coalesce(case when v_i is null then 0 else v_vals[v_i] end, 0);
     else
       realizado := null;
     end if;

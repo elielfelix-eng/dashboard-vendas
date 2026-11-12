@@ -179,5 +179,23 @@ eq('comercial: vendas visiveis', mo.map((m) => m.vendas_brutas), [70, 210]);
 eq('comercial: pedidos sem custo', (await rows(`select distinct custo_produto from analytics.dash_pedidos('mercadolivre','2026-10-01','2026-10-31', null)`)).map((x) => x.custo_produto), [null]);
 await perfil('admin');
 
+// ---------------- Revisao final: RLS de verdade (papel authenticated, nao superusuario) ----------------
+await db.exec(`grant usage on schema core to authenticated`);
+await perfil('comercial');
+await db.exec(`set role authenticated`);
+const comRls = (await resumo('mercadolivre', '2026-10-01', '2026-10-31'))[0];
+eq('I2: comercial ve o mesmo Product Ads do admin (fatura + API)', comRls.product_ads, 100);
+eq('I5: imposto/embalagem por item mascarados para comercial',
+  (await rows(`select distinct impemb from analytics.dash_itens('mercadolivre','2026-10-01','2026-10-31')`)).map((x) => x.impemb), [null]);
+eq('I5: parametros de custo nao legiveis por comercial', (await rows(`select count(*)::int as n from core.parametros_custo`))[0].n, 0);
+await db.exec(`reset role`);
+await perfil('admin');
+
+// ---------------- Revisao final: reaplicar a 0007 nao derruba o dashboard ----------------
+await db.exec(mig('0007_de_para_modelo.sql'));
+let depois07 = null;
+try { depois07 = (await resumo('mercadolivre', '2026-10-01', '2026-10-31'))[0].vendas_brutas; } catch (e) { depois07 = e.message; }
+eq('I1: dash_resumo funciona depois de reaplicar a 0007', depois07, 280); // outubro com o pedido M1 (70 + 210)
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

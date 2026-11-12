@@ -106,14 +106,22 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 - [x] Fase 0 — contas, migrations, deploy, ML conectado, 1ª sincronização OK
 - [ ] Validar números da 1ª carga contra outubro/2026 e confirmar dados de Ads
 - [x] Fase 2b — regras da V1 em código e testadas (falta aplicar 0003 e conferir com outubro/2026)
-- [ ] Fase 3 — Gateway ERP (ver seção abaixo)
+- [x] Fase 3 — Gateway ERP implementado e testado (falta instalar na máquina da rede, definir a consulta real das faixas e conferir em `core.sync_runs`)
 - [ ] Fase 4 — Páginas de KPI (Vendas, Rentabilidade, Ads com ACOS de equilíbrio, Novos Produtos/simulador)
 - [ ] Fase 5 — Bitrix24 (webhook somente leitura, usuário técnico)
 - [ ] Fase 6 — Shopee (aguarda aprovação no Open Platform)
 - [ ] Fase 7 — Healthchecks.io, backup semanal criptografado
 
-## ERP (SQL Server) — a preencher
-O ERP é próprio (SQL Server), ligado 24h. O gateway roda em **outra máquina da rede** (estilo Power BI Gateway): Python + pyodbc, serviço do Windows, usuário SQL somente leitura sobre views criadas para o painel, envio só de saída para o schema `erp` com o papel restrito `gateway_writer`. Horários de envio: 07:45, 12:45 e 16:45.
+## ERP (SQL Server) — gateway
+O ERP é próprio (SQL Server), ligado 24h. O gateway roda em **outra máquina Windows da rede** (estilo Power BI Gateway): Python + pyodbc empacotado em `BrindeGateway.exe` (PyInstaller), tarefa agendada **BrindeGateway** como SYSTEM às **07:45, 12:45 e 16:45** (com "executar se perdeu o horário", limite 1 h). Usa um usuário SQL somente leitura (`gateway_leitura`, SELECT no schema `painel`) e envia só de saída para o schema `erp` do Supabase com o papel restrito `gateway_writer` (migration `supabase/migrations/0005_gateway.sql`; pooler porta 6543, usuário `gateway_writer.<project_ref>`, `sslmode=require`).
+
+Como funciona: `config.toml` define `[source]`, `[target]` e `[[datasets]]` (nome, `target_table` `erp.<tabela>`, `mode` `replace_source`|`replace_all`, `query` ou `query_file` relativo ao config). Cada dataset é apagado e reinserido **na mesma transação** (em `replace_source` só as linhas `source='erp'`; `replace_all` é recusado em tabelas com `source`). Cada execução registra `core.sync_runs` (`source='erp'`). Segredos (`sqlserver`, `supabase`) ficam em `secrets.json` protegido por DPAPI (escopo máquina).
+
+Comandos: `BrindeGateway.exe run|test|set-secret NOME [--config caminho]`. Home: `%PROGRAMDATA%\BrindeGateway` (`config.toml`, `secrets.json`, `logs\gateway.log`; override `BRINDE_GATEWAY_HOME`). Saída: 0 ok, 1 falha de dataset/erro inesperado, 2 sem acesso ao Supabase/config inválida.
+
+Arquivos (`gateway/`): `src/brinde_gateway/` (código), `tests/`, `build.ps1`, `install.ps1`, `uninstall.ps1`, `config.exemplo.toml`, `consultas/faixas_custo.exemplo.sql` (aliases `product_id, qty_start, qty_end, price, created_at, expired_at`), `sqlserver/usuario_leitura.sql`, `LEIAME.md` (guia para o dono). Testes: `gateway/.venv/Scripts/python.exe -m pytest gateway/tests -q` e `npm run test:sql`; CI no job `gateway`.
+
+Opções do `config.toml`: por dataset, `allow_empty` (padrão `false`: consulta com 0 linhas dá erro e mantém os dados anteriores, em vez de apagar tudo); em `[source]`, `query_timeout_seconds` (padrão 600; vale para cada consulta, o `timeout` de 30 s só cobre o login). No início de cada execução o gateway marca como `error` ("execucao interrompida (sem finalizacao)") as linhas `core.sync_runs` `source='erp'` ainda `running` há mais de 2 h. O `product_id` da consulta deve vir como `UPPER(LTRIM(RTRIM(...)))` (char(n) e caixa quebram o casamento com o modelo do SKU). **Nova tabela `erp.*` com RLS ligado precisa de policy própria para `gateway_writer`** (os grants padrão não bastam) — ver `0005_gateway.sql`.
 
 De-para ML × ERP: o **modelo** do SKU (ex.: `BLA68` em `BLA68-AMA-K0010-V1`) é o `productId` da tabela de custos. Custos são **por faixa de quantidade com vigência** (`qtyStart`, `qtyEnd`, `price`, `createdAt`, `expiredAt`) — a view do ERP precisa entregar esse formato.
 

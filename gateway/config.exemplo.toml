@@ -1,0 +1,32 @@
+# Configuracao do Gateway do ERP. Copie para C:\ProgramData\BrindeGateway\config.toml e ajuste.
+# NUNCA escreva senhas aqui: elas ficam no cofre (comandos "set-secret sqlserver" e "set-secret supabase").
+
+[source]
+# Conexao ODBC com o SQL Server do ERP (sem senha; a senha vem do segredo "sqlserver").
+# Troque o driver (17 ou 18), o servidor e o banco.
+connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=NOME-OU-IP-DO-SERVIDOR,1433;Database=NOME_DO_BANCO;UID=gateway_leitura;TrustServerCertificate=yes"
+# Opcional: tempo maximo (segundos) de cada consulta ao ERP. Padrao: 600.
+# query_timeout_seconds = 600
+# Alternativa: odbc_dsn = "NomeDoDSN"   (use so um entre connection_string e odbc_dsn)
+
+[target]
+# Supabase, conexao pelo pooler. O usuario e gateway_writer.<ref do projeto>.
+host = "aws-0-REGIAO.pooler.supabase.com"
+port = 6543
+dbname = "postgres"
+user = "gateway_writer.REF_DO_PROJETO"
+sslmode = "require"
+
+# Opcional: aviso de "o gateway esta vivo" (ex.: Healthchecks.io).
+# [healthcheck]
+# url = "https://hc-ping.com/SEU-CODIGO"
+
+[[datasets]]
+name = "faixas_custo"
+target_table = "erp.cost_tiers"
+mode = "replace_source"
+# Caminho relativo a pasta deste config.toml.
+query_file = "consultas/faixas_custo.sql"
+# Opcional: se a consulta devolver 0 linhas, o gateway NAO apaga os dados anteriores (da erro).
+# Coloque true so se um resultado vazio for esperado (isso esvazia as linhas do ERP no painel).
+# allow_empty = false

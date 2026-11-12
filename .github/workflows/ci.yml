@@ -33,3 +33,28 @@ jobs:
       - run: npm run typecheck
       - name: Testar regras de negocio (SQL)
         run: npm run test:sql
+
+  gateway:
+    name: Testar o gateway do ERP (Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependencias do gateway
+        run: |
+          python -m pip install --upgrade pip
+          pip install "psycopg[binary]" pyodbc pytest
+          python -c "import pyodbc" || {
+            sudo apt-get update && sudo apt-get install -y unixodbc
+            python -c "import pyodbc"
+          }
+      - name: Testes do gateway
+        run: python -m pytest gateway/tests -q

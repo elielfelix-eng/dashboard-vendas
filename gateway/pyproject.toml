@@ -1,0 +1,16 @@
+[project]
+name = "brinde-gateway"
+version = "0.1.0"
+description = "Gateway que le consultas do ERP (SQL Server) e grava no Supabase (schema erp)"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "pyodbc>=5",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

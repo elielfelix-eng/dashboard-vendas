@@ -15,6 +15,7 @@ out/
 gateway/.venv/
 gateway/build/
 gateway/dist/
+gateway/*.spec
 gateway/config.local.*
 __pycache__/
 

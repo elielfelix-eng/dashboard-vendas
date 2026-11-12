@@ -78,6 +78,9 @@ Cadastre-se em https://open.shopee.com como vendedor/desenvolvedor e solicite um
 2. Clique em **Conectar Mercado Livre** e autorize.
 3. No GitHub: *Actions > Sincronizacao de dados > Run workflow*. A primeira carga busca 12 meses.
 
+## Fase 3 — Gateway do ERP
+Um programa pequeno, instalado numa máquina Windows da rede, lê o SQL Server do ERP (somente leitura) às 07:45, 12:45 e 16:45 e envia os dados para o Supabase (schema `erp`), começando pelas faixas de custo dos produtos. Só faz conexões de saída. O passo a passo de instalação está em [`gateway/LEIAME.md`](gateway/LEIAME.md).
+
 ## Segurança — resumo
 - Tokens do Mercado Livre ficam **criptografados** (Supabase Vault) e não podem ser lidos pelos usuários do site.
 - Senhas e chaves ficam só nos cofres do GitHub e da Vercel. O arquivo `.env` **nunca** vai para o GitHub.

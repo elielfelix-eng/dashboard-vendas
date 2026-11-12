@@ -114,5 +114,70 @@ eq('serie diaria: dia 10 e dia 11 (dividido nao conta)', dia.slice(0, 2),
 eq('serie mensal', (await serie('2026-09-01', '2026-10-31', 'mes')).map((x) => [x.periodo, x.vendas_brutas]), [['2026-09-01', 100], ['2026-10-01', 180]]);
 eq('serie semanal comeca na segunda', (await serie('2026-10-10', '2026-10-14', 'semana')).map((x) => x.periodo), ['2026-10-05', '2026-10-12']);
 
+// ---------------- Task 3: modelos, ABC, SKUs, pedidos ----------------
+const MODELOS = `select modelo, pedidos, unidades, vendas_brutas::float, ticket_medio::float, pct_cancel_devol::float, receita::float,
+  custo_produto::float, tarifas_frete::float, custos_rateados::float, imposto_embalagem::float, contribuicao::float,
+  contribuicao_pct::float, abc, sem_custo from analytics.dash_modelos($1, $2::date, $3::date) order by modelo`;
+const modelos = (c, de, ate) => rows(MODELOS, [c, de, ate]);
+
+let mo = await modelos('mercadolivre', '2026-10-01', '2026-10-31');
+eq('outubro: so GFT10', mo.map((m) => [m.modelo, m.vendas_brutas, m.receita, m.pedidos]), [['GFT10', 180, 60, 4]]);
+const totalPeriodo = (await rows(`select coalesce(sum(valor), 0)::float as v from analytics.dash_custos_periodo('mercadolivre', '2026-10-01', '2026-10-31')`))[0].v;
+eq('rateio de um modelo = todo o custo do periodo', mo[0].custos_rateados, totalPeriodo);
+eq('contribuicao do modelo = margem do resumo', mo[0].contribuicao, -65.2);
+
+// Pedido com 2 modelos: tarifas do pedido repartidas pelo valor de cada item
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','M1','paid','2026-10-20 13:00+00','2026-10-20 13:00+00', 100, '{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price, sale_fee) values
+ ('mercadolivre','M1',1,'MLB1','BLA68-AMA','x',1,70,0), ('mercadolivre','M1',2,'MLB2','GFT10-AZU','y',1,30,0);
+insert into mkt.billing_details (period_key, detail_id, created_at, detail_type, code, amount, order_id) values
+ ('2026-10','m1c','2026-10-21 10:00+00','CHARGE','CVVML', 10.00, 'M1');
+`);
+mo = await modelos('mercadolivre', '2026-10-01', '2026-10-31');
+eq('pedido com 2 modelos: vendas por item', mo.map((m) => [m.modelo, m.vendas_brutas, m.pedidos]), [['BLA68', 70, 1], ['GFT10', 210, 5]]);
+eq('pedido com 2 modelos: tarifas repartidas (GFT10 inclui as do pedido 2)', mo.map((m) => m.tarifas_frete), [7, 20.2]);
+eq('custo do BLA68 (1 peca x R$ 4)', mo[0].custo_produto, 4);
+const somaRateio = mo.reduce((s, m) => s + m.custos_rateados, 0);
+eq('soma do rateio = custo do periodo', Math.round(somaRateio * 100) / 100, totalPeriodo);
+eq('rateio pela receita (70 de 160)', Math.round(mo[0].custos_rateados * 100) / 100, Math.round(totalPeriodo * 70 / 160 * 100) / 100);
+const vbTotal = (await resumo('mercadolivre', '2026-10-01', '2026-10-31'))[0];
+eq('soma das vendas brutas dos modelos = resumo', mo.reduce((s, m) => s + m.vendas_brutas, 0), vbTotal.vendas_brutas);
+eq('soma das contribuicoes = margem do resumo', Math.round(mo.reduce((s, m) => s + m.contribuicao, 0) * 100) / 100, vbTotal.margem_contribuicao);
+
+// Curva ABC (cenario em 2025, sem custos de periodo)
+await db.exec(`
+insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, source) values
+ ('Z1', 1, 10, 20, '2025-01-01', 'erp'), ('Z2', 1, 10, 5, '2025-01-01', 'erp'),
+ ('Z3', 1, 10, 5, '2025-01-01', 'erp'), ('Z4', 1, 10, 20, '2025-01-01', 'erp');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','Z1','paid','2025-03-10 13:00+00','2025-03-10 13:00+00', 100, '{}'),
+ ('mercadolivre','Z2','paid','2025-03-10 13:00+00','2025-03-10 13:00+00', 20, '{}'),
+ ('mercadolivre','Z3','paid','2025-03-10 13:00+00','2025-03-10 13:00+00', 10, '{}'),
+ ('mercadolivre','Z4','paid','2025-03-10 13:00+00','2025-03-10 13:00+00', 10, '{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price, sale_fee) values
+ ('mercadolivre','Z1',1,'Z','Z1-AZU','z',1,100,0), ('mercadolivre','Z2',1,'Z','Z2-AZU','z',1,20,0),
+ ('mercadolivre','Z3',1,'Z','Z3-AZU','z',1,10,0), ('mercadolivre','Z4',1,'Z','Z4-AZU','z',1,10,0);
+`);
+eq('curva ABC por lucro', (await modelos('mercadolivre', '2025-03-01', '2025-03-31')).map((m) => [m.modelo, m.contribuicao, m.abc]),
+  [['Z1', 80, 'A'], ['Z2', 15, 'B'], ['Z3', 5, 'C'], ['Z4', -10, 'prejuizo']]);
+eq('modelo so com cancelados: sem curva', (await modelos('mercadolivre', '2026-10-13', '2026-10-13')).map((m) => [m.modelo, m.receita, m.abc]),
+  [['GFT10', 0, null]]);
+
+eq('SKUs do GFT10', (await rows(`select sku, kit, pedidos, unidades, vendas_brutas::float, receita::float from analytics.dash_skus('mercadolivre','2026-10-01','2026-10-31','GFT10')`)),
+  [{ sku: 'GFT10-AZU', kit: null, pedidos: 5, unidades: 7, vendas_brutas: 210, receita: 90 }]);
+const ped = await rows(`select order_id, classe from analytics.dash_pedidos('mercadolivre','2026-10-01','2026-10-31','GFT10')`);
+eq('pedidos do GFT10 (inclui dividido e o pedido com 2 modelos)', ped.map((p) => `${p.order_id}:${p.classe}`).sort(),
+  ['2:pago', '3:dividido', '4:devolvido', '5:cancelado', '6:devolvido', 'M1:pago']);
+eq('pedidos sem filtro de modelo', (await rows(`select count(*)::int as n from analytics.dash_pedidos('mercadolivre','2026-10-01','2026-10-31', null)`))[0].n, 6);
+
+await perfil('comercial');
+mo = await modelos('mercadolivre', '2026-10-01', '2026-10-31');
+eq('comercial: modelos sem custo/ABC', mo.map((m) => [m.custo_produto, m.contribuicao, m.abc, m.sem_custo]), [[null, null, null, null], [null, null, null, null]]);
+eq('comercial: vendas visiveis', mo.map((m) => m.vendas_brutas), [70, 210]);
+eq('comercial: pedidos sem custo', (await rows(`select distinct custo_produto from analytics.dash_pedidos('mercadolivre','2026-10-01','2026-10-31', null)`)).map((x) => x.custo_produto), [null]);
+await perfil('admin');
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

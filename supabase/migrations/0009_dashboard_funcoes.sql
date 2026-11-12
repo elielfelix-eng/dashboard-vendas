@@ -9,6 +9,10 @@
 -- p_canal: 'consolidado' (todos os canais com dados) ou o canal ('mercadolivre', 'shopee', ...).
 -- =====================================================================
 
+drop function if exists analytics.dash_pedidos(text, date, date, text);
+drop function if exists analytics.dash_skus(text, date, date, text);
+drop function if exists analytics.dash_modelos(text, date, date);
+drop function if exists analytics.dash_itens(text, date, date);
 drop function if exists analytics.dash_resumo(text, date, date);
 drop function if exists analytics.dash_serie(text, date, date, text);
 drop function if exists analytics.dash_custos_periodo(text, date, date);
@@ -159,7 +163,166 @@ language sql stable security invoker set search_path = '' as $$
    order by e.periodo
 $$;
 
+-- ---------------------------------------------------------------------
+-- Itens vendidos com a referencia do ERP e a parte de cada item nos custos do pedido.
+-- Tarifas, imposto e embalagem do pedido sao repartidos pelo valor de cada item.
+-- ---------------------------------------------------------------------
+create function analytics.dash_itens(p_canal text, p_de date, p_ate date)
+returns table (order_id text, classe text, modelo text, sku text, kit integer, qtd integer,
+               valor_item numeric, receita numeric, custo numeric, tarifas numeric, impemb numeric, sem_custo boolean)
+language sql stable security invoker set search_path = '' as $$
+  select b.order_id, b.classe, r.modelo, r.sku, oi.kit_units, oi.quantity,
+         oi.unit_price * oi.quantity,
+         case when b.classe = 'pago' then oi.unit_price * oi.quantity else 0 end,
+         case when b.classe = 'pago' then coalesce(c.price, 0) * oi.units else 0 end,
+         w.peso * (b.comissao + b.frete + b.parcelamento + b.product_ads + b.seguidores + b.estornos + b.difal + b.outras),
+         w.peso * (b.imposto + b.embalagem),
+         (b.classe = 'pago' and c.flag = 'sem_custo')
+    from analytics.dash_pedidos_base b
+    join mkt.order_items oi on oi.channel = b.channel and oi.order_id = b.order_id
+    cross join lateral analytics.ref_erp(oi.sku, oi.modelo, oi.cor, b.sale_ts) r
+    left join lateral analytics.resolve_unit_cost(r.modelo, b.sale_ts, oi.units) c on true
+    cross join lateral (
+      select case when b.valor_venda > 0 then oi.unit_price * oi.quantity / b.valor_venda
+                  else 1.0 / (select count(*) from mkt.order_items x where x.channel = b.channel and x.order_id = b.order_id)
+             end as peso
+    ) w
+   where (p_canal = 'consolidado' or b.channel = p_canal) and b.data_venda between p_de and p_ate
+$$;
+
+-- ---------------------------------------------------------------------
+-- Vendas e rentabilidade por modelo, com rateio dos custos do periodo e curva ABC por lucro
+-- ABC: entre os modelos com contribuicao positiva, em ordem decrescente, o lucro acumulado
+-- ANTES do modelo < 80% -> A, < 95% -> B, senao C. Contribuicao <= 0 -> 'prejuizo'.
+-- ---------------------------------------------------------------------
+create function analytics.dash_modelos(p_canal text, p_de date, p_ate date)
+returns table (
+  modelo text, pedidos integer, unidades integer, vendas_brutas numeric, ticket_medio numeric,
+  pct_cancel_devol numeric, receita numeric, custo_produto numeric, tarifas_frete numeric,
+  custos_rateados numeric, imposto_embalagem numeric, contribuicao numeric, contribuicao_pct numeric,
+  abc text, sem_custo integer
+)
+language sql stable security invoker set search_path = '' as $$
+  with i as (
+    select * from analytics.dash_itens(p_canal, p_de, p_ate)
+  ),
+  cp as (
+    select coalesce(sum(valor), 0) as total from analytics.dash_custos_periodo(p_canal, p_de, p_ate)
+  ),
+  m as (
+    select i.modelo,
+           count(distinct i.order_id) filter (where i.classe in ('pago', 'cancelado', 'devolvido'))::integer as pedidos,
+           coalesce(sum(i.qtd) filter (where i.classe in ('pago', 'cancelado', 'devolvido')), 0)::integer as unidades,
+           coalesce(sum(i.valor_item) filter (where i.classe in ('pago', 'cancelado', 'devolvido')), 0) as vendas_brutas,
+           count(distinct i.order_id) filter (where i.classe in ('cancelado', 'devolvido'))::integer as cancel_devol,
+           sum(i.receita) as receita, sum(i.custo) as custo, sum(i.tarifas) as tarifas, sum(i.impemb) as impemb,
+           count(distinct i.order_id) filter (where i.sem_custo)::integer as sem_custo
+      from i
+     group by i.modelo
+  ),
+  c as (
+    select m.*,
+           case when t.r > 0 then cp.total * m.receita / t.r else 0 end as rateio
+      from m
+     cross join cp
+     cross join (select sum(receita) as r from m) t
+  ),
+  c2 as (
+    select c.*, c.receita - c.custo - c.tarifas - c.rateio - c.impemb as contrib from c
+  ),
+  acum as (
+    select c2.modelo,
+           coalesce(sum(c2.contrib) over (order by c2.contrib desc, c2.modelo
+                                          rows between unbounded preceding and 1 preceding), 0) as antes,
+           sum(c2.contrib) over () as total
+      from c2
+     where c2.contrib > 0 and c2.receita > 0
+  )
+  select c2.modelo, c2.pedidos, c2.unidades, c2.vendas_brutas,
+         case when c2.pedidos > 0 then round(c2.vendas_brutas / c2.pedidos, 2) else 0 end,
+         case when c2.pedidos > 0 then round(c2.cancel_devol * 100.0 / c2.pedidos, 2) else 0 end,
+         c2.receita,
+         case when v.ve then c2.custo end,
+         c2.tarifas, c2.rateio,
+         case when v.ve then c2.impemb end,
+         case when v.ve then c2.contrib end,
+         case when v.ve and c2.receita > 0 then round(c2.contrib * 100 / c2.receita, 2) end,
+         case when not v.ve or c2.receita <= 0 then null
+              when c2.contrib <= 0 then 'prejuizo'
+              when a.antes / a.total < 0.80 then 'A'
+              when a.antes / a.total < 0.95 then 'B'
+              else 'C' end,
+         case when v.ve then c2.sem_custo end
+    from c2
+    left join acum a on a.modelo = c2.modelo
+   cross join (select core.has_perm('custos') as ve) v
+   order by c2.vendas_brutas desc, c2.modelo
+$$;
+
+-- ---------------------------------------------------------------------
+-- Detalhe de um modelo por SKU (mesmo calculo, rateio pela receita do SKU no periodo)
+-- ---------------------------------------------------------------------
+create function analytics.dash_skus(p_canal text, p_de date, p_ate date, p_modelo text)
+returns table (sku text, kit integer, pedidos integer, unidades integer, vendas_brutas numeric,
+               receita numeric, custo_produto numeric, contribuicao numeric)
+language sql stable security invoker set search_path = '' as $$
+  with i as (
+    select * from analytics.dash_itens(p_canal, p_de, p_ate)
+  ),
+  cp as (
+    select coalesce(sum(valor), 0) as total from analytics.dash_custos_periodo(p_canal, p_de, p_ate)
+  ),
+  t as (
+    select sum(receita) as r from i
+  ),
+  s as (
+    select i.sku, min(i.kit) as kit,
+           count(distinct i.order_id) filter (where i.classe in ('pago', 'cancelado', 'devolvido'))::integer as pedidos,
+           coalesce(sum(i.qtd) filter (where i.classe in ('pago', 'cancelado', 'devolvido')), 0)::integer as unidades,
+           coalesce(sum(i.valor_item) filter (where i.classe in ('pago', 'cancelado', 'devolvido')), 0) as vendas_brutas,
+           sum(i.receita) as receita, sum(i.custo) as custo, sum(i.tarifas) as tarifas, sum(i.impemb) as impemb
+      from i
+     where i.modelo = p_modelo
+     group by i.sku
+  )
+  select s.sku, s.kit, s.pedidos, s.unidades, s.vendas_brutas, s.receita,
+         case when v.ve then s.custo end,
+         case when v.ve then s.receita - s.custo - s.tarifas - s.impemb
+                             - case when t.r > 0 then cp.total * s.receita / t.r else 0 end end
+    from s
+   cross join cp
+   cross join t
+   cross join (select core.has_perm('custos') as ve) v
+   order by s.vendas_brutas desc, s.sku
+$$;
+
+-- ---------------------------------------------------------------------
+-- Lista de pedidos do periodo (opcionalmente so os que tem um item do modelo)
+-- ---------------------------------------------------------------------
+create function analytics.dash_pedidos(p_canal text, p_de date, p_ate date, p_modelo text)
+returns table (order_id text, data_venda date, sku text, sku_anuncio text, qtd integer, valor_venda numeric,
+               classe text, custo_produto numeric, alerta_custo text)
+language sql stable security invoker set search_path = '' as $$
+  select b.order_id, b.data_venda, b.sku, b.sku_anuncio, b.qtd, b.valor_venda, b.classe,
+         case when v.ve then b.custo_produto end,
+         case when v.ve then b.alerta_custo end
+    from analytics.dash_pedidos_base b
+   cross join (select core.has_perm('custos') as ve) v
+   where (p_canal = 'consolidado' or b.channel = p_canal)
+     and b.data_venda between p_de and p_ate
+     and (p_modelo is null or exists (
+           select 1
+             from mkt.order_items oi
+            cross join lateral analytics.ref_erp(oi.sku, oi.modelo, oi.cor, b.sale_ts) r
+            where oi.channel = b.channel and oi.order_id = b.order_id and r.modelo = p_modelo))
+   order by b.data_venda desc, b.order_id
+$$;
+
 grant select on analytics.dash_pedidos_base to authenticated;
 grant execute on function analytics.dash_custos_periodo(text, date, date),
                           analytics.dash_resumo(text, date, date),
-                          analytics.dash_serie(text, date, date, text) to authenticated;
+                          analytics.dash_serie(text, date, date, text),
+                          analytics.dash_itens(text, date, date),
+                          analytics.dash_modelos(text, date, date),
+                          analytics.dash_skus(text, date, date, text),
+                          analytics.dash_pedidos(text, date, date, text) to authenticated;

@@ -6,7 +6,8 @@
 --   * tabela do fornecedor: faixas Qtd..Qtd_Fin cotadas no mesmo dia;
 --   * cotacao pontual: uma quantidade so (Qtd = Qtd_Fin).
 -- Linhas antigas sem Qtd_Fin viram faixa de uma quantidade so.
--- So o fornecedor padrao do produto; so preco maior que zero; sem personalizacao.
+-- So o fornecedor padrao do produto (produto sem fornecedor padrao: qualquer fornecedor);
+-- so preco maior que zero; sem personalizacao.
 -- O painel escolhe, para N pecas vendidas na data D, a cotacao mais recente ate D cuja
 -- faixa contem N (migration 0006 do Supabase).
 
@@ -27,6 +28,6 @@ JOIN dbo.Produtos AS p ON p.IdProduto = c.IdProduto
 WHERE c.Data >= '2019-01-01'
   AND c.Qtd > 0
   AND c.Valor > 0
-  AND c.IdFornecedor = p.Id_FornecedorPadrao
+  AND (p.Id_FornecedorPadrao IS NULL OR c.IdFornecedor = p.Id_FornecedorPadrao)
   AND ISNULL(c.Personalizado, 0) = 0;
 GO

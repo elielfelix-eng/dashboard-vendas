@@ -82,7 +82,8 @@ eq('de-para: SQM148 em 20/08/2026 usa BMS148', await cost('SQM148', '2026-08-20 
 eq('de-para: vale ate 12/11/2026 23h (Brasilia)', await cost('SQM148', '2026-11-12 23:00-03', 10), { price: 2.04, flag: null });
 eq('de-para: depois de 12/11/2026 volta a sem_custo', await cost('SQM148', '2026-11-13 08:00-03', 10), { price: 0, flag: 'sem_custo' });
 eq('de-para: modelo sem ligacao fica igual', (await db.query(`select analytics.modelo_erp('BLA68', now()) as m`)).rows[0], { m: 'BLA68' });
-eq('de-para: semente gravada uma vez', (await db.query(`select count(*)::int as n from map.modelo_de_para`)).rows[0], { n: 1 });
+eq('de-para: sementes gravadas uma vez', (await db.query(`select count(*)::int as n from map.modelo_de_para`)).rows[0], { n: 2 });
+eq('de-para: CMT44 -> BOB01 ate 12/11/2026', (await db.query(`select analytics.modelo_erp('CMT44', '2026-08-14 10:00-03') as m`)).rows[0], { m: 'BOB01' });
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

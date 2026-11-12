@@ -29,9 +29,12 @@ create policy "de-para: admin altera" on map.modelo_de_para for all to authentic
 grant select, insert, update, delete on map.modelo_de_para to authenticated;
 grant usage on sequence map.modelo_de_para_id_seq to authenticated;
 
--- Pedido do dono em 12/11/2026: vendas com SQM148 ate hoje sao do produto BMS148.
-insert into map.modelo_de_para (modelo_anuncio, modelo_erp, ate, obs)
-values ('SQM148', 'BMS148', '2026-11-12', 'SKU errado no anuncio; corrigido a pedido do dono')
+-- Pedidos do dono em 12/11/2026 (SKU errado no anuncio), vendas ate essa data:
+--   SQM148 -> BMS148
+--   CMT44 (CMT44-CDE-67..72, os unicos CMT44 vendidos) -> BOB01 (BOB01-PDR)
+insert into map.modelo_de_para (modelo_anuncio, modelo_erp, ate, obs) values
+  ('SQM148', 'BMS148', '2026-11-12', 'SKU errado no anuncio; corrigido a pedido do dono'),
+  ('CMT44',  'BOB01',  '2026-11-12', 'CMT44-CDE-67/68/69/70/71/72 = BOB01-PDR; corrigido a pedido do dono')
 on conflict (modelo_anuncio, ate) do nothing;
 
 -- Modelo do ERP para um modelo de anuncio numa data.

@@ -18,7 +18,8 @@ await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0002_marketplaces.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0003_regras_v1.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0006_custo_por_cotacao.sql`, 'utf8'));
-console.log('Migrations 0002 + 0003 + 0006 aplicadas');
+await db.exec(readFileSync(`${repo}/supabase/migrations/0007_de_para_modelo.sql`, 'utf8'));
+console.log('Migrations 0002 + 0003 + 0006 + 0007 aplicadas');
 
 // ---------------- Custos por faixa ----------------
 await db.exec(`

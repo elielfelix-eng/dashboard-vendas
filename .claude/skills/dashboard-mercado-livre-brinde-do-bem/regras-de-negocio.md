@@ -55,6 +55,8 @@ Regra (`analytics.resolve_unit_cost`, migration 0006), N peças na data D, datas
 - `expired_at` não é usado. Custo do produto = preço × peças. **Só pedidos pagos têm custo.**
 - Exemplos reais BLA68: 12 peças em 15/10/2026 → R$ 4,14 (tabela 19/08, faixa 11–2549); 10 peças → R$ 4,18; 30 peças em 01/03/2026 → R$ 4,90 (tabela 12/02, faixa 1–254).
 - Próximo passo planejado: custo real pela NF de entrada (XML), com a cotação como reserva.
+- **De-para de modelo** (migration 0007, `map.modelo_de_para` + `analytics.modelo_erp`): quando o modelo do SKU do anúncio não existe no ERP, o custo usa o `modelo_erp` indicado, para vendas até a data `ate` (vazio = sempre). Primeiro caso: SQM148 → BMS148 até 12/11/2026 (SKU errado no anúncio). Nas telas da Fase 4, agrupar por `analytics.modelo_erp(modelo, data)`.
+- Modelos sem custo encontrados em 11/2026: CMT44 (só cotação de 2017; a view filtra ≥ 2019), KON09 (sem cotação no ERP).
 
 ## Custos do Mercado Livre (fatura)
 | Categoria | Códigos |

@@ -1,6 +1,7 @@
 -- =====================================================================
 -- 0006 - Custo do produto pela cotacao de compra (substitui a regra da V1)
 -- Pode ser reexecutada. Se a 0003 for reaplicada, reaplique esta depois.
+-- A 0007 redefine resolve_unit_cost (acrescenta o de-para de modelo): reaplicar a 0007 depois desta.
 --
 -- erp.cost_tiers passa a receber o HISTORICO de cotacoes do ERP (tabela Cotacoes,
 -- fornecedor padrao): cada linha e uma faixa qty_start..qty_end cotada em created_at.

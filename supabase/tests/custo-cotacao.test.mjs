@@ -17,7 +17,9 @@ await db.exec(readFileSync(`${repo}/supabase/migrations/0002_marketplaces.sql`, 
 await db.exec(readFileSync(`${repo}/supabase/migrations/0003_regras_v1.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0006_custo_por_cotacao.sql`, 'utf8'));
 await db.exec(readFileSync(`${repo}/supabase/migrations/0006_custo_por_cotacao.sql`, 'utf8')); // reexecutavel
-console.log('Migrations 0002 + 0003 + 0006 aplicadas');
+await db.exec(readFileSync(`${repo}/supabase/migrations/0007_de_para_modelo.sql`, 'utf8'));
+await db.exec(readFileSync(`${repo}/supabase/migrations/0007_de_para_modelo.sql`, 'utf8')); // reexecutavel
+console.log('Migrations 0002 + 0003 + 0006 + 0007 aplicadas');
 
 // Datas no horario de Brasilia (-03), como vem do ERP.
 await db.exec(`
@@ -50,7 +52,9 @@ insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, s
  -- NUL1: qty_end vazio = sem limite
  ('NUL1', 5, null, 2.00, '2026-03-01 10:00-03', 'erp'),
  -- EXP1: expired_at preenchido nao corta a cotacao
- ('EXP1', 1, 100, 7.00, '2026-01-01 10:00-03', 'erp');
+ ('EXP1', 1, 100, 7.00, '2026-01-01 10:00-03', 'erp'),
+ -- BMS148: destino do de-para SQM148 -> BMS148 (ate 12/11/2026)
+ ('BMS148', 1, 1000, 2.04, '2026-01-01 10:00-03', 'erp');
 update erp.cost_tiers set expired_at = '2026-02-01' where product_id = 'EXP1';
 `);
 
@@ -73,6 +77,12 @@ eq('data em Brasilia: cotacao 22h vale para venda 15h do mesmo dia', await cost(
 eq('empate no mesmo horario -> maior preco', await cost('TIE1', '2026-03-10 10:00-03', 5), { price: 1.5, flag: null });
 eq('qty_end vazio = sem limite', await cost('NUL1', '2026-03-10 10:00-03', 500), { price: 2, flag: null });
 eq('expired_at ignorado', await cost('EXP1', '2026-06-01 10:00-03', 5), { price: 7, flag: null });
+
+eq('de-para: SQM148 em 20/08/2026 usa BMS148', await cost('SQM148', '2026-08-20 10:00-03', 10), { price: 2.04, flag: null });
+eq('de-para: vale ate 12/11/2026 23h (Brasilia)', await cost('SQM148', '2026-11-12 23:00-03', 10), { price: 2.04, flag: null });
+eq('de-para: depois de 12/11/2026 volta a sem_custo', await cost('SQM148', '2026-11-13 08:00-03', 10), { price: 0, flag: 'sem_custo' });
+eq('de-para: modelo sem ligacao fica igual', (await db.query(`select analytics.modelo_erp('BLA68', now()) as m`)).rows[0], { m: 'BLA68' });
+eq('de-para: semente gravada uma vez', (await db.query(`select count(*)::int as n from map.modelo_de_para`)).rows[0], { n: 1 });
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

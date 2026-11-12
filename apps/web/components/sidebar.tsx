@@ -1,16 +1,16 @@
 import Link from 'next/link';
 import { logout } from '@/app/login/actions';
 import { ROLE_LABEL, type Role } from '@/lib/auth';
+import type { Permissao } from '@/lib/permissoes';
 
-interface NavItem { href: string; label: string; ready: boolean; roles?: Role[] }
-
-const COST_ROLES: Role[] = ['admin', 'gestor'];
+interface NavItem { href: string; label: string; ready: boolean; perm?: Permissao }
 
 const NAV: { section: string; items: NavItem[] }[] = [
   { section: 'Marketplaces', items: [
-    { href: '/', label: 'Visão Geral', ready: true },
-    { href: '/vendas', label: 'Vendas', ready: false },
-    { href: '/rentabilidade', label: 'Rentabilidade', ready: false, roles: COST_ROLES },
+    { href: '/', label: 'Visão Geral', ready: true, perm: 'visao_geral' },
+    { href: '/vendas', label: 'Vendas', ready: true, perm: 'vendas' },
+    { href: '/rentabilidade', label: 'Rentabilidade', ready: true, perm: 'rentabilidade' },
+    { href: '/metas', label: 'Metas e Projeção', ready: true, perm: 'metas' },
     { href: '/anuncios', label: 'Anúncios', ready: false },
     { href: '/ads', label: 'Ads', ready: false },
     { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
@@ -22,14 +22,18 @@ const NAV: { section: string; items: NavItem[] }[] = [
   ]},
   { section: 'ERP', items: [
     { href: '/estoque', label: 'Estoque', ready: false },
-    { href: '/financeiro', label: 'Financeiro', ready: false, roles: COST_ROLES },
+    { href: '/financeiro', label: 'Financeiro', ready: false },
   ]},
   { section: 'Administração', items: [
-    { href: '/configuracoes/conexoes', label: 'Conexões', ready: true, roles: ['admin'] },
+    { href: '/configuracoes/permissoes', label: 'Permissões', ready: true, perm: 'configuracoes' },
+    { href: '/configuracoes/parametros', label: 'Parâmetros de custo', ready: true, perm: 'configuracoes' },
+    { href: '/configuracoes/metas', label: 'Metas (upload)', ready: true, perm: 'editar_metas' },
+    { href: '/configuracoes/conexoes', label: 'Conexões', ready: true, perm: 'configuracoes' },
   ]},
 ];
 
-export function Sidebar({ role, name }: { role: Role | undefined; name: string }) {
+export function Sidebar({ role, name, permissoes }: { role: Role | undefined; name: string; permissoes: Permissao[] }) {
+  const perms = new Set(permissoes);
   return (
     <aside className="flex w-full flex-col border-b border-border bg-surface md:min-h-screen md:w-60 md:border-r md:border-b-0">
       <div className="px-5 py-5">
@@ -38,7 +42,7 @@ export function Sidebar({ role, name }: { role: Role | undefined; name: string }
       </div>
       <nav className="flex-1 overflow-x-auto px-3 pb-4">
         {NAV.map((group) => {
-          const items = group.items.filter((i) => !i.roles || (role && i.roles.includes(role)));
+          const items = group.items.filter((i) => (i.perm ? perms.has(i.perm) : perms.size > 0));
           if (!items.length) return null;
           return (
             <div key={group.section} className="mb-4">

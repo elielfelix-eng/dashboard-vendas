@@ -107,7 +107,17 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 - [ ] Validar números da 1ª carga contra outubro/2026 e confirmar dados de Ads
 - [x] Fase 2b — regras da V1 em código e testadas (falta aplicar 0003 e conferir com outubro/2026)
 - [x] Fase 3 — Gateway ERP implementado e testado (falta instalar na máquina da rede, definir a consulta real das faixas e conferir em `core.sync_runs`)
-- [ ] Fase 4 — Páginas de KPI (Vendas, Rentabilidade, Ads com ACOS de equilíbrio, Novos Produtos/simulador)
+- [x] Fase 4 / Bloco A — Visão Geral, Vendas, Rentabilidade, Metas e Projeção, Permissões, Parâmetros (migrations 0008–0010; falta aplicar e conferir out/2026)
+- [ ] Fase 4 / Bloco B — Anúncios e Ads por anúncio (ACOS de equilíbrio); C — Novos Produtos/simulador; D — Estoque e Financeiro
+
+## Dashboard (Bloco A)
+Spec `docs/superpowers/specs/2026-11-12-dashboard-bloco-a-design.md`, plano `docs/superpowers/plans/2026-11-12-dashboard-bloco-a.md`. **O banco calcula, a tela só mostra.**
+- **Ordem das migrations:** 0003 → 0006 → 0007 → 0008 → 0009 → 0010 (todas reexecutáveis). Reaplicar a 0003 recria as views da 0003; depois reaplique 0006, 0007, 0009 e 0010.
+- **Permissões por perfil:** `core.role_permissions` (visao_geral, vendas, rentabilidade, metas, custos, editar_metas, configuracoes), `core.has_perm(text)`; `core.can_see_costs()` = `has_perm('custos')`. Trava: admin nunca perde `configuracoes`. Escrita de permissões/parâmetros só pelo perfil admin.
+- **Imposto/embalagem:** `core.parametros_custo` por canal com `vigente_desde`; só pedidos pagos.
+- **Funções (security invoker):** `analytics.dash_resumo`, `dash_serie(…, 'dia'|'semana'|'mes')`, `dash_modelos` (rateio dos custos sem pedido pela receita + curva ABC por lucro: acumulado antes do modelo < 80% A, < 95% B, senão C; ≤ 0 = prejuizo), `dash_skus`, `dash_pedidos`, `dash_custos_periodo`, `dash_itens`, `dash_metas(canal, ano, hoje)`. Parâmetros `(p_canal 'consolidado'|'mercadolivre'|…, p_de, p_ate)`. Sem `custos`: custo, imposto, embalagem, margens, ABC e alertas voltam nulos.
+- **Metas:** `core.metas` (canal mercadolivre|shopee|brindedobem, ano, mês, valor), upload em `/configuracoes/metas` (xlsx Canal|Ano|Mês|Meta; substitui os anos do arquivo via `core.substituir_metas`). Projeção: parte do último mês fechado; mês = anterior × (1 + crescimento); crescimento do mês em `core.premissas_projecao` ou o padrão do canal no ano (mes nulo).
+- **Testes:** `npm run test:sql` (inclui `dashboard-admin`, `dashboard-funcoes`, `dashboard-metas`) e `npm run test:web` (período, formatos, planilha de metas; Node 24).
 - [ ] Fase 5 — Bitrix24 (webhook somente leitura, usuário técnico)
 - [ ] Fase 6 — Shopee (aguarda aprovação no Open Platform)
 - [ ] Fase 7 — Healthchecks.io, backup semanal criptografado

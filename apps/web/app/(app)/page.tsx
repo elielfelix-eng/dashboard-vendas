@@ -1,49 +1,107 @@
-import { createClient } from '@/lib/supabase/server';
+import Link from 'next/link';
+import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { FiltroTopo } from '@/components/filtro-topo';
+import { GraficoSerie } from '@/components/grafico-serie';
+import { PainelAtencao } from '@/components/painel-atencao';
+import { canalMetaVisaoGeral } from '@/lib/canais';
+import * as dash from '@/lib/dash';
+import { brl, num, pct, variacao } from '@/lib/formato';
+import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
+import { exigirPermissao } from '@/lib/permissoes';
 
-const SOURCE_LABEL: Record<string, string> = {
-  mercadolivre: 'Mercado Livre',
-  shopee: 'Shopee',
-  bitrix24: 'Bitrix24',
-  erp: 'ERP (SQL Server)',
-};
+type SP = Promise<Record<string, string | string[] | undefined>>;
 
-const fmt = (d: string | null) =>
-  d ? new Date(d).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' }) : '—';
+const margemPct = (m: number | null, receita: number) => (m == null || receita === 0 ? null : (m / receita) * 100);
 
-export default async function HomePage() {
-  const supabase = await createClient();
-  const { data: runs } = await supabase
-    .schema('core')
-    .from('sync_runs')
-    .select('source, status, started_at, finished_at, error')
-    .order('started_at', { ascending: false })
-    .limit(20);
+export default async function VisaoGeralPage({ searchParams }: { searchParams: SP }) {
+  const perms = await exigirPermissao('visao_geral');
+  const hoje = hojeBrasilia();
+  const { canal, chave, periodo } = lerFiltros(await searchParams, hoje);
+  const verCustos = perms.has('custos');
 
-  // Última execução de cada fonte
-  const latest = new Map<string, NonNullable<typeof runs>[number]>();
-  for (const r of runs ?? []) if (!latest.has(r.source)) latest.set(r.source, r);
+  let dados;
+  try {
+    const [atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas] = await Promise.all([
+      dash.resumo(canal, periodo.de, periodo.ate),
+      dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
+      dash.serie(canal, periodo.de, periodo.ate, 'dia'),
+      dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, 'dia'),
+      dash.modelos(canal, periodo.de, periodo.ate),
+      dash.sincronizacoes(),
+      perms.has('metas') ? dash.metas(canalMetaVisaoGeral(canal), Number(hoje.slice(0, 4))) : Promise.resolve([]),
+    ]);
+    dados = { atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas };
+  } catch (e) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <h1 className="mb-4 text-2xl font-semibold">Visão Geral</h1>
+        <ErroDados mensagem={(e as Error).message} />
+      </div>
+    );
+  }
+  const { atual: a, anterior: p, serieAtual, serieAnterior, modelos, sinc, metas } = dados;
+  const mesAtual = metas.find((m) => m.mes === `${hoje.slice(0, 7)}-01`);
+  const tacos = a.vendas_brutas > 0 ? (a.product_ads / a.vendas_brutas) * 100 : null;
 
   return (
-    <div className="mx-auto max-w-5xl">
-      <h1 className="text-2xl font-semibold">Visão Geral</h1>
-      <p className="mt-1 text-sm text-muted">
-        Os indicadores de vendas, margem e Ads aparecerão aqui na Fase 4. Abaixo está o status das atualizações automáticas (08h, 13h e 17h).
-      </p>
+    <div className="mx-auto max-w-6xl">
+      <h1 className="mb-4 text-2xl font-semibold">Visão Geral</h1>
+      <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={sinc.mercadolivre?.ultimoSucesso ?? null} />
 
-      <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Object.entries(SOURCE_LABEL).map(([key, label]) => {
-          const r = latest.get(key);
-          const color = !r ? 'text-muted' : r.status === 'success' ? 'text-good' : r.status === 'error' ? 'text-bad' : 'text-accent';
-          const status = !r ? 'Ainda não sincronizado' : r.status === 'success' ? 'Atualizado' : r.status === 'error' ? 'Falhou' : 'Em andamento';
-          return (
-            <div key={key} className="rounded-xl border border-border bg-surface p-4">
-              <p className="text-sm text-muted">{label}</p>
-              <p className={`mt-1 font-semibold ${color}`}>{status}</p>
-              <p className="mt-1 text-xs text-muted">{fmt(r?.finished_at ?? r?.started_at ?? null)}</p>
+      {a.pedidos === 0 ? (
+        <SemDados />
+      ) : (
+        <>
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)}
+              ajuda="Pedidos pagos, cancelados e devolvidos (sem divididos), igual ao painel do Mercado Livre." />
+            <CartaoIndicador titulo="Pedidos" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} />
+            <CartaoIndicador titulo="Unidades" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} />
+            <CartaoIndicador titulo="Ticket médio" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} />
+            {verCustos && a.margem_bruta != null && (
+              <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)} variacao={variacao(a.margem_bruta, p.margem_bruta)}
+                detalhe={pct(margemPct(a.margem_bruta, a.receita))} ajuda="Receita (pedidos pagos) menos o custo dos produtos." />
+            )}
+            {verCustos && a.margem_contribuicao != null && (
+              <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
+                variacao={variacao(a.margem_contribuicao, p.margem_contribuicao)} detalhe={pct(margemPct(a.margem_contribuicao, a.receita))}
+                ajuda="Receita menos tarifas do Mercado Livre, frete, Ads, imposto, embalagem e custo dos produtos." />
+            )}
+            <CartaoIndicador titulo="Ads" valor={brl(a.product_ads)} variacao={variacao(a.product_ads, p.product_ads)} inverterCores
+              detalhe={`TACOS ${pct(tacos)}`} ajuda="Investimento em Product Ads. TACOS = Ads ÷ vendas brutas." />
+            <CartaoIndicador titulo="Cancelados e devolvidos" valor={num(a.cancelados + a.devolvidos)}
+              variacao={variacao(a.cancelados + a.devolvidos, p.cancelados + p.devolvidos)} inverterCores
+              detalhe={`${pct(a.pct_cancel_devol)} dos pedidos`} />
+            {mesAtual?.meta != null && (
+              <CartaoIndicador titulo="Mês atual: realizado × meta" valor={`${pct(((mesAtual.realizado ?? 0) / mesAtual.meta) * 100)}`}
+                detalhe={`${brl(mesAtual.realizado)} de ${brl(mesAtual.meta)}`} ajuda="Receita (pedidos pagos) do mês até hoje ÷ meta do mês." />
+            )}
+          </section>
+
+          <section className="mt-6 rounded-xl border border-border bg-surface p-4">
+            <h2 className="mb-2 text-sm font-semibold">Vendas brutas por dia</h2>
+            <GraficoSerie atual={serieAtual} anterior={serieAnterior} />
+          </section>
+
+          <section className="mt-6 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-xl border border-border bg-surface p-4">
+              <h2 className="text-sm font-semibold">Top 5 modelos (vendas brutas)</h2>
+              <table className="mt-2 w-full text-sm">
+                <tbody>
+                  {modelos.slice(0, 5).map((m) => (
+                    <tr key={m.modelo} className="border-t border-border">
+                      <td className="py-1.5">{m.modelo ? <Link href={`/vendas/${encodeURIComponent(m.modelo)}`} className="hover:underline">{m.modelo}</Link> : '(sem SKU)'}</td>
+                      <td className="py-1.5 text-right tabular-nums">{brl(m.vendas_brutas)}</td>
+                      {verCustos && <td className="py-1.5 text-right text-muted tabular-nums">{m.contribuicao_pct == null ? '' : `margem ${pct(m.contribuicao_pct)}`}</td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </section>
+            <PainelAtencao pedidosSemCusto={verCustos ? a.pedidos_sem_custo : null} sincronizacoes={sinc} />
+          </section>
+        </>
+      )}
     </div>
   );
 }

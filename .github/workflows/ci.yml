@@ -27,10 +27,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      - name: Testar funcoes do site (periodo, formatos, planilha)
+        run: npm run test:web
       - name: Testar regras de negocio (SQL)
         run: npm run test:sql
 

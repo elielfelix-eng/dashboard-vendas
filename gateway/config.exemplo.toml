@@ -4,6 +4,8 @@
 [source]
 # Conexao ODBC com o SQL Server do ERP (sem senha; a senha vem do segredo "sqlserver").
 # Troque o driver (17 ou 18), o servidor e o banco.
+# SQL Server 2008 (sem TLS 1.2): use o driver nativo do Windows, ex.:
+#   connection_string = "Driver={SQL Server};Server=192.168.0.30;Database=NewFord;UID=gateway_leitura"
 connection_string = "Driver={ODBC Driver 18 for SQL Server};Server=NOME-OU-IP-DO-SERVIDOR,1433;Database=NOME_DO_BANCO;UID=gateway_leitura;TrustServerCertificate=yes"
 # Opcional: tempo maximo (segundos) de cada consulta ao ERP. Padrao: 600.
 # query_timeout_seconds = 600

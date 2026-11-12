@@ -89,7 +89,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
                 <tbody>
                   {modelos.slice(0, 5).map((m) => (
                     <tr key={m.modelo} className="border-t border-border">
-                      <td className="py-1.5"><Link href={`/vendas/${encodeURIComponent(m.modelo ?? '')}`} className="hover:underline">{m.modelo ?? '(sem SKU)'}</Link></td>
+                      <td className="py-1.5">{m.modelo ? <Link href={`/vendas/${encodeURIComponent(m.modelo)}`} className="hover:underline">{m.modelo}</Link> : '(sem SKU)'}</td>
                       <td className="py-1.5 text-right tabular-nums">{brl(m.vendas_brutas)}</td>
                       {verCustos && <td className="py-1.5 text-right text-muted tabular-nums">{m.contribuicao_pct == null ? '' : `margem ${pct(m.contribuicao_pct)}`}</td>}
                     </tr>

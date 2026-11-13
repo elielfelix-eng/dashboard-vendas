@@ -186,27 +186,21 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
           </section>
 
           <section className="mt-6">
-            <h2 className="mb-1 text-sm font-semibold">Resultado mês a mês ({periodo.ate.slice(0, 4)})</h2>
-            <p className="mb-2 text-xs text-muted">
-              Vendas brutas, canceladas e devolvidas seguem as Métricas do Mercado Livre; as vendas líquidas são a base da margem.
-              Publicidade, ICMS-DIFAL e outras tarifas vêm da fatura e entram no mês de referência.
-            </p>
-            <TabelaDados colunas={COL_MESES} linhas={meses} nomeArquivo={`resultado-mensal_${inicioAno}_${periodo.ate}`} />
+            <TabelaDados colunas={COL_MESES} linhas={meses} nomeArquivo={`resultado-mensal_${inicioAno}_${periodo.ate}`}
+              titulo={`Resultado mês a mês (${periodo.ate.slice(0, 4)})`}
+              descricao="Vendas brutas, canceladas e devolvidas seguem as Métricas do Mercado Livre; as vendas líquidas são a base da margem. Publicidade, ICMS-DIFAL e outras tarifas vêm da fatura e entram no mês de referência." />
           </section>
 
           <section className="mt-6">
-            <h2 className="mb-1 text-sm font-semibold">Resultado por modelo</h2>
-            <p className="mb-2 text-xs text-muted">
-              Contribuição = receita − tarifas e frete do pedido − custo do produto − publicidade e outras tarifas rateadas pela receita
-              − imposto e embalagem. Clique no título de uma coluna para ordenar; no modelo, para ver os SKUs e pedidos.
-            </p>
-            <TabelaAbc colunas={COL_MODELOS} linhas={modelos} busca="modelo" temLucro nomeArquivo={`rentabilidade-modelos_${periodo.de}_${periodo.ate}`} />
+            <TabelaAbc colunas={COL_MODELOS} linhas={modelos} busca="modelo" temLucro nomeArquivo={`rentabilidade-modelos_${periodo.de}_${periodo.ate}`}
+              titulo="Resultado por modelo"
+              descricao="Contribuição = receita − tarifas e frete do pedido − custo do produto − publicidade e outras tarifas rateadas pela receita − imposto e embalagem. Clique no título de uma coluna para ordenar; no modelo, para ver os SKUs e pedidos." />
           </section>
 
           <section className="mt-6">
-            <h2 className="mb-1 text-sm font-semibold">Resultado por SKU</h2>
-            <p className="mb-2 text-xs text-muted">Cada variação de anúncio (modelo, cor e kit) separada, com a mesma conta da tabela por modelo.</p>
-            <TabelaAbc colunas={COL_SKUS} linhas={skus} busca="sku" temLucro nomeArquivo={`rentabilidade-skus_${periodo.de}_${periodo.ate}`} />
+            <TabelaAbc colunas={COL_SKUS} linhas={skus} busca="sku" temLucro nomeArquivo={`rentabilidade-skus_${periodo.de}_${periodo.ate}`}
+              titulo="Resultado por SKU"
+              descricao="Cada variação de anúncio (modelo, cor e kit) separada, com a mesma conta da tabela por modelo." />
           </section>
 
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">

@@ -63,12 +63,12 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
       <h1 className="mb-4 text-2xl font-semibold">{modelo}</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={sinc.mercadolivre?.ultimoSucesso ?? null} />
       <section>
-        <h2 className="mb-2 text-sm font-semibold">Por SKU</h2>
-        <TabelaDados colunas={colSkus} linhas={skus} nomeArquivo={`${modelo}_skus_${periodo.de}_${periodo.ate}`} vazio="Sem vendas deste modelo no período." />
+        <TabelaDados colunas={colSkus} linhas={skus} nomeArquivo={`${modelo}_skus_${periodo.de}_${periodo.ate}`} vazio="Sem vendas deste modelo no período."
+          titulo="Por SKU" />
       </section>
       <section className="mt-6">
-        <h2 className="mb-2 text-sm font-semibold">Pedidos</h2>
-        <TabelaDados colunas={colPedidos} linhas={linhasPedidos} busca="order_id" nomeArquivo={`${modelo}_pedidos_${periodo.de}_${periodo.ate}`} vazio="Sem pedidos no período." />
+        <TabelaDados colunas={colPedidos} linhas={linhasPedidos} busca="order_id" nomeArquivo={`${modelo}_pedidos_${periodo.de}_${periodo.ate}`} vazio="Sem pedidos no período."
+          titulo="Pedidos" />
       </section>
     </div>
   );

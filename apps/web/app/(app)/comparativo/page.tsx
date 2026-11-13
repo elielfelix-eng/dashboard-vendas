@@ -60,9 +60,8 @@ export default async function ComparativoPage({ searchParams }: { searchParams: 
       {!anos.length ? <SemDados texto="Sem vendas nos últimos anos." /> : (
         <>
           <section>
-            <h2 className="mb-2 text-sm font-semibold">Resultado por ano</h2>
             <TabelaDados colunas={colunas} linhas={anos.map((x) => ({ ...x, ano: String(x.ano) as unknown as number }))}
-              nomeArquivo={`comparativo-anual_${hoje}`} />
+              nomeArquivo={`comparativo-anual_${hoje}`} titulo="Resultado por ano" />
           </section>
           <section className="mt-6 grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border border-border bg-surface p-4">

@@ -94,8 +94,9 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
             <GraficoSerie atual={d.sAtual} anterior={d.sAnterior} grao={grao} />
           </section>
           <section className="mt-6">
-            <h2 className="mb-2 text-sm font-semibold">Vendas por modelo</h2>
-            <TabelaDados colunas={COLUNAS} linhas={linhas} busca="modelo" nomeArquivo={`vendas-por-modelo_${periodo.de}_${periodo.ate}`} />
+            <TabelaDados colunas={COLUNAS} linhas={linhas} busca="modelo" nomeArquivo={`vendas-por-modelo_${periodo.de}_${periodo.ate}`}
+              titulo="Vendas por modelo"
+              descricao={`Todos os ${linhas.length} modelos vendidos no período, do maior para o menor. Clique no modelo para ver SKUs e pedidos.`} />
           </section>
         </>
       )}

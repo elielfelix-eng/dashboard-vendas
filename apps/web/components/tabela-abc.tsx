@@ -16,10 +16,12 @@ interface Props<T extends Base> {
   nomeArquivo: string;
   /** Sem permissão de custo só existe a curva por receita. */
   temLucro: boolean;
+  titulo?: string;
+  descricao?: string;
 }
 
 /** Tabela com posição, curva ABC por lucro ou por receita e filtro por classe. */
-export function TabelaAbc<T extends Base>({ colunas, linhas, busca, nomeArquivo, temLucro }: Props<T>) {
+export function TabelaAbc<T extends Base>({ colunas, linhas, busca, nomeArquivo, temLucro, titulo, descricao }: Props<T>) {
   const [modo, setModo] = useState<'lucro' | 'receita'>(temLucro ? 'lucro' : 'receita');
   const [classe, setClasse] = useState('');
 
@@ -37,9 +39,8 @@ export function TabelaAbc<T extends Base>({ colunas, linhas, busca, nomeArquivo,
     ...colunas,
   ] as unknown as Coluna<ComAbc<T>>[];
 
-  return (
-    <div>
-      <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
+  const controles = (
+      <div className="flex flex-wrap items-center gap-2 text-sm">
         {temLucro && (
           <div className="flex overflow-hidden rounded-lg border border-border">
             {(['lucro', 'receita'] as const).map((m) => (
@@ -59,7 +60,9 @@ export function TabelaAbc<T extends Base>({ colunas, linhas, busca, nomeArquivo,
           {modo === 'lucro' && <option value="prejuizo">Prejuízo</option>}
         </select>
       </div>
-      <TabelaDados colunas={cols} linhas={visiveis} busca={busca as keyof ComAbc<T> & string} nomeArquivo={nomeArquivo} />
-    </div>
+  );
+  return (
+    <TabelaDados colunas={cols} linhas={visiveis} busca={busca as keyof ComAbc<T> & string} nomeArquivo={nomeArquivo}
+      titulo={titulo} descricao={descricao} extra={controles} />
   );
 }

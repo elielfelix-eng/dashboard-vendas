@@ -14,6 +14,12 @@ interface Props<T extends object> {
   busca?: keyof T & string;
   nomeArquivo: string;
   vazio?: string;
+  /** Título na mesma linha da busca e do Excel, colado à tabela. */
+  titulo?: string;
+  /** Texto curto abaixo do título. */
+  descricao?: string;
+  /** Controles extras ao lado da busca (ex.: seletor da curva ABC). */
+  extra?: React.ReactNode;
 }
 // Convenções das linhas: `href` vira link na primeira coluna; `ruim: true` pinta a linha de vermelho.
 
@@ -37,7 +43,7 @@ function formatar(tipo: Coluna<object>['tipo'], v: unknown): string {
   }
 }
 
-export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArquivo, vazio = 'Nada para mostrar.' }: Props<T>) {
+export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArquivo, vazio = 'Nada para mostrar.', titulo, descricao, extra }: Props<T>) {
   const [ordem, setOrdem] = useState<{ chave: string; desc: boolean } | null>(null);
   const [texto, setTexto] = useState('');
   const [baixando, setBaixando] = useState(false);
@@ -58,7 +64,13 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
 
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
+      <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
+        <div className="min-w-0">
+          {titulo && <h2 className="text-sm font-semibold">{titulo}</h2>}
+          {descricao && <p className="mt-0.5 max-w-3xl text-xs text-muted">{descricao}</p>}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+        {extra}
         {busca && (
           <input
             value={texto}
@@ -75,6 +87,7 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
         >
           {baixando ? 'Gerando…' : '⬇ Excel'}
         </button>
+        </div>
       </div>
       <div className="overflow-x-auto rounded-xl border border-border bg-surface">
         <table className="w-full text-sm">

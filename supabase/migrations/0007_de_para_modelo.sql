@@ -77,35 +77,76 @@ $$;
 -- agora ele e feito nas views, antes de chamar esta funcao).
 create or replace function analytics.resolve_unit_cost(p_modelo text, p_data timestamptz, p_units integer)
 returns table (price numeric, flag text)
-language sql stable set search_path = '' as $$
-  with v as (
-    select t.price,
-           t.created_at,
-           (t.created_at at time zone 'America/Sao_Paulo')::date
-             <= (p_data at time zone 'America/Sao_Paulo')::date as antes,
-           p_units between t.qty_start and coalesce(t.qty_end, 2147483647) as contem,
-           case when p_units < t.qty_start then t.qty_start - p_units
-                when p_units > coalesce(t.qty_end, 2147483647) then p_units - t.qty_end
-                else 0 end as distancia
+language plpgsql stable set search_path = '' as $$
+-- Mesma regra de antes, mas cada passo usa o indice (product_id, created_at) em vez de
+-- reler todas as cotacoes do modelo a cada item vendido. "Ate a data D" = cotacao feita
+-- antes do inicio do dia seguinte a D, em horario de Brasilia.
+declare
+  v_lim   timestamptz;
+  v_ini   timestamptz;
+  v_fim   timestamptz;
+  v_dia   date;
+  v_price numeric;
+begin
+  if p_modelo is null then
+    return query select 0::numeric, 'sem_custo'::text;
+    return;
+  end if;
+  v_lim := (((p_data at time zone 'America/Sao_Paulo')::date + 1)::timestamp at time zone 'America/Sao_Paulo');
+
+  -- 1. cotacao mais recente ate D cuja faixa contem N (empate no horario: maior preco)
+  select t.price into v_price
+    from erp.cost_tiers t
+   where t.product_id = p_modelo and t.created_at < v_lim
+     and p_units between t.qty_start and coalesce(t.qty_end, 2147483647)
+   order by t.created_at desc, t.price desc
+   limit 1;
+  if found then
+    return query select v_price, null::text;
+    return;
+  end if;
+
+  -- 2. nenhuma contem N: dia da cotacao mais recente ate D; nesse dia, a faixa mais proxima de N
+  select (max(t.created_at) at time zone 'America/Sao_Paulo')::date into v_dia
+    from erp.cost_tiers t
+   where t.product_id = p_modelo and t.created_at < v_lim;
+  if v_dia is not null then
+    v_ini := (v_dia::timestamp at time zone 'America/Sao_Paulo');
+    v_fim := ((v_dia + 1)::timestamp at time zone 'America/Sao_Paulo');
+    select t.price into v_price
       from erp.cost_tiers t
-     where t.product_id = p_modelo
-  ),
-  pick as (
-    (select v.price, null::text as flag, 1 as pri from v where v.antes and v.contem
-      order by v.created_at desc, v.price desc limit 1)
-    union all
-    (select v.price, null::text, 2 from v where v.antes
-      order by (v.created_at at time zone 'America/Sao_Paulo')::date desc, v.distancia, v.created_at desc, v.price desc
-      limit 1)
-    union all
-    (select v.price, 'faixa_atual'::text, 3 from v where not v.antes
-      order by (v.created_at at time zone 'America/Sao_Paulo')::date, v.distancia, v.created_at, v.price desc
-      limit 1)
-    union all
-    select 0::numeric, 'sem_custo'::text, 4
-  )
-  select p.price, p.flag from pick p order by p.pri limit 1;
-$$;
+     where t.product_id = p_modelo and t.created_at >= v_ini and t.created_at < v_fim
+     order by case when p_units < t.qty_start then t.qty_start - p_units
+                   when p_units > coalesce(t.qty_end, 2147483647) then p_units - t.qty_end
+                   else 0 end,
+              t.created_at desc, t.price desc
+     limit 1;
+    return query select v_price, null::text;
+    return;
+  end if;
+
+  -- 3. nenhuma cotacao ate D: o primeiro dia com cotacao depois de D (alerta 'faixa_atual')
+  select (min(t.created_at) at time zone 'America/Sao_Paulo')::date into v_dia
+    from erp.cost_tiers t
+   where t.product_id = p_modelo and t.created_at >= v_lim;
+  if v_dia is not null then
+    v_ini := (v_dia::timestamp at time zone 'America/Sao_Paulo');
+    v_fim := ((v_dia + 1)::timestamp at time zone 'America/Sao_Paulo');
+    select t.price into v_price
+      from erp.cost_tiers t
+     where t.product_id = p_modelo and t.created_at >= v_ini and t.created_at < v_fim
+     order by case when p_units < t.qty_start then t.qty_start - p_units
+                   when p_units > coalesce(t.qty_end, 2147483647) then p_units - t.qty_end
+                   else 0 end,
+              t.created_at, t.price desc
+     limit 1;
+    return query select v_price, 'faixa_atual'::text;
+    return;
+  end if;
+
+  -- 4. modelo sem cotacao
+  return query select 0::numeric, 'sem_custo'::text;
+end $$;
 drop function if exists analytics.modelo_erp(text, timestamptz);
 
 -- ---------------------------------------------------------------------

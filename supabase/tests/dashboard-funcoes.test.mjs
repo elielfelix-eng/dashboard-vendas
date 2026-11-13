@@ -14,9 +14,10 @@ const eq = (label, got, exp) => {
 const mig = (f) => readFileSync(`${repo}/supabase/migrations/${f}`, 'utf8');
 await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
-  '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0009_dashboard_funcoes.sql'])
+  '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql',
+  '0011_rls_desempenho.sql', '0011_rls_desempenho.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002..0009 aplicadas (0009 x2)');
+console.log('Migrations 0002..0011 aplicadas (0009 e 0011 x2)');
 
 await db.exec(`create or replace function core.my_role() returns core.app_role language sql as $$ select coalesce(nullif(current_setting('teste.perfil', true), ''), 'admin')::core.app_role $$`);
 const perfil = (p) => db.exec(`set teste.perfil = '${p}'`);
@@ -191,11 +192,37 @@ eq('I5: parametros de custo nao legiveis por comercial', (await rows(`select cou
 await db.exec(`reset role`);
 await perfil('admin');
 
+// 0011: permissao calculada uma vez por consulta, com o mesmo efeito
+eq('0011: politicas usam my_channels/can_see_costs em (select ...)',
+  (await rows(`select tablename, qual from pg_policies where schemaname in ('mkt','erp') and policyname in ('canal liberado','fatura: quem ve custos','custos: quem ve custos') order by tablename`))
+    .every((p) => /SELECT (core\.my_channels|core\.can_see_costs)/i.test(p.qual)), true);
+await db.exec(`create or replace function core.can_see_channel(ch text) returns boolean language sql as 'select ch <> ''mercadolivre'''`);
+await db.exec(`set role authenticated`);
+eq('0011: canal nao liberado continua bloqueado (RLS)', (await rows(`select count(*)::int as n from mkt.orders`))[0].n, 0);
+await db.exec(`reset role`);
+await db.exec(`create or replace function core.can_see_channel(ch text) returns boolean language sql as 'select true'`);
+await db.exec(`set role authenticated`);
+eq('0011: canal liberado ve os pedidos (RLS)', (await rows(`select count(*)::int as n from mkt.orders`))[0].n > 0, true);
+await db.exec(`reset role`);
+
 // ---------------- Revisao final: reaplicar a 0007 nao derruba o dashboard ----------------
 await db.exec(mig('0007_de_para_modelo.sql'));
 let depois07 = null;
 try { depois07 = (await resumo('mercadolivre', '2026-10-01', '2026-10-31'))[0].vendas_brutas; } catch (e) { depois07 = e.message; }
 eq('I1: dash_resumo funciona depois de reaplicar a 0007', depois07, 280); // outubro com o pedido M1 (70 + 210)
+
+// ---------------- Desempenho: a base calcula so o periodo pedido, com os mesmos valores do ml_pedidos ----------------
+const COLS = `order_id, classe, data_venda::text, sku, sku_anuncio, qtd, unidades, valor_venda::float, receita::float,
+  comissao::float, frete::float, parcelamento::float, product_ads::float, seguidores::float, estornos::float,
+  difal::float, outras::float, custo_produto::float, alerta_custo`;
+const base = await rows(`select ${COLS} from analytics.dash_pedidos_base('1900-01-01', '2100-12-31') order by order_id`);
+const viewP = await rows(`select ${COLS} from analytics.ml_pedidos order by order_id`);
+eq('base no periodo inteiro = ml_pedidos (todas as colunas, todos os pedidos)', base, viewP);
+eq('base filtra pela data da venda em Brasilia (pedido 1 = 30/09)',
+  (await rows(`select order_id from analytics.dash_pedidos_base('2026-09-30', '2026-09-30')`)).map((x) => x.order_id), ['1']);
+eq('base de outubro nao traz pedidos de agosto/setembro',
+  (await rows(`select order_id from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') order by order_id`)).map((x) => x.order_id),
+  ['2', '3', '4', '5', '6', 'M1']);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

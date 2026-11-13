@@ -57,7 +57,7 @@ begin
     select coalesce(array_agg(x.m order by x.m), '{}'), coalesce(array_agg(x.r order by x.m), '{}')
       into v_meses, v_vals
       from (select date_trunc('month', b.data_venda)::date as m, sum(b.receita) as r
-              from analytics.dash_pedidos_base() b
+              from analytics.dash_pedidos_base(v_inicio, (v_atual + interval '1 month' - interval '1 day')::date) b
              where b.channel = p_canal and b.data_venda >= v_inicio and b.data_venda < (v_atual + interval '1 month')
              group by 1) x;
   end if;

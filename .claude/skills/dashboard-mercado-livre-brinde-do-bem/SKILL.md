@@ -98,6 +98,7 @@ Comissão isenta desde 10/2026 (`sale_fee` = 0) — não é erro. A V1 está em 
 | `ENOTFOUND` ao gravar no banco | URL "Direct" ou senha com símbolos | Usar Transaction pooler (porta 6543), senha só alfanumérica |
 | `28P01 password authentication failed` | Senha errada na URL | Reset da senha do banco e remontar a URL; atualizar Vercel e GitHub Secrets |
 | `O Mercado Livre nao enviou o refresh token` | Fluxo "Refresh Token" desmarcado no app ML | App ML → Fluxos OAuth → marcar **Refresh Token**; revogar o app e reconectar |
+| Sync: `HTTP 403 ... /items: Resource deprecated ... ResourceDeprecated` (13/11/2026) | ML recusou a consulta de anúncios em lote (`/items?ids=`) para o app | `listItems` cai para `/items/{id}` um por um; anúncios e visitas são não fatais (pedidos seguem) |
 | Dependabot: postcss (high) | Next 15 traz postcss 8.4.31 | `overrides.postcss` no package.json raiz (já aplicado) |
 
 Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh Token (Client Credentials desmarcado); PKCE marcado; todas as permissões em **Leitura**.

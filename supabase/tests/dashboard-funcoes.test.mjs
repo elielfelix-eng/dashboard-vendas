@@ -252,6 +252,27 @@ eq('SKUs de todos os modelos (sem filtro)',
 eq('alertas do periodo (pedidos pagos sem custo)',
   (await rows(`select codigo, tipo, pedidos from analytics.dash_alertas('mercadolivre','2026-10-01','2026-10-31')`)),
   [{ codigo: 'GFT10', tipo: 'sem_custo', pedidos: 2 }]);
+// ---------------- Fotos do anuncio ----------------
+await db.exec(`
+insert into mkt.items (channel, item_id, title, thumbnail, permalink, raw) values
+ ('mercadolivre','MLB2','y','http://http2.mlstatic.com/thumb-y.jpg','https://produto.mercadolivre.com.br/MLB2',
+  '{"pictures":[{"id":"P1","secure_url":"https://img/p1.jpg"},{"id":"P2","secure_url":"https://img/p2.jpg"}],
+    "variations":[{"id":111,"picture_ids":["P2"]}]}'),
+ ('mercadolivre','MLB1','x','http://http2.mlstatic.com/thumb-x.jpg','https://produto.mercadolivre.com.br/MLB1', '{}');
+update mkt.order_items set variation_id = '111' where order_id = '2';
+`);
+eq('foto: variacao do SKU', (await rows(`select analytics.foto_anuncio('MLB2', '111') as f`))[0].f, 'https://img/p2.jpg');
+eq('foto: sem variacao = principal', (await rows(`select analytics.foto_anuncio('MLB2', null) as f`))[0].f, 'https://img/p1.jpg');
+eq('foto: sem fotos no raw = miniatura em https', (await rows(`select analytics.foto_anuncio('MLB1', null) as f`))[0].f, 'https://http2.mlstatic.com/thumb-x.jpg');
+eq('foto: anuncio desconhecido = nulo', (await rows(`select analytics.foto_anuncio('MLB999', null) as f`))[0].f, null);
+eq('modelos: foto principal e link do anuncio',
+  (await rows(`select modelo, foto, link from analytics.dash_modelos('mercadolivre','2026-10-01','2026-10-31') order by modelo`)),
+  [{ modelo: 'BLA68', foto: 'https://http2.mlstatic.com/thumb-x.jpg', link: 'https://produto.mercadolivre.com.br/MLB1' },
+   { modelo: 'GFT10', foto: 'https://img/p1.jpg', link: 'https://produto.mercadolivre.com.br/MLB2' }]);
+eq('SKU completo: foto da variacao vendida', // GFT10-AZU vendido no pedido 2 com a variacao 111
+  (await rows(`select sku, foto from analytics.dash_skus('mercadolivre','2026-10-10','2026-10-10', null)`)),
+  [{ sku: 'GFT10-AZU', foto: 'https://img/p2.jpg' }]);
+
 await perfil('comercial');
 eq('comercial: sem alertas de custo', (await rows(`select count(*)::int as n from analytics.dash_alertas('mercadolivre','2026-10-01','2026-10-31')`))[0].n, 0);
 eq('comercial: resultado mensal sem margem', (await rows(`select distinct margem_contribuicao from analytics.dash_resultado_mensal('mercadolivre','2026-10-01','2026-10-31')`)).map((x) => x.margem_contribuicao), [null]);

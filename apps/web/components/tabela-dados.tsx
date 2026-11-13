@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
+import { FotoProduto } from '@/components/foto-produto';
 import { exportarXlsx, type Coluna } from '@/lib/exportar';
 import { brl, num, pct } from '@/lib/formato';
 
@@ -116,7 +117,12 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
                     const varCor = c.tipo === 'variacao' && v ? ((v as { valor: number | null }).valor ?? 0) : 0;
                     return (
                       <td key={c.chave} className={`px-3 py-1.5 ${c.tipo === 'texto' ? '' : 'text-right tabular-nums'} ${varCor > 0 ? 'text-good' : varCor < 0 ? 'text-bad' : ''}`}>
-                        {j === 0 && href ? <Link href={href} className="font-medium hover:underline">{txt}</Link> : txt}
+                        {j === 0 && 'foto' in l ? (
+                          <span className="flex items-center gap-2">
+                            <FotoProduto src={(l as { foto?: string | null }).foto} alt={txt} />
+                            {href ? <Link href={href} className="font-medium hover:underline">{txt}</Link> : txt}
+                          </span>
+                        ) : j === 0 && href ? <Link href={href} className="font-medium hover:underline">{txt}</Link> : txt}
                       </td>
                     );
                   })}

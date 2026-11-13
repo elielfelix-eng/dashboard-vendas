@@ -11,7 +11,7 @@ import { exigirPermissao } from '@/lib/permissoes';
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
 interface LinhaVendas {
-  modelo: string; href?: string; pedidos: number; unidades: number; vendas_brutas: number;
+  modelo: string; href?: string; foto: string | null; pedidos: number; unidades: number; vendas_brutas: number;
   variacao: { valor: number | null; rotulo: string }; participacao: number; ticket_medio: number; pct_cancel_devol: number;
 }
 
@@ -56,6 +56,7 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
     .map((m) => ({
       modelo: m.modelo ?? '(sem SKU)',
       href: m.modelo ? `/vendas/${encodeURIComponent(m.modelo)}${qs}` : undefined,
+      foto: m.foto,
       pedidos: m.pedidos, unidades: m.unidades, vendas_brutas: m.vendas_brutas,
       variacao: variacao(m.vendas_brutas, anteriorPorModelo.get(m.modelo) ?? 0),
       participacao: a.vendas_brutas > 0 ? (m.vendas_brutas / a.vendas_brutas) * 100 : 0,

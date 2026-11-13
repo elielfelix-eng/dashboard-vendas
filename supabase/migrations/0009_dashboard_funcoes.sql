@@ -16,6 +16,7 @@ drop function if exists analytics.dash_skus(text, date, date, text);
 drop function if exists analytics.dash_modelos(text, date, date);
 drop function if exists analytics.dash_itens(text, date, date);
 drop function if exists analytics.dash_abc(numeric, numeric);
+drop function if exists analytics.foto_anuncio(text, text);
 drop function if exists analytics.dash_resumo(text, date, date);
 drop function if exists analytics.dash_serie(text, date, date, text);
 drop function if exists analytics.dash_custos_periodo(text, date, date);
@@ -304,13 +305,33 @@ language sql stable security invoker set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------
+-- Foto do anuncio: da variacao (quando informada e com foto propria) ou a principal;
+-- sem fotos guardadas, a miniatura em https. Anuncio desconhecido -> nulo.
+-- ---------------------------------------------------------------------
+create function analytics.foto_anuncio(p_item text, p_variacao text) returns text
+language sql stable security invoker set search_path = '' as $$
+  select coalesce(
+           (select p->>'secure_url'
+              from jsonb_array_elements(case when jsonb_typeof(i.raw->'pictures') = 'array' then i.raw->'pictures' else '[]'::jsonb end) p
+             where p->>'id' = (select v->'picture_ids'->>0
+                                 from jsonb_array_elements(case when jsonb_typeof(i.raw->'variations') = 'array' then i.raw->'variations' else '[]'::jsonb end) v
+                                where v->>'id' = p_variacao
+                                limit 1)
+             limit 1),
+           i.raw->'pictures'->0->>'secure_url',
+           replace(i.thumbnail, 'http://', 'https://'))
+    from mkt.items i
+   where i.channel = 'mercadolivre' and i.item_id = p_item
+$$;
+
+-- ---------------------------------------------------------------------
 -- Itens vendidos com a referencia do ERP e a parte de cada item nos custos do pedido.
 -- Tarifas, imposto e embalagem do pedido sao repartidos pelo valor de cada item.
 -- ---------------------------------------------------------------------
 create function analytics.dash_itens(p_canal text, p_de date, p_ate date)
 returns table (order_id text, classe text, modelo text, sku text, kit integer, qtd integer,
                valor_item numeric, receita numeric, custo numeric, tarifas numeric, impemb numeric, sem_custo boolean,
-               produto text, flag text, sale_ts timestamptz)
+               produto text, flag text, sale_ts timestamptz, item_id text, variation_id text)
 language sql stable security invoker set search_path = '' as $$
   select b.order_id, b.classe, r.modelo, r.sku, oi.kit_units, oi.quantity,
          oi.unit_price * oi.quantity,
@@ -321,7 +342,7 @@ language sql stable security invoker set search_path = '' as $$
          case when v.ve then (b.classe = 'pago' and c.flag = 'sem_custo') end,
          oi.title,
          case when v.ve and b.classe = 'pago' then c.flag end,
-         b.sale_ts
+         b.sale_ts, oi.item_id, oi.variation_id
     from analytics.dash_pedidos_base(p_de, p_ate) b
     join mkt.order_items oi on oi.channel = b.channel and oi.order_id = b.order_id
     cross join lateral analytics.ref_erp(oi.sku, oi.modelo, oi.cor, b.sale_ts) r
@@ -356,7 +377,7 @@ returns table (
   modelo text, pedidos integer, unidades integer, vendas_brutas numeric, ticket_medio numeric,
   pct_cancel_devol numeric, receita numeric, custo_produto numeric, tarifas_frete numeric,
   custos_rateados numeric, imposto_embalagem numeric, contribuicao numeric, contribuicao_pct numeric,
-  abc text, sem_custo integer, produto text, abc_receita text
+  abc text, sem_custo integer, produto text, abc_receita text, foto text, link text
 )
 language sql stable security invoker set search_path = '' as $$
   with i as materialized (
@@ -376,6 +397,12 @@ language sql stable security invoker set search_path = '' as $$
            (array_agg(i.produto order by i.sale_ts desc))[1] as produto
       from i
      group by i.modelo
+  ),
+  -- Anuncio que mais vendeu (em R$) de cada modelo no periodo: fonte da foto principal e do link
+  topo as (
+    select distinct on (x.modelo) x.modelo, x.item_id
+      from (select i.modelo, i.item_id, sum(i.valor_item) as v from i where i.item_id is not null group by 1, 2) x
+     order by x.modelo, x.v desc, x.item_id
   ),
   c as (
     select m.*,
@@ -417,10 +444,13 @@ language sql stable security invoker set search_path = '' as $$
               else analytics.dash_abc(a.antes, a.total) end,
          case when v.ve then c2.sem_custo end,
          c2.produto,
-         analytics.dash_abc(ar.antes, ar.total)
+         analytics.dash_abc(ar.antes, ar.total),
+         analytics.foto_anuncio(tp.item_id, null),
+         (select it.permalink from mkt.items it where it.channel = 'mercadolivre' and it.item_id = tp.item_id)
     from c2
     left join acum a on a.modelo = c2.modelo
     left join acum_r ar on ar.modelo = c2.modelo
+    left join topo tp on tp.modelo is not distinct from c2.modelo
    cross join (select core.has_perm('custos') as ve) v
    order by c2.vendas_brutas desc, c2.modelo
 $$;
@@ -431,7 +461,8 @@ $$;
 create function analytics.dash_skus(p_canal text, p_de date, p_ate date, p_modelo text)
 returns table (sku text, kit integer, pedidos integer, unidades integer, vendas_brutas numeric,
                receita numeric, custo_produto numeric, contribuicao numeric,
-               modelo text, produto text, tarifas_frete numeric, contribuicao_pct numeric, abc text, abc_receita text)
+               modelo text, produto text, tarifas_frete numeric, contribuicao_pct numeric, abc text, abc_receita text,
+               foto text, link text)
 language sql stable security invoker set search_path = '' as $$
   with i as materialized (
     select * from analytics.dash_itens(p_canal, p_de, p_ate)
@@ -452,6 +483,14 @@ language sql stable security invoker set search_path = '' as $$
       from i
      where p_modelo is null or i.modelo = p_modelo
      group by i.sku
+  ),
+  -- Anuncio/variacao que mais vendeu (em R$) de cada SKU: fonte da foto e do link.
+  -- SKU completo (MODELO-COR...) usa a foto da variacao; SKU so com o modelo usa a foto principal.
+  topo as (
+    select distinct on (x.sku) x.sku, x.item_id, x.variation_id
+      from (select i.sku, i.item_id, i.variation_id, sum(i.valor_item) as v
+              from i where i.item_id is not null group by 1, 2, 3) x
+     order by x.sku, x.v desc, x.item_id
   ),
   s2 as (
     select s.*,
@@ -479,10 +518,13 @@ language sql stable security invoker set search_path = '' as $$
          case when not v.ve or s2.receita <= 0 then null
               when s2.contrib <= 0 then 'prejuizo'
               else analytics.dash_abc(a.antes, a.total) end,
-         analytics.dash_abc(ar.antes, ar.total)
+         analytics.dash_abc(ar.antes, ar.total),
+         analytics.foto_anuncio(tp.item_id, case when s2.sku like '%-%' then tp.variation_id end),
+         (select it.permalink from mkt.items it where it.channel = 'mercadolivre' and it.item_id = tp.item_id)
     from s2
     left join acum a on a.sku = s2.sku
     left join acum_r ar on ar.sku = s2.sku
+    left join topo tp on tp.sku is not distinct from s2.sku
    cross join (select core.has_perm('custos') as ve) v
    order by s2.vendas_brutas desc, s2.sku
 $$;
@@ -561,4 +603,5 @@ grant execute on function analytics.dash_custos_periodo(text, date, date),
                           analytics.dash_pedidos(text, date, date, text),
                           analytics.dash_alertas(text, date, date),
                           analytics.dash_resultado_mensal(text, date, date),
-                          analytics.dash_abc(numeric, numeric) to authenticated;
+                          analytics.dash_abc(numeric, numeric),
+                          analytics.foto_anuncio(text, text) to authenticated;

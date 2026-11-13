@@ -18,12 +18,12 @@ const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'o
 const pctDe = (v: number | null, r: number) => (v == null || r === 0 ? null : (v / r) * 100);
 
 interface LinhaModeloT {
-  modelo: string; href?: string; produto: string | null; abc: dash.Abc; abc_receita: dash.Abc; pedidos: number; unidades: number;
+  modelo: string; href?: string; foto: string | null; produto: string | null; abc: dash.Abc; abc_receita: dash.Abc; pedidos: number; unidades: number;
   receita: number; participacao: number; tarifas_frete: number; custo_produto: number | null; custos_rateados: number;
   imposto_embalagem: number | null; contribuicao: number | null; contribuicao_pct: number | null;
 }
 interface LinhaSkuT {
-  sku: string; href?: string; produto: string | null; kit: number | null; abc: dash.Abc; abc_receita: dash.Abc; pedidos: number;
+  sku: string; href?: string; foto: string | null; produto: string | null; kit: number | null; abc: dash.Abc; abc_receita: dash.Abc; pedidos: number;
   unidades: number; receita: number; participacao: number; tarifas_frete: number; custo_produto: number | null;
   contribuicao: number | null; contribuicao_pct: number | null;
 }
@@ -115,7 +115,7 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
     .filter((m) => m.receita > 0 || (m.contribuicao ?? 0) !== 0)
     .sort((x, y) => (y.contribuicao ?? 0) - (x.contribuicao ?? 0))
     .map((m) => ({
-      modelo: m.modelo ?? '(sem SKU)', href: linkModelo(m.modelo), produto: m.produto, abc: m.abc, abc_receita: m.abc_receita,
+      modelo: m.modelo ?? '(sem SKU)', href: linkModelo(m.modelo), foto: m.foto, produto: m.produto, abc: m.abc, abc_receita: m.abc_receita,
       pedidos: m.pedidos, unidades: m.unidades, receita: m.receita, participacao: pctDe(m.receita, a.receita) ?? 0,
       tarifas_frete: m.tarifas_frete, custo_produto: m.custo_produto, custos_rateados: m.custos_rateados,
       imposto_embalagem: m.imposto_embalagem, contribuicao: m.contribuicao, contribuicao_pct: m.contribuicao_pct,
@@ -124,7 +124,7 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
     .filter((s) => s.receita > 0 || (s.contribuicao ?? 0) !== 0)
     .sort((x, y) => (y.contribuicao ?? 0) - (x.contribuicao ?? 0))
     .map((s) => ({
-      sku: s.sku ?? '(sem SKU)', href: linkModelo(s.modelo), produto: s.produto, kit: s.kit, abc: s.abc, abc_receita: s.abc_receita,
+      sku: s.sku ?? '(sem SKU)', href: linkModelo(s.modelo), foto: s.foto, produto: s.produto, kit: s.kit, abc: s.abc, abc_receita: s.abc_receita,
       pedidos: s.pedidos, unidades: s.unidades, receita: s.receita, participacao: pctDe(s.receita, a.receita) ?? 0,
       tarifas_frete: s.tarifas_frete, custo_produto: s.custo_produto, contribuicao: s.contribuicao, contribuicao_pct: s.contribuicao_pct,
     }));

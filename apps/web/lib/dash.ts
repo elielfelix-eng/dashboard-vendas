@@ -22,11 +22,13 @@ export interface LinhaModelo {
   pct_cancel_devol: number; receita: number; custo_produto: number | null; tarifas_frete: number;
   custos_rateados: number; imposto_embalagem: number | null; contribuicao: number | null;
   contribuicao_pct: number | null; abc: Abc; sem_custo: number | null; produto: string | null; abc_receita: Abc;
+  foto: string | null; link: string | null;
 }
 export interface LinhaSku {
   sku: string; kit: number | null; pedidos: number; unidades: number; vendas_brutas: number;
   receita: number; custo_produto: number | null; contribuicao: number | null;
   modelo: string | null; produto: string | null; tarifas_frete: number; contribuicao_pct: number | null; abc: Abc; abc_receita: Abc;
+  foto: string | null; link: string | null;
 }
 export interface LinhaPedido {
   order_id: string; data_venda: string; sku: string | null; sku_anuncio: string | null; qtd: number;
@@ -40,7 +42,7 @@ export type Grao = 'dia' | 'semana' | 'mes';
 export type CanalMeta = Canal | 'brindedobem';
 
 const TEXTO = new Set(['modelo', 'sku', 'sku_anuncio', 'order_id', 'data_venda', 'classe', 'alerta_custo', 'abc', 'abc_receita',
-  'periodo', 'mes', 'situacao', 'produto', 'codigo', 'tipo']);
+  'periodo', 'mes', 'situacao', 'produto', 'codigo', 'tipo', 'foto', 'link']);
 
 function numeros<T>(linha: Record<string, unknown>): T {
   const out: Record<string, unknown> = {};

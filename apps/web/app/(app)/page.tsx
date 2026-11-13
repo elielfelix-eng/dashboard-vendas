@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
 import { ComoCalculamos } from '@/components/como-calculamos';
+import { FotoProduto } from '@/components/foto-produto';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { PainelAtencao } from '@/components/painel-atencao';
@@ -104,7 +105,12 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
                 <tbody>
                   {modelos.slice(0, 5).map((m) => (
                     <tr key={m.modelo} className="border-t border-border">
-                      <td className="py-1.5">{m.modelo ? <Link href={`/vendas/${encodeURIComponent(m.modelo)}`} className="hover:underline">{m.modelo}</Link> : '(sem SKU)'}</td>
+                      <td className="py-1.5">
+                        <span className="flex items-center gap-2">
+                          <FotoProduto src={m.foto} alt={m.modelo ?? 'sem SKU'} />
+                          {m.modelo ? <Link href={`/vendas/${encodeURIComponent(m.modelo)}`} className="hover:underline">{m.modelo}</Link> : '(sem SKU)'}
+                        </span>
+                      </td>
                       <td className="py-1.5 text-right tabular-nums">{brl(m.vendas_brutas)}</td>
                       {verCustos && (
                         <td className="py-1.5 text-right text-muted tabular-nums" title={m.receita === 0 ? 'Margem é calculada sobre os pedidos pagos; neste período as vendas do modelo foram canceladas ou devolvidas.' : undefined}>

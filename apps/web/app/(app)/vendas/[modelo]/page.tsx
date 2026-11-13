@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ErroDados } from '@/components/cartao-indicador';
 import { FiltroTopo } from '@/components/filtro-topo';
+import { FotoProduto } from '@/components/foto-produto';
 import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
 import * as dash from '@/lib/dash';
@@ -19,16 +20,19 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
   const { canal, chave, periodo } = lerFiltros(sp, hojeBrasilia());
   const verCustos = perms.has('custos');
 
-  let skus, pedidos, sinc;
+  let skus, pedidos, sinc, modelos;
   try {
-    [skus, pedidos, sinc] = await Promise.all([
+    [skus, pedidos, sinc, modelos] = await Promise.all([
       dash.skus(canal, periodo.de, periodo.ate, modelo),
       dash.pedidos(canal, periodo.de, periodo.ate, modelo),
       dash.sincronizacoes(),
+      dash.modelos(canal, periodo.de, periodo.ate),
     ]);
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">{modelo}</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
+
+  const info = modelos.find((m) => m.modelo === modelo);
 
   const colSkus: Coluna<dash.LinhaSku>[] = [
     { chave: 'sku', titulo: 'SKU', tipo: 'texto' },
@@ -60,7 +64,18 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
   return (
     <div className="mx-auto max-w-6xl">
       <p className="mb-1 text-sm"><Link href={`/vendas${queryFiltros(sp)}`} className="text-muted hover:underline">← Vendas</Link></p>
-      <h1 className="mb-4 text-2xl font-semibold">{modelo}</h1>
+      <div className="mb-4 flex items-center gap-4">
+        <FotoProduto src={info?.foto} alt={modelo} tamanho={96} />
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">{modelo}</h1>
+          {info?.produto && <p className="text-sm text-muted">{info.produto}</p>}
+          {info?.link && (
+            <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-accent hover:underline">
+              Ver anúncio no Mercado Livre ↗
+            </a>
+          )}
+        </div>
+      </div>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={sinc.mercadolivre?.ultimoSucesso ?? null} />
       <section>
         <TabelaDados colunas={colSkus} linhas={skus} nomeArquivo={`${modelo}_skus_${periodo.de}_${periodo.ate}`} vazio="Sem vendas deste modelo no período."

@@ -101,4 +101,6 @@ Margem líquida = vendas líquidas − (comissão + frete + parcelamento + Produ
 | Product Ads | R$ 8.224 |
 | Seguidores | ≈ R$ 538 |
 
+**Atualização em 13/11/2026:** o próprio painel do ML revisou outubro/2026 para vendas brutas **R$ 51.270**, **90** vendas, **102** unidades (canceladas 8 / R$ 4.055; devolvidas 2 / R$ 1.530; preço médio por venda R$ 569,67). O dashboard bate com esses números, inclusive as variações contra o período anterior. Use sempre o painel do ML **do dia** como referência.
+
 Se algo divergir, investigar **nesta ordem**: data usada → classificação do pedido → defasagem da fatura. Só depois mudar regras.

@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { ComoCalculamos } from '@/components/como-calculamos';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { PainelAtencao } from '@/components/painel-atencao';
 import { canalMetaVisaoGeral } from '@/lib/canais';
 import * as dash from '@/lib/dash';
-import { brl, num, pct, variacao } from '@/lib/formato';
-import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
+import { brl, dataBr, num, pct, variacao } from '@/lib/formato';
+import { hojeBrasilia, lerFiltros, resolverPeriodo } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -21,7 +22,8 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
 
   let dados;
   try {
-    const [atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas] = await Promise.all([
+    const ontem = resolverPeriodo('hoje', hoje).anteriorDe;
+    const [atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
       dash.serie(canal, periodo.de, periodo.ate, 'dia'),
@@ -29,8 +31,10 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.sincronizacoes(),
       perms.has('metas') ? dash.metas(canalMetaVisaoGeral(canal), Number(hoje.slice(0, 4))) : Promise.resolve([]),
+      dash.resumo(canal, hoje, hoje),
+      dash.resumo(canal, ontem, ontem),
     ]);
-    dados = { atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas };
+    dados = { atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem };
   } catch (e) {
     return (
       <div className="mx-auto max-w-6xl">
@@ -39,7 +43,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
       </div>
     );
   }
-  const { atual: a, anterior: p, serieAtual, serieAnterior, modelos, sinc, metas } = dados;
+  const { atual: a, anterior: p, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem } = dados;
   const mesAtual = metas.find((m) => m.mes === `${hoje.slice(0, 7)}-01`);
   const tacos = a.vendas_brutas > 0 ? (a.product_ads / a.vendas_brutas) * 100 : null;
 
@@ -47,6 +51,16 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-semibold">Visão Geral</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={sinc.mercadolivre?.ultimoSucesso ?? null} />
+
+      <section className="mb-6 rounded-xl border border-accent/40 bg-accent-soft p-4">
+        <p className="text-sm text-muted">Vendas de hoje, {dataBr(hoje)}</p>
+        <p className="mt-1 text-2xl font-semibold tabular-nums">{brl(rHoje.receita)}</p>
+        <p className="mt-1 text-sm">
+          {num(rHoje.pedidos)} pedidos · {num(rHoje.unidades)} unidades
+          <span className="text-muted"> · Ontem: {brl(rOntem.receita)} em {num(rOntem.pedidos)} pedidos</span>
+        </p>
+        <p className="mt-1 text-xs text-muted">Receita = pedidos pagos. Os números de hoje mudam a cada atualização (08h, 13h e 17h).</p>
+      </section>
 
       {a.pedidos === 0 ? (
         <SemDados />
@@ -104,6 +118,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
             </div>
             <PainelAtencao pedidosSemCusto={verCustos ? a.pedidos_sem_custo : null} sincronizacoes={sinc} />
           </section>
+          <ComoCalculamos verCustos={verCustos} />
         </>
       )}
     </div>

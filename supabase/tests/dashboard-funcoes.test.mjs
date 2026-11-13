@@ -223,6 +223,39 @@ eq('base filtra pela data da venda em Brasilia (pedido 1 = 30/09)',
 eq('base de outubro nao traz pedidos de agosto/setembro',
   (await rows(`select order_id from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') order by order_id`)).map((x) => x.order_id),
   ['2', '3', '4', '5', '6', 'M1']);
+eq('base traz frete_estimado igual ao ml_pedidos',
+  (await rows(`select order_id, frete_estimado from analytics.dash_pedidos_base('1900-01-01','2100-12-31') order by order_id`)),
+  (await rows(`select order_id, frete_estimado from analytics.ml_pedidos order by order_id`)));
+
+// ---------------- Itens da V1: canceladas/devolvidas em R$, estimados, resultado mensal, SKUs, alertas ----------------
+const out2 = (await rows(`select canceladas_valor::float, devolvidas_valor::float, estimados from analytics.dash_resumo('mercadolivre','2026-10-01','2026-10-31')`))[0];
+eq('resumo: valor de canceladas e devolvidas, estimados (outubro)', out2, { canceladas_valor: 30, devolvidas_valor: 90, estimados: 0 });
+eq('resumo: pedido 1 de setembro sem fatura = estimado',
+  (await rows(`select estimados from analytics.dash_resumo('mercadolivre','2026-09-01','2026-09-30')`))[0].estimados, 1);
+
+const mens = await rows(`select mes::text, vendas_brutas::float, receita::float, margem_contribuicao::float, canceladas_valor::float
+  from analytics.dash_resultado_mensal('mercadolivre', '2026-08-01', '2026-10-31')`);
+eq('resultado mensal: um mes por linha', mens.map((m) => m.mes), ['2026-08-01', '2026-09-01', '2026-10-01']);
+eq('resultado mensal: setembro', [mens[1].vendas_brutas, mens[1].receita], [100, 100]);
+eq('resultado mensal: outubro = resumo de outubro', mens[2].margem_contribuicao,
+  (await rows(`select margem_contribuicao::float as m from analytics.dash_resumo('mercadolivre','2026-10-01','2026-10-31')`))[0].m);
+eq('resultado mensal: periodo parcial respeita o corte',
+  (await rows(`select mes::text, vendas_brutas::float from analytics.dash_resultado_mensal('mercadolivre','2026-10-12','2026-10-14')`)),
+  [{ mes: '2026-10-01', vendas_brutas: 120 }]);
+
+eq('modelos: nome do produto e ABC por receita',
+  (await rows(`select modelo, produto, abc_receita from analytics.dash_modelos('mercadolivre','2026-10-01','2026-10-31') order by modelo`)),
+  [{ modelo: 'BLA68', produto: 'x', abc_receita: 'A' }, { modelo: 'GFT10', produto: 'y', abc_receita: 'A' }]); // 90 e 70 de 160: o 2o comeca em 56%
+eq('SKUs de todos os modelos (sem filtro)',
+  (await rows(`select sku, modelo, produto, receita::float, tarifas_frete::float from analytics.dash_skus('mercadolivre','2026-10-01','2026-10-31', null) order by sku`)),
+  [{ sku: 'BLA68-AMA', modelo: 'BLA68', produto: 'x', receita: 70, tarifas_frete: 7 }, { sku: 'GFT10-AZU', modelo: 'GFT10', produto: 'y', receita: 90, tarifas_frete: 20.2 }]);
+eq('alertas do periodo (pedidos pagos sem custo)',
+  (await rows(`select codigo, tipo, pedidos from analytics.dash_alertas('mercadolivre','2026-10-01','2026-10-31')`)),
+  [{ codigo: 'GFT10', tipo: 'sem_custo', pedidos: 2 }]);
+await perfil('comercial');
+eq('comercial: sem alertas de custo', (await rows(`select count(*)::int as n from analytics.dash_alertas('mercadolivre','2026-10-01','2026-10-31')`))[0].n, 0);
+eq('comercial: resultado mensal sem margem', (await rows(`select distinct margem_contribuicao from analytics.dash_resultado_mensal('mercadolivre','2026-10-01','2026-10-31')`)).map((x) => x.margem_contribuicao), [null]);
+await perfil('admin');
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

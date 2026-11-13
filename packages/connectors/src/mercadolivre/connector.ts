@@ -73,6 +73,8 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
 export class MercadoLivreConnector implements MarketplaceConnector {
   readonly channel = 'mercadolivre' as const;
   private readonly api: MercadoLivreClient;
+  /** O ML recusou a consulta de anúncios em lote: daqui em diante, um por um. */
+  private loteRecusado = false;
 
   constructor(private readonly sellerId: string, getToken: TokenProvider) {
     this.api = new MercadoLivreClient(getToken);
@@ -94,8 +96,26 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       scrollId = page.scroll_id;
       const items: Item[] = [];
       for (const ids of chunk(page.results, 20)) {
-        const multi = await this.api.get<{ code: number; body: MlItem }[]>('/items', { ids: ids.join(',') });
-        for (const r of multi) if (r.code === 200) items.push(this.toItem(r.body));
+        if (!this.loteRecusado) {
+          try {
+            const multi = await this.api.get<{ code: number; body: MlItem }[]>('/items', { ids: ids.join(',') });
+            for (const r of multi) if (r.code === 200) items.push(this.toItem(r.body));
+            continue;
+          } catch (err) {
+            // Em 13/11/2026 o ML passou a recusar a consulta em lote (403 ResourceDeprecated) para este app.
+            if (!(err instanceof HttpError && err.status === 403)) throw err;
+            this.loteRecusado = true;
+            console.warn('[ML] Consulta de anúncios em lote recusada; buscando um por um.');
+          }
+        }
+        for (const id of ids) {
+          try {
+            items.push(this.toItem(await this.api.get<MlItem>(`/items/${id}`)));
+          } catch (err) {
+            if (!(err instanceof HttpError && err.status < 500 && err.status !== 429)) throw err;
+            console.warn(`[ML] Anúncio ${id} não pôde ser lido (HTTP ${err.status}); seguindo com os demais.`);
+          }
+        }
       }
       yield items;
       if (!scrollId) return;

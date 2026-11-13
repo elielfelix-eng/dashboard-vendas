@@ -31,7 +31,13 @@ export async function syncMercadoLivre(sql: Sql) {
       const to = new Date();
       console.log(`[ML ${acc.nickname}] período ${from.toISOString()} -> ${to.toISOString()}`);
 
-      stats.items = await syncItems(sql, ml, acc.id);
+      // Anúncios e visitas não podem derrubar a sincronização de pedidos (o ML muda endpoints sem aviso)
+      try {
+        stats.items = await syncItems(sql, ml, acc.id);
+      } catch (err) {
+        console.warn('[ML] Falha ao buscar os anúncios (pedidos seguem normalmente):', (err as Error).message);
+        stats.items = -1;
+      }
       stats.orders = await syncOrders(sql, ml, acc.id, from, to);
       stats.shipping = await syncShippingCosts(sql, ml);
       stats.cancelled_shipments = await syncCancelledShipments(sql, ml);
@@ -41,7 +47,12 @@ export async function syncMercadoLivre(sql: Sql) {
         console.warn('[ML] Falha ao buscar a fatura (será tentada de novo):', (err as Error).message);
         stats.billing_rows = -1;
       }
-      stats.visits = await syncVisits(sql, ml, isFirstRun ? 90 : 3);
+      try {
+        stats.visits = await syncVisits(sql, ml, isFirstRun ? 90 : 3);
+      } catch (err) {
+        console.warn('[ML] Falha ao buscar visitas (será tentada de novo):', (err as Error).message);
+        stats.visits = -1;
+      }
       // Ads: a API guarda 90 dias (inclui hoje). Na 1ª vez (ou se a tabela estiver vazia), busca tudo.
       const [{ n: adsDays }] = await sql<{ n: number }[]>`
         select count(distinct day)::int as n from mkt.ads_campaign_daily where channel = 'mercadolivre'`;

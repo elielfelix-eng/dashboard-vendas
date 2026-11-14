@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from './supabase/server';
 import { requireUser } from './auth';
 
-export type Permissao = 'visao_geral' | 'vendas' | 'rentabilidade' | 'metas' | 'custos' | 'editar_metas' | 'configuracoes';
+export type Permissao = 'visao_geral' | 'vendas' | 'rentabilidade' | 'metas' | 'custos' | 'editar_metas' | 'configuracoes'
+  | 'crm_funil' | 'crm_vendedores' | 'crm_origens';
 
 export const PERMISSOES: { chave: Permissao; rotulo: string }[] = [
   { chave: 'visao_geral', rotulo: 'Visão Geral' },
@@ -13,6 +14,9 @@ export const PERMISSOES: { chave: Permissao; rotulo: string }[] = [
   { chave: 'custos', rotulo: 'Vê custo/margem' },
   { chave: 'editar_metas', rotulo: 'Editar metas e premissas' },
   { chave: 'configuracoes', rotulo: 'Administração' },
+  { chave: 'crm_funil', rotulo: 'CRM – Funil' },
+  { chave: 'crm_vendedores', rotulo: 'CRM – Vendedores' },
+  { chave: 'crm_origens', rotulo: 'CRM – Origens' },
 ];
 
 /** Permissões do perfil do usuário logado (uma consulta por requisição). */
@@ -31,6 +35,7 @@ export const getPermissoes = cache(async (): Promise<Set<Permissao>> => {
 
 const ORDEM_TELAS: [Permissao, string][] = [
   ['visao_geral', '/'], ['vendas', '/vendas'], ['rentabilidade', '/rentabilidade'], ['metas', '/metas'],
+  ['crm_funil', '/crm/funil'], ['crm_vendedores', '/crm/vendedores'], ['crm_origens', '/crm/origens'],
   ['configuracoes', '/configuracoes/permissoes'],
 ];
 

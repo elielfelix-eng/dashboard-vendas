@@ -16,9 +16,10 @@ interface Props {
   periodo: Periodo;
   atualizadoEm: string | null;
   mostrarCanal?: boolean;
+  children?: React.ReactNode;
 }
 
-export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal = true }: Props) {
+export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal = true, children }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -65,6 +66,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
         >
           {PERIODOS.map((p) => <option key={p.chave} value={p.chave}>{p.rotulo}</option>)}
         </select>
+        {children}
         {chave === 'personalizado' && (
           <form
             className="flex items-center gap-1 text-sm"

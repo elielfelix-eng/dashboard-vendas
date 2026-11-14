@@ -17,9 +17,9 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
   ]},
   { section: 'CRM', items: [
-    { href: '/crm/funil', label: 'Funil', ready: false },
-    { href: '/crm/vendedores', label: 'Vendedores', ready: false },
-    { href: '/crm/origens', label: 'Origens', ready: false },
+    { href: '/crm/funil', label: 'Funil', ready: true, perm: 'crm_funil' },
+    { href: '/crm/vendedores', label: 'Vendedores', ready: true, perm: 'crm_vendedores' },
+    { href: '/crm/origens', label: 'Origens', ready: true, perm: 'crm_origens' },
   ]},
   { section: 'ERP', items: [
     { href: '/estoque', label: 'Estoque', ready: false },
@@ -30,6 +30,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { href: '/configuracoes/parametros', label: 'Parâmetros de custo', ready: true, perm: 'configuracoes' },
     { href: '/configuracoes/metas', label: 'Metas (upload)', ready: true, perm: 'editar_metas' },
     { href: '/configuracoes/conexoes', label: 'Conexões', ready: true, perm: 'configuracoes' },
+    { href: '/configuracoes/vendedores-crm', label: 'Vendedores do CRM', ready: true, perm: 'configuracoes' },
   ]},
 ];
 

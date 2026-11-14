@@ -9,21 +9,21 @@ on:
       source:
         description: 'O que sincronizar'
         type: choice
-        options: [all, mercadolivre]
+        options: [all, mercadolivre, bitrix24]
         default: all
-
-# Nunca roda duas sincronizações ao mesmo tempo (protege o refresh token)
-concurrency:
-  group: sync
-  cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  # Mercado Livre. Nunca roda duas ao mesmo tempo (protege o refresh token).
   sync:
+    if: ${{ github.event_name == 'schedule' || inputs.source == 'all' || inputs.source == 'mercadolivre' || inputs.source == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    concurrency:
+      group: sync
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -32,11 +32,32 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Sincronizar
-        run: npm run sync -- --source="$SOURCE"
+        run: npm run sync -- --source=mercadolivre
         env:
-          SOURCE: ${{ inputs.source || 'all' }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
           ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
           BACKFILL_DAYS: '365'
+
+  # CRM Bitrix24: job separado, a falha de um não afeta o outro.
+  bitrix:
+    if: ${{ github.event_name == 'schedule' || inputs.source == 'all' || inputs.source == 'bitrix24' || inputs.source == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    concurrency:
+      group: sync-bitrix
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Sincronizar Bitrix24
+        run: npm run sync -- --source=bitrix24
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}

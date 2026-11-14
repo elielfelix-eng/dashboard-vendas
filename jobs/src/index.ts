@@ -1,14 +1,15 @@
 /**
  * Ponto de entrada da sincronização.
- * Uso:  npm run sync -- --source=all | mercadolivre
+ * Uso:  npm run sync -- --source=all | mercadolivre | bitrix24
  * Executado automaticamente pelo GitHub Actions às 08h, 13h e 17h (Brasília).
  */
 import { connect } from './db.ts';
+import { syncBitrix24 } from './sync-bitrix24.ts';
 import { syncMercadoLivre } from './sync-mercadolivre.ts';
 
 const arg = process.argv.find((a) => a.startsWith('--source='));
 const source = arg?.split('=')[1] ?? 'all';
-const ALLOWED = ['all', 'mercadolivre'];
+const ALLOWED = ['all', 'mercadolivre', 'bitrix24'];
 
 async function ping(suffix = '') {
   const url = process.env.HEALTHCHECK_URL;
@@ -22,8 +23,20 @@ async function main() {
   const sql = connect();
   let failures = 0;
   try {
-    if (source === 'all' || source === 'mercadolivre') failures += await syncMercadoLivre(sql);
-    // Próximas fases: shopee, bitrix24, e atualização das views de KPI
+    // Cada fonte tem o próprio contador: a falha de uma não impede a outra
+    if (source === 'all' || source === 'mercadolivre') {
+      try { failures += await syncMercadoLivre(sql); } catch (err) {
+        failures++;
+        console.error('[ML] Falha geral:', (err as Error).message);
+      }
+    }
+    if (source === 'all' || source === 'bitrix24') {
+      try { failures += await syncBitrix24(sql); } catch (err) {
+        failures++;
+        console.error('[Bitrix] Falha geral:', (err as Error).message);
+      }
+    }
+    // Próximas fases: shopee e atualização das views de KPI
   } finally {
     await sql.end();
   }

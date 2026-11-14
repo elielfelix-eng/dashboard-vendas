@@ -1,6 +1,6 @@
 import writeXlsxFile from 'write-excel-file/browser';
 
-export type TipoColuna = 'texto' | 'brl' | 'num' | 'pct' | 'variacao';
+export type TipoColuna = 'texto' | 'brl' | 'num' | 'dec1' | 'pct' | 'variacao';
 export interface Coluna<T> {
   chave: keyof T & string;
   titulo: string;
@@ -18,7 +18,7 @@ export async function exportarXlsx<T extends object>(nomeArquivo: string, coluna
       if (v == null) return null;
       if (c.tipo === 'variacao') return { value: (v as { rotulo: string }).rotulo };
       if (c.tipo === 'texto') return { value: String(v) };
-      return { value: Number(v), format: c.tipo === 'brl' ? '#,##0.00' : c.tipo === 'pct' ? '0.0' : '#,##0' };
+      return { value: Number(v), format: c.tipo === 'brl' ? '#,##0.00' : c.tipo === 'pct' || c.tipo === 'dec1' ? '0.0' : '#,##0' };
     }),
   );
   await writeXlsxFile([cabecalho, ...corpo]).toFile(`${nomeArquivo}.xlsx`);

@@ -27,6 +27,33 @@ export function normalizarWebhook(bruta: string): string {
   return `${u.origin}/rest/${m[1]}/${m[2]}/`;
 }
 
+/** Referência de resultado de outro comando do batch (o Bitrix troca pelo valor). */
+const REF_RESULT = /^\$result\[[^\]]+\](\[[^\]]+\])*$/;
+
+/**
+ * Codifica no formato PHP http_build_query (filter[>ID]=5&select[0]=ID), com
+ * encodeURIComponent nos valores. Referências `$result[...]` ficam literais, para o
+ * Bitrix conseguir substituí-las dentro do comando do batch.
+ */
+export function paraQuery(params: Record<string, unknown>): string {
+  const partes: string[] = [];
+  const add = (chave: string, v: unknown): void => {
+    if (v === undefined || v === null) return;
+    if (Array.isArray(v)) { v.forEach((x, i) => add(`${chave}[${i}]`, x)); return; }
+    if (typeof v === 'object') {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) add(`${chave}[${k}]`, x);
+      return;
+    }
+    const txt = String(v);
+    partes.push(`${encodeURIComponent(chave)}=${REF_RESULT.test(txt) ? txt : encodeURIComponent(txt)}`);
+  };
+  for (const [k, v] of Object.entries(params)) add(k, v);
+  return partes.join('&');
+}
+
+/** Itens por página do Bitrix e máximo de comandos por batch. */
+const PAGINA = 50;
+
 /**
  * Cliente da REST do Bitrix24 via webhook de entrada.
  * A URL do webhook contém a chave secreta: ela NUNCA aparece em mensagens de
@@ -36,11 +63,14 @@ export class BitrixClient {
   private readonly base: string;
   /** Intervalo mínimo entre chamadas (limite do Bitrix: ~2 req/s). */
   private readonly intervaloMs: number;
+  /** Espera base antes de repetir um batch com comando falho (2 s, 4 s, 8 s). */
+  private readonly retentativaMs: number;
   private ultima = 0;
 
-  constructor(webhookUrl: string, opts: { intervaloMs?: number } = {}) {
+  constructor(webhookUrl: string, opts: { intervaloMs?: number; retentativaMs?: number } = {}) {
     this.base = normalizarWebhook(webhookUrl);
     this.intervaloMs = opts.intervaloMs ?? 550;
+    this.retentativaMs = opts.retentativaMs ?? 2000;
   }
 
   async call<T>(method: string, params: Record<string, unknown> = {}): Promise<BitrixResponse<T>> {
@@ -70,5 +100,70 @@ export class BitrixClient {
     const out: T[] = [];
     for await (const p of this.paginas<T>(method, params)) out.push(...p);
     return out;
+  }
+
+  /** Executa até 50 comandos numa chamada só (halt: 0, um erro não derruba os outros). */
+  async batch<T>(
+    cmds: Record<string, [string, Record<string, unknown>]>,
+  ): Promise<{ result: Record<string, T>; erros: Record<string, unknown> }> {
+    const chaves = Object.keys(cmds);
+    if (chaves.length > PAGINA) throw new Error(`Bitrix batch: no máximo ${PAGINA} comandos por chamada (recebeu ${chaves.length})`);
+    const cmd: Record<string, string> = {};
+    for (const k of chaves) cmd[k] = `${cmds[k][0]}?${paraQuery(cmds[k][1])}`;
+    const r = await this.call<{ result?: Record<string, T>; result_error?: Record<string, unknown> | unknown[] }>(
+      'batch', { halt: 0, cmd });
+    const res = r.result?.result;
+    const err = r.result?.result_error;
+    return {
+      result: res && !Array.isArray(res) ? res : {},
+      erros: err && !Array.isArray(err) ? err : {},
+    };
+  }
+
+  /**
+   * Modo rápido: pagina por ID (order ID ASC, start -1) em lotes de 50 comandos
+   * encadeados por `$result[c{i-1}][49][ID]`. Entrega UM array por comando, em ordem
+   * crescente de ID, e para no primeiro comando com menos de 50 itens (os seguintes
+   * são ignorados, mesmo com erro). Se todos vierem cheios, começa outro lote a
+   * partir do maior ID recebido. Parâmetros extras (ex.: entityTypeId) vão em todo comando.
+   * Se um comando alcançado vier sem resultado (erro dentro do batch), repete o batch a
+   * partir do último ID bom até 3 vezes (espera 2 s, 4 s, 8 s) antes de desistir; o
+   * contador zera quando há progresso.
+   */
+  async *listarPorId<T extends { ID: string }>(
+    method: string,
+    params: { filter?: Record<string, unknown>; select: string[]; [extra: string]: unknown },
+    opts: { itens?: (r: unknown) => T[]; idCampo?: string } = {},
+  ): AsyncGenerator<T[]> {
+    const idCampo = opts.idCampo ?? 'ID';
+    const itens = opts.itens ?? ((r: unknown) => (Array.isArray(r) ? (r as T[]) : []));
+    const caminho = opts.itens ? '[items]' : '';
+    let ultimoId: string | undefined;
+    let tentativas = 0;
+    for (;;) {
+      const cmds: Record<string, [string, Record<string, unknown>]> = {};
+      for (let i = 0; i < PAGINA; i++) {
+        const ref = i === 0 ? ultimoId : `$result[c${i - 1}]${caminho}[${PAGINA - 1}][${idCampo}]`;
+        const filter = { ...(params.filter ?? {}), ...(ref !== undefined ? { [`>${idCampo}`]: ref } : {}) };
+        cmds[`c${i}`] = [method, { ...params, filter, order: { [idCampo]: 'ASC' }, start: -1 }];
+      }
+      const { result, erros } = await this.batch<unknown>(cmds);
+      for (let i = 0; i < PAGINA; i++) {
+        const k = `c${i}`;
+        if (!(k in result)) {
+          if (tentativas >= 3) {
+            throw new Error(`Bitrix ${method}: comando ${k} do batch falhou ${JSON.stringify(erros[k] ?? 'sem resposta')}`.slice(0, 300));
+          }
+          tentativas++;
+          await sleep(this.retentativaMs * 2 ** (tentativas - 1));
+          break; // recomeça o batch a partir de ultimoId
+        }
+        const lista = itens(result[k]);
+        tentativas = 0;
+        if (lista.length) yield lista;
+        if (lista.length < PAGINA) return;
+        ultimoId = String((lista[lista.length - 1] as unknown as Record<string, unknown>)[idCampo]);
+      }
+    }
   }
 }

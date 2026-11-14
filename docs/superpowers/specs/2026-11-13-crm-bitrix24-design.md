@@ -13,6 +13,8 @@ Trazer os **Leads e Negócios** do Bitrix24 (`https://vocacao.bitrix24.com.br`) 
 - O cruzamento com o ERP é feito **pelo contato**. O **e-mail é a chave principal**, e o telefone e o CNPJ/CPF servem **apenas para validar**.
 - Os vendedores entram **já nesta etapa**, ligados ao usuário do painel **pelo e-mail**.
 - A carga inicial traz o **histórico completo**.
+- (14/11) O Bitrix é compartilhado por toda a ONG Vocação (16 funis). Entra só o funil **Brinde do Bem [10]**. Um **lead conta como Brinde do Bem pela origem** (`SOURCE_ID`), a partir de uma lista de origens escolhida pelo dono e editável na tela de admin.
+- (14/11) Privacidade: o Bitrix guarda dados pessoais de outros programas da ONG (escolaridade, telefone dos pais etc.). A sincronização busca **só os campos listados na seção 2**, nunca `select: ['*', 'UF_*']`, e grava em `raw` apenas esses campos.
 - Arquitetura: a mesma do ML. O GitHub Actions sincroniza, o banco calcula (funções SQL `analytics.crm_*`) e a tela só mostra.
 
 ## 2. Coleta (conector + job)

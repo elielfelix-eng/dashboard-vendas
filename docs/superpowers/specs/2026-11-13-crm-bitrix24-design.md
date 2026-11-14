@@ -62,8 +62,9 @@ O schema `crm` já existe desde a 0001. Tabelas, todas com `synced_at` (sem `raw
 
 **Permissões e RLS**
 - Novas permissões em `core.role_permissions`: `crm_funil`, `crm_vendedores` e `crm_origens`. Valores iniciais: admin e gestor com todas, comercial com todas, visualizador sem nenhuma, vendedor com todas.
-- `core.my_bitrix_id()` (definer) retorna o `bitrix_user_id` do usuário logado.
-- Política nas tabelas `crm.leads` e `crm.deals`: o usuário precisa ver o canal `crm` **e** ou ter perfil diferente de vendedor, ou ser o responsável (`assigned_by_id = (select core.my_bitrix_id())`). O padrão `(select …)` é o mesmo da 0011.
+- `core.my_bitrix_id()` (definer) retorna o usuário do Bitrix ligado ao usuário logado: a ligação manual em `crm.vinculo_vendedor` (se houver linha; `bitrix_id` null = desligado), senão o usuário de `crm.users` com o mesmo e-mail.
+- Todas as tabelas `crm.*` (exceto `vinculo_vendedor`, sem leitura direta) exigem o canal `crm` **e** alguma permissão `crm_funil`, `crm_vendedores` ou `crm_origens`.
+- Política nas tabelas `crm.leads` e `crm.deals`: além disso, o usuário precisa ou ter perfil diferente de vendedor, ou ser o responsável (`assigned_by_id = (select core.my_bitrix_id())`). O padrão `(select …)` é o mesmo da 0011.
 - O vendedor sem ligação não vê nenhum registro.
 - O webhook nunca grava no Bitrix. O job só faz leituras.
 

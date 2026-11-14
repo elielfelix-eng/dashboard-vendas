@@ -189,7 +189,7 @@ await db.exec(`create or replace function core.can_see_channel(ch text) returns 
 
 const ORIG = `select source_id, origem, leads, pct_negocio, pct_ganho, valor_ganho, ticket_medio from analytics.crm_origens`;
 eq('crm_origens outubro (origem 19)', (await rows(`${ORIG}(${OUT})`)).find((r) => r.source_id === '19'),
-  { source_id: '19', origem: 'Site - Brinde do Bem', leads: 4, pct_negocio: '75.0', pct_ganho: '33.3', valor_ganho: '1000.00', ticket_medio: '1000.00' });
+  { source_id: '19', origem: 'Site - Brinde do Bem', leads: 4, pct_negocio: '75.0', pct_ganho: '25.0', valor_ganho: '1000.00', ticket_medio: '1000.00' });
 const origNov = await rows(`${ORIG}(${NOV})`);
 eq('crm_origens novembro: sem divisao por zero (percentuais nulos)',
   [origNov.length > 0, origNov.every((r) => r.leads === 0 && r.pct_negocio === null && r.pct_ganho === null && r.ticket_medio === null)], [true, true]);

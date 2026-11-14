@@ -333,7 +333,7 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- Origens: leads da coorte pela origem do lead (% -> negocio = leads com negocio / leads;
--- % -> ganho = negocios ganhos / negocios da coorte); valor ganho e ticket pelos ganhos no
+-- % -> ganho = leads com negocio ganho (etapa ganho hoje) / leads); valor ganho e ticket pelos ganhos no
 -- periodo, pela origem do NEGOCIO. Lista as origens ativas mesmo sem dados; nula = "Sem origem".
 -- ---------------------------------------------------------------------
 create or replace function analytics.crm_origens(p_de date, p_ate date, p_area text default null,
@@ -371,16 +371,19 @@ language sql stable security invoker set search_path = '' as $$
        and (p_origem is null or d.source_id = p_origem)
      group by d.source_id
   ),
+  -- Desfecho por lead (agregado uma vez; junta por hash, sem subconsulta por lead)
+  pd as (
+    select cd.lead_id, bool_or(cd.semantica = 'ganho') as tem_ganho
+      from cd
+     group by cd.lead_id
+  ),
   pl as (
     select lds.source_id, count(*)::int as leads,
-           count(*) filter (where exists (select 1 from cd where cd.lead_id = lds.id))::int as com_neg
+           count(pd.lead_id)::int as com_neg,
+           count(*) filter (where pd.tem_ganho)::int as com_ganho
       from lds
+      left join pd on pd.lead_id = lds.id
      group by lds.source_id
-  ),
-  pn as (
-    select cd.source_id, count(*)::int as neg, count(*) filter (where cd.semantica = 'ganho')::int as gan
-      from cd
-     group by cd.source_id
   ),
   todas as (
     select o.source_id from crm.origens_brinde o where o.ativo and (p_origem is null or o.source_id = p_origem)
@@ -394,14 +397,13 @@ language sql stable security invoker set search_path = '' as $$
               else coalesce(ob.nome, s.nome, t.source_id) end,
          coalesce(pl.leads, 0),
          round(pl.com_neg * 100.0 / nullif(pl.leads, 0), 1),
-         round(pn.gan * 100.0 / nullif(pn.neg, 0), 1),
+         round(pl.com_ganho * 100.0 / nullif(pl.leads, 0), 1),
          round(coalesce(gan.valor, 0), 2),
          round(gan.valor / nullif(gan.qtd, 0), 2)
     from todas t
     left join crm.origens_brinde ob on ob.source_id = t.source_id
     left join crm.sources s on s.status_id = t.source_id
     left join pl on pl.source_id is not distinct from t.source_id
-    left join pn on pn.source_id is not distinct from t.source_id
     left join gan on gan.source_id is not distinct from t.source_id
    order by coalesce(pl.leads, 0) desc, coalesce(gan.valor, 0) desc, 2
 $$;

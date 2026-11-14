@@ -10,6 +10,24 @@ export interface BitrixResponse<T> {
 }
 
 /**
+ * Deixa só "https://portal/rest/<usuario>/<chave>/": tira espaços e aspas e corta
+ * o que vier depois da chave (ex.: o exemplo "profile/" que o Bitrix mostra).
+ * Nunca inclui a URL nas mensagens de erro.
+ */
+export function normalizarWebhook(bruta: string): string {
+  const s = (bruta ?? '').trim().replace(/^["']+|["']+$/g, '').trim();
+  if (!s) throw new Error('BITRIX_WEBHOOK_URL não configurada');
+  let u: URL;
+  try { u = new URL(s); } catch { throw new Error('BITRIX_WEBHOOK_URL inválida: não é um endereço (deve começar com https://)'); }
+  const m = u.pathname.match(/^\/rest\/(\d+)\/([^/]+)/);
+  if (!m) throw new Error('BITRIX_WEBHOOK_URL inválida: esperado https://<portal>/rest/<número>/<chave>/');
+  if (/\.(json|xml)$/.test(m[2]) || m[2] === 'profile') {
+    throw new Error('BITRIX_WEBHOOK_URL inválida: falta a chave depois do número do usuário');
+  }
+  return `${u.origin}/rest/${m[1]}/${m[2]}/`;
+}
+
+/**
  * Cliente da REST do Bitrix24 via webhook de entrada.
  * A URL do webhook contém a chave secreta: ela NUNCA aparece em mensagens de
  * erro nem em logs (o rótulo usado é só "bitrix:<método>").
@@ -21,8 +39,7 @@ export class BitrixClient {
   private ultima = 0;
 
   constructor(webhookUrl: string, opts: { intervaloMs?: number } = {}) {
-    if (!webhookUrl) throw new Error('BITRIX_WEBHOOK_URL não configurada');
-    this.base = webhookUrl.endsWith('/') ? webhookUrl : webhookUrl + '/';
+    this.base = normalizarWebhook(webhookUrl);
     this.intervaloMs = opts.intervaloMs ?? 550;
   }
 

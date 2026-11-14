@@ -1,6 +1,17 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BitrixClient } from './client.ts';
+import { BitrixClient, normalizarWebhook } from './client.ts';
+
+test('bitrix: limpa a URL do webhook (espaço, aspas, exemplo "profile/")', () => {
+  const ok = 'https://p.bitrix24.com.br/rest/9/abc123/';
+  assert.equal(normalizarWebhook('https://p.bitrix24.com.br/rest/9/abc123'), ok);
+  assert.equal(normalizarWebhook('  "https://p.bitrix24.com.br/rest/9/abc123/"\n'), ok);
+  assert.equal(normalizarWebhook('https://p.bitrix24.com.br/rest/9/abc123/profile/'), ok);
+  assert.equal(normalizarWebhook('https://p.bitrix24.com.br/rest/9/abc123/profile.json'), ok);
+  assert.throws(() => normalizarWebhook('https://p.bitrix24.com.br/rest/9/profile/'), /falta a chave/);
+  assert.throws(() => normalizarWebhook('p.bitrix24.com.br'), /não é um endereço/);
+  assert.throws(() => normalizarWebhook('https://p.bitrix24.com.br/crm/'), /esperado/);
+});
 
 const original = globalThis.fetch;
 afterEach(() => { globalThis.fetch = original; });

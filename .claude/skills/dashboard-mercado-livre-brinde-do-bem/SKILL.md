@@ -113,7 +113,7 @@ Configuração correta do app ML: Fluxos OAuth = Authorization Code + Refresh To
 
 ## Dashboard (Bloco A)
 Spec `docs/superpowers/specs/2026-11-12-dashboard-bloco-a-design.md`, plano `docs/superpowers/plans/2026-11-12-dashboard-bloco-a.md`. **O banco calcula, a tela só mostra.**
-- **Ordem das migrations:** 0003 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 (todas reexecutáveis). Reaplicou alguma? Reaplique todas as seguintes da lista.
+- **Ordem das migrations:** 0003 → 0006 → 0007 → 0008 → 0009 → 0010 → 0011 → 0012 → 0013 (todas reexecutáveis). Reaplicou alguma? Reaplique todas as seguintes da lista.
 - **Desempenho (incidente 12/11/2026: telas com "statement timeout" de 8 s):** (1) `analytics.dash_pedidos_base(p_de, p_ate)` refaz a regra de `ml_pedidos` só para o período (teste garante igualdade) com CTEs `as materialized` — sem isso o Postgres reexecutava fatura/frete de carrinho por pedido (1,2 milhão de laços num ano); (2) `resolve_unit_cost` em plpgsql usando o índice (product_id, created_at); (3) 0011: políticas RLS com `(select core.my_channels())` / `(select core.can_see_costs())` (calcula uma vez por consulta). Nunca usar `ml_pedidos` inteiro nas telas. Medir com o papel `authenticated` (o SQL Editor ignora RLS).
 - **Permissões por perfil:** `core.role_permissions` (visao_geral, vendas, rentabilidade, metas, custos, editar_metas, configuracoes), `core.has_perm(text)`; `core.can_see_costs()` = `has_perm('custos')`. Trava: admin nunca perde `configuracoes`. Escrita de permissões/parâmetros só pelo perfil admin.
 - **Imposto/embalagem:** `core.parametros_custo` por canal com `vigente_desde`; só pedidos pagos.
@@ -123,6 +123,21 @@ Spec `docs/superpowers/specs/2026-11-12-dashboard-bloco-a-design.md`, plano `doc
 - [ ] Fase 5 — Bitrix24 (webhook somente leitura, usuário técnico)
 - [ ] Fase 6 — Shopee (aguarda aprovação no Open Platform)
 - [ ] Fase 7 — Healthchecks.io, backup semanal criptografado
+
+## CRM Bitrix24 — funil, vendedores e origens
+Spec `docs/superpowers/specs/2026-11-13-crm-bitrix24-design.md` (decisões na seção 1). Migrations `0012_crm.sql` (tabelas, permissões, RLS) e `0013_crm_funcoes.sql` (funções `analytics.crm_*`). **Reexecutar a 0013 sozinha** sempre que as funções `crm_*` mudarem; a 0012 só quando mudar tabela, permissão ou RLS.
+- **Escopo:** só o funil **10 (Brinde do Bem)** do Bitrix da ONG (16 funis). Não há filtro de funil.
+- **Leads** contam pela **origem** (`SOURCE_ID`), a partir da lista `crm.origens_brinde` (editável em Configurações → Vendedores do CRM). **Negócios** contam pelo funil 10, qualquer que seja a origem.
+- **Motivo de perda** = a etapa de perda do funil 10. `C10:LOSE` aparece como "Cancelado (sem motivo)" (é a maioria dos perdidos).
+- **Área de Negócio** (`UF_CRM_1740402485`: Brinde do Bem | Brindes Vocação | Pedido Online) é filtro nas telas; vale para negócios, não para leads.
+- **Fuso:** o portal devolve horários com `+03:00`; os dias são contados no horário de Brasília (`America/Sao_Paulo`), como no ML.
+- **Vínculo vendedor × usuário do painel:** automático pelo **e-mail**; a exceção manual fica em `crm.vinculo_vendedor` (`bitrix_id` null = desligado). `core.user_profiles.bitrix_user_id` não é usado.
+- **Sincronização:** job `bitrix` da ação "Sincronizacao de dados" (`source` = `bitrix24`). Primeira execução = carga completa (até cerca de 1 h); depois incremental por `DATE_MODIFY`; domingo faz reconciliação (IDs sumidos saem do painel). Canal `crm` em `core.sync_runs`. Falha do Bitrix não afeta o ML.
+- **Conferir a carga:** `crm.users` deve ter cerca de **309** usuários. Se der cerca de **132**, o `user.get` trouxe só os usuários ativos.
+- **Ação "Bitrix - listar configuracao"** (manual, só leitura): lista funis, etapas, origens e campos. Use para conferir IDs antes de mudar listas ou filtros.
+- **Webhook:** a URL fica **só** no GitHub Secret `BITRIX_WEBHOOK_URL`. **Nunca** peça, cole ou repita a URL no chat, em logs ou em arquivos. Erros mostram só o nome do método.
+- **Somente leitura:** o conector só usa métodos de leitura (`crm.*.list`, `user.get`). Nunca adicione métodos de gravação (`add`, `update`, `delete`). O usuário técnico do Bitrix deve ter só "Ler" no CRM.
+- **Privacidade:** só os campos listados na spec (seção 2) são buscados; nunca `select: ['*', 'UF_*']`.
 
 ## ERP (SQL Server) — gateway
 O ERP é próprio (SQL Server), ligado 24h. O gateway roda em **outra máquina Windows da rede** (estilo Power BI Gateway): Python + pyodbc empacotado em `BrindeGateway.exe` (PyInstaller), tarefa agendada **BrindeGateway** como SYSTEM às **07:45, 12:45 e 16:45** (com "executar se perdeu o horário", limite 1 h). Usa um usuário SQL somente leitura (`gateway_leitura`, SELECT no schema `painel`) e envia só de saída para o schema `erp` do Supabase com o papel restrito `gateway_writer` (migration `supabase/migrations/0005_gateway.sql`; pooler porta 6543, usuário `gateway_writer.<project_ref>`, `sslmode=require`).

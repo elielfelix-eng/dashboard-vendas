@@ -58,7 +58,7 @@ O schema `crm` já existe desde a 0001. Tabelas, todas com `synced_at` (sem `raw
 - `crm.leads`, `crm.deals` (com as colunas acima + `deleted_at`)
 - `crm.stage_history` (entidade, id do registro, etapa, data de entrada)
 - `crm.first_activity` (entidade, id do registro, data da 1ª atividade)
-- `crm.vinculo_vendedor`: exceções da ligação entre o usuário do painel e o usuário do Bitrix, mantida pelo admin. Preenche `core.user_profiles.bitrix_user_id`, que já existe.
+- `crm.vinculo_vendedor`: ligações manuais entre o usuário do painel e o usuário do Bitrix, mantidas pelo admin. `bitrix_id` null = ligação desligada explicitamente (o vendedor fica sem vínculo mesmo que o e-mail bata). A ligação automática é pelo e-mail. `core.user_profiles.bitrix_user_id` **não é usado**.
 
 **Permissões e RLS**
 - Novas permissões em `core.role_permissions`: `crm_funil`, `crm_vendedores` e `crm_origens`. Valores iniciais: admin e gestor com todas, comercial com todas, visualizador sem nenhuma, vendedor com todas.

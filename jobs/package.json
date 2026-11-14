@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "sync": "tsx --env-file-if-exists=../.env src/index.ts",
+    "bitrix:config": "tsx --env-file-if-exists=../.env src/bitrix-config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

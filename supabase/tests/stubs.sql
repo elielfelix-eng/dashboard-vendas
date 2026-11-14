@@ -23,3 +23,4 @@ create index on core.sync_runs (source, status, started_at desc);
 
 alter table core.sync_runs enable row level security;
 create policy "logados veem log de sincronizacao" on core.sync_runs for select to authenticated using (true);
+create table auth.users (id uuid primary key, email text);

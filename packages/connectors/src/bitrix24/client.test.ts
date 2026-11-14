@@ -1,6 +1,6 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BitrixClient, normalizarWebhook } from './client.ts';
+import { BitrixClient, normalizarWebhook, paraQuery } from './client.ts';
 
 test('bitrix: limpa a URL do webhook (espaço, aspas, exemplo "profile/")', () => {
   const ok = 'https://p.bitrix24.com.br/rest/9/abc123/';
@@ -57,4 +57,95 @@ test('bitrix: erro no corpo com HTTP 200 vira exceção', async () => {
 
 test('bitrix: sem URL configurada falha com mensagem clara', () => {
   assert.throws(() => new BitrixClient(''), /BITRIX_WEBHOOK_URL/);
+});
+
+// ---- batch e paginação por ID ----
+
+function lerQuery(qs: string): Record<string, string> {
+  const o: Record<string, string> = {};
+  for (const par of qs.split('&')) {
+    const i = par.indexOf('=');
+    o[decodeURIComponent(par.slice(0, i))] = decodeURIComponent(par.slice(i + 1));
+  }
+  return o;
+}
+
+/** Fake do Bitrix com registros de ID 1..total; resolve $result dentro do batch. */
+function fakeBitrix(total: number, opts: { comItems?: boolean } = {}) {
+  const metodos: string[] = [];
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const method = String(input).slice(SEGREDO.length);
+    metodos.push(method);
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    assert.equal(method, 'batch');
+    assert.equal(body.halt, 0);
+    const resultados: Record<string, unknown> = {};
+    for (const [chave, cmd] of Object.entries(body.cmd as Record<string, string>)) {
+      const [m, qs] = cmd.split('?');
+      metodos.push(m);
+      const q = lerQuery(qs);
+      assert.equal(q.start, '-1');
+      assert.equal(q['order[ID]'], 'ASC');
+      let de = Number(q['filter[>ID]'] ?? 0);
+      const ref = q['filter[>ID]']?.match(/^\$result\[(c\d+)\](\[items\])?\[49\]\[ID\]$/);
+      if (ref) {
+        const anterior = resultados[ref[1]];
+        const lista = (ref[2] ? (anterior as { items: { ID: string }[] }).items : anterior) as { ID: string }[];
+        de = Number(lista[49]?.ID ?? total);
+      }
+      const itens: { ID: string }[] = [];
+      for (let id = de + 1; id <= total && itens.length < 50; id++) itens.push({ ID: String(id) });
+      resultados[chave] = opts.comItems ? { items: itens } : itens;
+    }
+    return json({ result: { result: resultados, result_error: [], result_total: {}, result_time: {} } });
+  }) as typeof fetch;
+  return metodos;
+}
+
+type Params = Parameters<BitrixClient['listarPorId']>[1];
+type Opts = Parameters<BitrixClient['listarPorId']>[2];
+async function todos(bx: BitrixClient, params: Params, opts?: Opts) {
+  const ids: string[] = [];
+  for await (const p of bx.listarPorId<{ ID: string }>('crm.lead.list', params, opts)) ids.push(...p.map((x) => x.ID));
+  return ids;
+}
+const de1a = (n: number) => Array.from({ length: n }, (_, i) => String(i + 1));
+const semEscrita = (m: string[]) => m.every((x) => !/\.(add|update|delete)$/.test(x));
+
+test('bitrix: paraQuery no formato PHP', () => {
+  const q = paraQuery({ filter: { '>ID': 5, '@SOURCE_ID': ['19', '10|WHATSAPP'] }, order: { ID: 'ASC' }, select: ['ID'], start: -1 });
+  assert.equal(q, 'filter%5B%3EID%5D=5&filter%5B%40SOURCE_ID%5D%5B0%5D=19&filter%5B%40SOURCE_ID%5D%5B1%5D=10%7CWHATSAPP&order%5BID%5D=ASC&select%5B0%5D=ID&start=-1');
+  assert.equal(decodeURIComponent(q), 'filter[>ID]=5&filter[@SOURCE_ID][0]=19&filter[@SOURCE_ID][1]=10|WHATSAPP&order[ID]=ASC&select[0]=ID&start=-1');
+  assert.ok(paraQuery({ filter: { '>ID': '$result[c0][49][ID]' } }).endsWith('=$result[c0][49][ID]'));
+});
+
+test('bitrix: listarPorId com 120 registros, sem repetir', async () => {
+  const metodos = fakeBitrix(120);
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  assert.deepEqual(await todos(bx, { select: ['ID'] }), de1a(120));
+  assert.ok(semEscrita(metodos));
+});
+
+test('bitrix: listarPorId com 100 registros (última página cheia) termina sem repetir', async () => {
+  const metodos = fakeBitrix(100);
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  assert.deepEqual(await todos(bx, { select: ['ID'] }), de1a(100));
+  assert.ok(semEscrita(metodos));
+});
+
+test('bitrix: listarPorId com resposta em items e parâmetro extra', async () => {
+  const metodos = fakeBitrix(120, { comItems: true });
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  const ids = await todos(bx, { select: ['ID'], entityTypeId: 2 }, { itens: (r) => (r as { items: { ID: string }[] }).items });
+  assert.deepEqual(ids, de1a(120));
+  assert.ok(semEscrita(metodos));
+});
+
+test('bitrix: batch com 51 comandos dá erro', async () => {
+  const metodos = fakeBitrix(1);
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  const cmds: Record<string, [string, Record<string, unknown>]> = {};
+  for (let i = 0; i < 51; i++) cmds[`c${i}`] = ['crm.lead.list', {}];
+  await assert.rejects(bx.batch(cmds), /50/);
+  assert.ok(semEscrita(metodos));
 });

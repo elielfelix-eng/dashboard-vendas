@@ -142,6 +142,17 @@ export function separarNegocios<T extends Pick<LinhaDeal, 'id' | 'category_id'>>
   return { manter, remover };
 }
 
+/**
+ * Origens ativas agora que não estavam na última execução com sucesso (ou todas, se ela
+ * não registrou a lista). Os leads antigos dessas origens precisam de uma busca sem
+ * >DATE_MODIFY. Origens removidas não pedem nada (a reconciliação cuida delas).
+ */
+export function origensNovas(atuais: string[], anteriores: string[] | null): string[] {
+  if (!anteriores) return [...atuais];
+  const antes = new Set(anteriores);
+  return atuais.filter((o) => !antes.has(o));
+}
+
 /** Hoje é domingo no horário de Brasília? */
 export function domingoEmBrasilia(d: Date): boolean {
   return new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(d) === 'Sun';

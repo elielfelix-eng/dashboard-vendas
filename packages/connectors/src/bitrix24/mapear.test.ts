@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CAMPOS_DEAL, CAMPOS_LEAD, domingoEmBrasilia, mapDeal, mapHistorico, mapLead, mapStage, mapUser,
-  mapaAreas, paraFiltroBitrix, semantica, separarNegocios, type LinhaDeal,
+  mapaAreas, origensNovas, paraFiltroBitrix, semantica, separarNegocios, type LinhaDeal,
 } from './mapear.ts';
 
 test('mapear: mapDeal converte tipos, vazio vira null e a área vira o rótulo', () => {
@@ -99,6 +99,12 @@ test('mapear: domingo é o dia em Brasília', () => {
   assert.equal(domingoEmBrasilia(new Date('2026-11-15T04:00:00Z')), true);  // dom 01h BRT
   assert.equal(domingoEmBrasilia(new Date('2026-11-16T02:59:00Z')), true);  // dom 23h59 BRT
   assert.equal(domingoEmBrasilia(new Date('2026-11-16T03:00:00Z')), false); // seg 00h BRT
+});
+
+test('mapear: origensNovas devolve as origens ativadas desde a última execução', () => {
+  assert.deepEqual(origensNovas(['19', '23'], ['19']), ['23']);
+  assert.deepEqual(origensNovas(['19'], ['19', '23']), []);
+  assert.deepEqual(origensNovas(['19'], null), ['19']);
 });
 
 test('mapear: data para o filtro do Bitrix com fuso explícito', () => {

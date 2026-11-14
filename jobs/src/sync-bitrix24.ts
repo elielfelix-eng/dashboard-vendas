@@ -6,7 +6,7 @@
  */
 import {
   BitrixClient, CAMPOS_DEAL, CAMPOS_LEAD, FUNIL_BRINDE, chunk, domingoEmBrasilia, mapDeal, mapHistorico,
-  mapLead, mapStage, mapUser, mapaAreas, paraFiltroBitrix, separarNegocios,
+  mapLead, mapStage, mapUser, mapaAreas, origensNovas, paraFiltroBitrix, separarNegocios,
   type BitrixResponse,
 } from '@dash/connectors';
 import { requireEnv, upsert, type Sql } from './db.ts';
@@ -19,13 +19,17 @@ type Linha = Record<string, unknown>;
 
 export async function syncBitrix24(sql: Sql): Promise<number> {
   const [run] = await sql<{ id: number }[]>`insert into core.sync_runs (source) values ('bitrix24') returning id`;
-  const stats = { leads: 0, deals: 0, fora_do_funil: 0, historico: 0, atividades: 0, apagados: 0 };
+  const stats = {
+    leads: 0, leads_origens_novas: 0, deals: 0, fora_do_funil: 0, historico: 0, atividades: 0, apagados: 0,
+    origens: [] as string[],
+  };
   try {
     const bx = new BitrixClient(requireEnv('BITRIX_WEBHOOK_URL'));
     const agora = new Date();
 
-    const [last] = await sql<{ started_at: Date | null }[]>`
-      select max(started_at) as started_at from core.sync_runs where source = 'bitrix24' and status = 'success'`;
+    const [last] = await sql<{ started_at: Date; stats: { origens?: unknown } | null }[]>`
+      select started_at, stats from core.sync_runs where source = 'bitrix24' and status = 'success'
+       order by started_at desc limit 1`;
     const completa = !last?.started_at;
     const desde = completa ? null : paraFiltroBitrix(new Date(last.started_at!.getTime() - HORA));
     console.log(`[Bitrix] ${completa ? 'carga completa' : `incremental desde ${desde}`}`);
@@ -33,9 +37,22 @@ export async function syncBitrix24(sql: Sql): Promise<number> {
     const areas = await syncConfiguracao(sql, bx, agora);
 
     const origens = (await sql<{ source_id: string }[]>`
-      select source_id from crm.origens_brinde where ativo order by source_id`).map((o) => o.source_id);
+      select source_id from crm.origens_brinde where ativo`).map((o) => o.source_id).sort();
+    stats.origens = origens;
     if (!origens.length) console.warn('[Bitrix] Nenhuma origem ativa em crm.origens_brinde: leads não sincronizados.');
-    else stats.leads = await syncLeads(sql, bx, origens, desde, agora);
+    else {
+      stats.leads = await syncLeads(sql, bx, origens, desde, agora);
+      // Origem ativada depois da última execução com sucesso: os leads antigos dela
+      // não chegam pelo >DATE_MODIFY, então ganham uma busca completa só dessas origens.
+      if (!completa) {
+        const anteriores = Array.isArray(last?.stats?.origens) ? (last!.stats!.origens as unknown[]).map(String) : null;
+        const novas = origensNovas(origens, anteriores);
+        if (novas.length) {
+          console.log(`[Bitrix] origens novas (${novas.join(', ')}): buscando todos os leads delas`);
+          stats.leads_origens_novas = await syncLeads(sql, bx, novas, null, agora);
+        }
+      }
+    }
 
     const negocios = await syncNegocios(sql, bx, areas, desde, agora);
     stats.deals = negocios.gravados;

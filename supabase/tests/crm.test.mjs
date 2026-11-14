@@ -22,9 +22,9 @@ const mig = (f) => readFileSync(`${repo}/supabase/migrations/${f}`, 'utf8');
 
 await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
-  '0008_dashboard_admin.sql', '0011_rls_desempenho.sql', '0012_crm.sql', '0012_crm.sql'])
+  '0008_dashboard_admin.sql', '0011_rls_desempenho.sql', '0012_crm.sql', '0012_crm.sql', '0013_crm_funcoes.sql', '0013_crm_funcoes.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002 + 0003 + 0006 + 0007 + 0008 + 0011 + 0012 (x2) aplicadas');
+console.log('Migrations 0002 + 0003 + 0006 + 0007 + 0008 + 0011 + 0012 (x2) + 0013 (x2) aplicadas');
 
 // Perfil e usuario controlados pelo teste
 await db.exec(`
@@ -96,6 +96,129 @@ await perfil('gestor');
 await erro('crm_vincular exige admin', `select core.crm_vincular('${U1}', 1)`, /permiss/);
 await erro('crm_desvincular_auto exige admin', `select core.crm_desvincular_auto('${U1}')`, /permiss/);
 await erro('crm_origem_ativa exige admin', `select core.crm_origem_ativa('19', false)`, /permiss/);
+
+// ---------------- 0013: funcoes de analise analytics.crm_* ----------------
+// 4 leads da origem 19 em outubro (um em 01/11 02:30+03 = 31/10 20:30 em Brasilia) + 1 lead do Bazar (UC_BVPCTK).
+// Negocios do funil 10: ganho R$ 1.000 (20/10), perdido em C10:LOSE e aberto em C10:UC_W608A6. Mais 1 ganho no funil 33.
+await db.exec(`
+  insert into crm.stages (entity, status_id, category_id, nome, ordem, semantica) values
+    ('deal', 'C10:NEW', 10, 'Novo', 10, 'andamento'),
+    ('deal', 'C10:UC_W608A6', 10, 'Proposta', 20, 'andamento'),
+    ('deal', 'C10:WON', 10, 'Ganho', 30, 'ganho'),
+    ('deal', 'C10:LOSE', 10, 'Perdido', 40, 'perdido'),
+    ('deal', 'C10:UC_SEMRESP', 10, 'Cliente sem resposta', 50, 'perdido'),
+    ('deal', 'C33:WON', 33, 'Ganho', 30, 'ganho');
+  insert into crm.leads (id, source_id, assigned_by_id, date_create) values
+    (101, '19', 7, '2026-10-05T12:00:00-03:00'),
+    (102, '19', 7, '2026-10-10T12:00:00-03:00'),
+    (103, '19', 8, '2026-10-15T12:00:00-03:00'),
+    (104, '19', 8, '2026-11-01T02:30:00+03:00'),
+    (105, 'UC_BVPCTK', 7, '2026-10-12T12:00:00-03:00');
+  insert into crm.deals (id, category_id, stage_id, source_id, assigned_by_id, lead_id, opportunity, date_create, closedate, area) values
+    (201, 10, 'C10:WON', '19', 7, 101, 1000, '2026-10-06T12:00:00-03:00', '2026-10-20T12:00:00-03:00', 'Brinde do Bem'),
+    (202, 10, 'C10:LOSE', '19', 7, 102, 500, '2026-10-11T12:00:00-03:00', '2026-10-25T12:00:00-03:00', 'Brinde do Bem'),
+    (203, 10, 'C10:UC_W608A6', '19', 8, 103, 300, '2026-10-16T12:00:00-03:00', null, 'Brinde do Bem'),
+    (204, 33, 'C33:WON', '19', 8, 104, 999, '2026-10-17T12:00:00-03:00', '2026-10-21T12:00:00-03:00', 'Brinde do Bem');
+  insert into crm.stage_history (id, deal_id, stage_id, entrou_em) values
+    (1, 201, 'C10:NEW', '2026-10-06T12:00:00-03:00'), (2, 201, 'C10:UC_W608A6', '2026-10-10T12:00:00-03:00'),
+    (3, 201, 'C10:WON', '2026-10-20T12:00:00-03:00'),
+    (4, 202, 'C10:NEW', '2026-10-11T12:00:00-03:00'), (5, 202, 'C10:LOSE', '2026-10-25T12:00:00-03:00'),
+    (6, 203, 'C10:NEW', '2026-10-16T12:00:00-03:00'), (7, 203, 'C10:UC_W608A6', '2026-10-18T12:00:00-03:00');
+  insert into crm.first_activity (lead_id, primeira_em) values
+    (101, '2026-10-05T14:00:00-03:00'), (102, '2026-10-10T16:00:00-03:00');`);
+await db.exec(`reset role`); await perfil('comercial'); await uid(U2);
+const rows = async (sql) => (await db.query(sql)).rows;
+const ARGS = (de, ate, extra = '') => `'${de}'::date, '${ate}'::date${extra}`;
+const OUT = ARGS('2026-10-01', '2026-10-31');
+const NOV = ARGS('2026-11-01', '2026-11-30');
+const RESUMO = (a) => `select * from analytics.crm_resumo(${a})`;
+
+eq('crm_resumo outubro', (await rows(RESUMO(OUT)))[0], {
+  leads_novos: 4, leads_com_negocio: 3, negocios_coorte: 3, ganhos_coorte: 1,
+  ganhos: 1, perdidos: 1, valor_ganho: '1000.00', ciclo_medio_dias: '14.0' });
+eq('lead de 01/11 02:30+03 conta em outubro (nao em novembro)', (await rows(RESUMO(NOV)))[0].leads_novos, 0);
+eq('crm_resumo novembro: zeros, sem erro', (await rows(RESUMO(NOV)))[0], {
+  leads_novos: 0, leads_com_negocio: 0, negocios_coorte: 0, ganhos_coorte: 0,
+  ganhos: 0, perdidos: 0, valor_ganho: '0.00', ciclo_medio_dias: null });
+eq('filtro p_area = Pedido Online zera os negocios', (await rows(RESUMO(ARGS('2026-10-01', '2026-10-31', `, 'Pedido Online'`))))[0], {
+  leads_novos: 4, leads_com_negocio: 0, negocios_coorte: 0, ganhos_coorte: 0,
+  ganhos: 0, perdidos: 0, valor_ganho: '0.00', ciclo_medio_dias: null });
+eq('filtro p_vendedor = 8', (await rows(`select leads_novos, negocios_coorte, ganhos from analytics.crm_resumo(${OUT}, null, 8)`))[0],
+  { leads_novos: 2, negocios_coorte: 1, ganhos: 0 });
+eq('filtro p_origem = 38 (sem dados)', (await rows(`select leads_novos, ganhos from analytics.crm_resumo(${OUT}, null, null, '38')`))[0],
+  { leads_novos: 0, ganhos: 0 });
+
+eq('crm_funil outubro', await rows(`select ordem, etapa, quantidade from analytics.crm_funil(${OUT}) order by ordem`), [
+  { ordem: 1, etapa: 'Leads', quantidade: 4 }, { ordem: 2, etapa: 'Negócios', quantidade: 3 },
+  { ordem: 3, etapa: 'Novo', quantidade: 3 }, { ordem: 4, etapa: 'Proposta', quantidade: 2 },
+  { ordem: 5, etapa: 'Ganhos', quantidade: 1 }]);
+
+const etapas = await rows(`select status_id, nome, ordem, em_aberto, valor_aberto, tempo_medio_dias, gargalo from analytics.crm_etapas(${OUT}) order by ordem`);
+eq('crm_etapas: Novo (foto de agora + tempo medio)', etapas[0],
+  { status_id: 'C10:NEW', nome: 'Novo', ordem: 10, em_aberto: 0, valor_aberto: '0.00', tempo_medio_dias: '6.7', gargalo: false });
+eq('crm_etapas: Proposta e o gargalo (aberto ate agora)', [etapas[1].em_aberto, etapas[1].valor_aberto, etapas[1].gargalo, Number(etapas[1].tempo_medio_dias) > 10],
+  [1, '300.00', true, true]);
+eq('crm_etapas: so etapas em andamento', etapas.length, 2);
+
+eq('crm_motivos_perda outubro', await rows(`select status_id, motivo, perdidos, pct from analytics.crm_motivos_perda(${OUT})`),
+  [{ status_id: 'C10:LOSE', motivo: 'Cancelado (sem motivo)', perdidos: 1, pct: '100.0' }]);
+eq('crm_motivos_perda novembro vazio', await rows(`select * from analytics.crm_motivos_perda(${NOV})`), []);
+
+const VEND = `select bitrix_id::int as id, vendedor, leads, primeiro_contato_horas as h, sem_contato, negocios, ganhos, perdidos,
+  conversao, valor_ganho, ticket_medio from analytics.crm_vendedores`;
+eq('crm_vendedores (comercial)', await rows(`${VEND}(${OUT})`), [
+  { id: 7, vendedor: 'Ana', leads: 2, h: '3.0', sem_contato: 0, negocios: 2, ganhos: 1, perdidos: 1,
+    conversao: '50.0', valor_ganho: '1000.00', ticket_medio: '1000.00' },
+  { id: 8, vendedor: 'Beto', leads: 2, h: null, sem_contato: 2, negocios: 1, ganhos: 0, perdidos: 0,
+    conversao: null, valor_ganho: '0.00', ticket_medio: null },
+  { id: null, vendedor: 'Média da equipe', leads: 2, h: '3.0', sem_contato: 1, negocios: 2, ganhos: 1, perdidos: 1,
+    conversao: '50.0', valor_ganho: '500.00', ticket_medio: '1000.00' }]);
+await db.exec(`insert into crm.leads (id, source_id, assigned_by_id, date_create) values
+  (106, '19', null, '2026-10-20T12:00:00-03:00'), (107, '19', 77, '2026-10-21T12:00:00-03:00'),
+  (108, '19', 7, '2026-10-22T12:00:00-03:00')`);
+await db.exec(`update crm.leads set deleted_at = now() where id = 108`);
+eq('crm_vendedores: sem responsavel, usuario desconhecido e excluidos', (await rows(`${VEND}(${OUT})`)).map((r) => [r.id, r.vendedor, r.leads]),
+  [[7, 'Ana', 2], [8, 'Beto', 2], [77, 'Usuário 77', 1], [null, 'Sem responsável', 1], [null, 'Média da equipe', 2]]);
+await db.exec(`delete from crm.leads where id in (106, 107, 108)`);
+await perfil('visualizador');
+await erro('crm_vendedores exige permissao', `select * from analytics.crm_vendedores(${OUT})`, /permiss/);
+await perfil('comercial');
+await db.exec(`create or replace function core.can_see_channel(ch text) returns boolean language sql as 'select ch <> ''crm'''`);
+eq('crm_vendedores sem o canal crm: nada', await rows(`${VEND}(${OUT})`), []);
+await db.exec(`create or replace function core.can_see_channel(ch text) returns boolean language sql as 'select true'`);
+
+const ORIG = `select source_id, origem, leads, pct_negocio, pct_ganho, valor_ganho, ticket_medio from analytics.crm_origens`;
+eq('crm_origens outubro (origem 19)', (await rows(`${ORIG}(${OUT})`)).find((r) => r.source_id === '19'),
+  { source_id: '19', origem: 'Site - Brinde do Bem', leads: 4, pct_negocio: '75.0', pct_ganho: '33.3', valor_ganho: '1000.00', ticket_medio: '1000.00' });
+const origNov = await rows(`${ORIG}(${NOV})`);
+eq('crm_origens novembro: sem divisao por zero (percentuais nulos)',
+  [origNov.length > 0, origNov.every((r) => r.leads === 0 && r.pct_negocio === null && r.pct_ganho === null && r.ticket_medio === null)], [true, true]);
+await db.exec(`update crm.deals set source_id = null where id = 201`);
+eq('crm_origens: negocio sem origem', (await rows(`${ORIG}(${OUT})`)).find((r) => r.source_id === null),
+  { source_id: null, origem: 'Sem origem', leads: 0, pct_negocio: null, pct_ganho: null, valor_ganho: '1000.00', ticket_medio: '1000.00' });
+await db.exec(`update crm.deals set source_id = '19' where id = 201`);
+
+eq('crm_opcoes', await rows(`select tipo, valor, rotulo from analytics.crm_opcoes() where tipo <> 'origem'`), [
+  { tipo: 'area', valor: 'Brinde do Bem', rotulo: 'Brinde do Bem' },
+  { tipo: 'vendedor', valor: '7', rotulo: 'Ana' }, { tipo: 'vendedor', valor: '8', rotulo: 'Beto' }]);
+eq('crm_opcoes: origens ativas', (await rows(`select valor from analytics.crm_opcoes() where tipo = 'origem'`)).length, 12);
+
+// Como vendedor 7 (U1 ligado por e-mail), com o RLS valendo
+await perfil('vendedor'); await uid(U1); await db.exec(`set role authenticated`);
+try {
+  eq('vendedor 7: crm_vendedores = a dele + Media da equipe', (await rows(`${VEND}(${OUT})`)).map((r) => [r.id, r.vendedor, r.leads]),
+    [[7, 'Ana', 2], [null, 'Média da equipe', 2]]);
+  eq('vendedor 7: p_vendedor de outro e ignorado', (await rows(`${VEND}(${OUT}, null, 8)`)).map((r) => r.vendedor),
+    ['Ana', 'Média da equipe']);
+  eq('vendedor 7: crm_resumo so dele', (await rows(RESUMO(OUT)))[0], {
+    leads_novos: 2, leads_com_negocio: 2, negocios_coorte: 2, ganhos_coorte: 1,
+    ganhos: 1, perdidos: 1, valor_ganho: '1000.00', ciclo_medio_dias: '14.0' });
+  eq('vendedor 7: crm_opcoes so ele', await rows(`select valor from analytics.crm_opcoes() where tipo = 'vendedor'`), [{ valor: '7' }]);
+} finally { await db.exec(`reset role`); }
+await uid(U2); await db.exec(`set role authenticated`);
+try {
+  eq('vendedor sem vinculo: crm_vendedores vazio', await rows(`${VEND}(${OUT})`), []);
+} finally { await db.exec(`reset role`); }
 
 if (fails) { console.log(`\n${fails} FALHA(S)`); process.exit(1); }
 console.log('\nTodos os testes do CRM passaram');

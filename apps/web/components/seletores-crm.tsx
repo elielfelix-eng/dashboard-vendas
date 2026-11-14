@@ -44,8 +44,15 @@ export function SeletoresCrm({ opcoes, area, vendedor, origem, travarVendedor = 
         onChange={(e) => ir({ vendedor: valor(e.target.value) })}
         className={classe}
       >
-        <option value="">Todos os vendedores</option>
-        {lista('vendedor').map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+        {travarVendedor ? (
+          // Vendedor só vê os próprios dados (RLS): o filtro mostra o nome dele, travado
+          <option value="">{lista('vendedor')[0]?.rotulo ?? 'Você'}</option>
+        ) : (
+          <>
+            <option value="">Todos os vendedores</option>
+            {lista('vendedor').map((o) => <option key={o.valor} value={o.valor}>{o.rotulo}</option>)}
+          </>
+        )}
       </select>
       <select aria-label="Origem" value={origem ?? ''} onChange={(e) => ir({ origem: valor(e.target.value) })} className={classe}>
         <option value="">Todas as origens</option>

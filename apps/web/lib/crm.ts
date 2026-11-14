@@ -63,3 +63,14 @@ export const motivosPerda = (f: FiltrosCrm, de?: string, ate?: string) => rpc<Li
 export const vendedores = (f: FiltrosCrm, de?: string, ate?: string) => rpc<LinhaVendedor>('crm_vendedores', args(f, de, ate));
 export const origens = (f: FiltrosCrm, de?: string, ate?: string) => rpc<LinhaOrigem>('crm_origens', args(f, de, ate));
 export const opcoes = (_f?: FiltrosCrm, _de?: string, _ate?: string) => rpc<LinhaOpcao>('crm_opcoes', {});
+
+/** Usuário do Bitrix ligado ao usuário logado (ligação manual ou por e-mail); null = não ligado. */
+export async function meuBitrixId(): Promise<number | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema('core').rpc('my_bitrix_id');
+  if (error) {
+    console.error('[crm] my_bitrix_id:', error.message);
+    throw new Error('Não foi possível carregar os dados agora. Tente de novo em alguns minutos.');
+  }
+  return data == null ? null : Number(data);
+}

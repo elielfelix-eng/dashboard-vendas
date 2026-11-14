@@ -33,14 +33,15 @@ export default async function OrigensPage({ searchParams }: { searchParams: SP }
 
   let d;
   try {
-    const [linhas, opcoes, sinc] = await Promise.all([crm.origens(f), crm.opcoes(), dash.sincronizacoes()]);
-    d = { linhas, opcoes, sinc };
+    const [linhas, opcoes, sinc, meuId] = await Promise.all([crm.origens(f), crm.opcoes(), dash.sincronizacoes(),
+      profile?.role === 'vendedor' ? crm.meuBitrixId() : Promise.resolve(null)]);
+    d = { linhas, opcoes, sinc, meuId };
   } catch (e) {
     return <div className="mx-auto max-w-6xl">{titulo}<ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const topo = <TopoCrm filtros={f} opcoes={d.opcoes} ehVendedor={profile?.role === 'vendedor'} atualizadoEm={d.sinc['bitrix24']?.ultimoSucesso ?? null} />;
+  const topo = <TopoCrm filtros={f} opcoes={d.opcoes} ehVendedor={profile?.role === 'vendedor'} sinc={d.sinc['bitrix24']} />;
 
-  if (semVinculo(profile?.role, d.opcoes)) {
+  if (semVinculo(profile?.role, d.meuId)) {
     return <div className="mx-auto max-w-6xl">{titulo}{topo}<p className="rounded-xl border border-border bg-surface p-4 text-sm">{AVISO_SEM_VINCULO}</p></div>;
   }
 

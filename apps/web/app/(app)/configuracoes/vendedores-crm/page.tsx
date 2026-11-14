@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server';
 import { alternarOrigem, desvincular, vincular } from './actions';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
+type OrigemAdmin = { source_id: string; nome: string | null; ativo: boolean };
 type Vinculo = { bitrix_id: number; nome: string; email: string | null; ativo: boolean; user_id: string | null; usuario: string | null; tipo: 'automatico' | 'manual' | null };
 const inp = 'rounded border border-border bg-surface px-2 py-1';
 
@@ -10,19 +11,18 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
   await exigirPermissao('configuracoes');
   const sp = await searchParams;
   const supabase = await createClient();
-  const [vinc, perfis, fontes, ativas] = await Promise.all([
+  // O schema crm não é exposto na Data API: tudo vem por funções do schema core.
+  const [vinc, perfis, fontes] = await Promise.all([
     supabase.schema('core').rpc('crm_vinculos'),
     supabase.schema('core').from('user_profiles').select('user_id, full_name').order('full_name'),
-    supabase.schema('crm').from('sources').select('status_id, nome').order('nome'),
-    supabase.schema('crm').from('origens_brinde').select('source_id, ativo'),
+    supabase.schema('core').rpc('crm_origens_admin'),
   ]);
   const vendedores = (vinc.data ?? []) as Vinculo[];
   const usuarios = (perfis.data ?? []).map((p) => ({
     id: p.user_id as string,
     rotulo: (p.full_name as string | null)?.trim() || `Usuário ${String(p.user_id).slice(0, 8)}`,
   }));
-  const origens = fontes.data ?? [];
-  const ativa = new Map((ativas.data ?? []).map((o) => [o.source_id as string, !!o.ativo]));
+  const origens = (fontes.data ?? []) as OrigemAdmin[];
   const semDados = vendedores.length === 0;
 
   return (
@@ -111,13 +111,13 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
             </thead>
             <tbody>
               {origens.map((o) => {
-                const on = ativa.get(o.status_id as string) ?? false;
+                const on = !!o.ativo;
                 return (
-                  <tr key={o.status_id as string} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2">{o.nome}</td>
+                  <tr key={o.source_id} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2">{o.nome ?? o.source_id}</td>
                     <td className="px-3 py-2">
                       <form action={alternarOrigem} className="flex items-center gap-2">
-                        <input type="hidden" name="source_id" value={o.status_id as string} />
+                        <input type="hidden" name="source_id" value={o.source_id} />
                         <input type="hidden" name="ativo" value={on ? 'false' : 'true'} />
                         <span>{on ? 'Sim' : 'Não'}</span>
                         <button className="text-xs text-accent hover:underline">{on ? 'Desativar' : 'Ativar'}</button>

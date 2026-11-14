@@ -210,8 +210,28 @@ end $$;
 revoke all on function core.crm_origem_ativa(text, boolean) from public;
 grant execute on function core.crm_origem_ativa(text, boolean) to authenticated;
 
+-- Origens para a tela de administracao (o schema crm nao e exposto na Data API):
+-- todas as origens do Bitrix + as da lista do Brinde do Bem (mesmo sem a origem no Bitrix).
+create or replace function core.crm_origens_admin()
+returns table (source_id text, nome text, ativo boolean)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not core.has_perm('configuracoes') then
+    raise exception 'sem permissao para ver as origens do CRM';
+  end if;
+  return query
+  select coalesce(s.status_id, ob.source_id) as source_id,
+         coalesce(s.nome, ob.nome, ob.source_id) as nome,
+         coalesce(ob.ativo, false) as ativo
+    from crm.sources s
+    full join crm.origens_brinde ob on ob.source_id = s.status_id
+   order by 2, 1;
+end $$;
+revoke all on function core.crm_origens_admin() from public;
+grant execute on function core.crm_origens_admin() to authenticated;
+
 -- ---------------------------------------------------------------------
--- 4. RLS: leitura para quem ve o canal 'crm' (vendedor so ve o que e dele)
+-- 4. RLS: leitura para quem ve o canal 'crm' E tem alguma permissao crm_* (vendedor so ve o que e dele)
 -- ---------------------------------------------------------------------
 do $$
 declare t text;
@@ -227,13 +247,15 @@ begin
                            'stage_history', 'first_activity']
   loop
     execute format('create policy "crm: leitura" on crm.%I for select to authenticated
-                      using ((select core.can_see_channel(''crm'')))', t);
+                      using ((select core.can_see_channel(''crm''))
+                             and (select core.has_perm(''crm_funil'') or core.has_perm(''crm_vendedores'') or core.has_perm(''crm_origens'')))', t);
   end loop;
 
   foreach t in array array['leads', 'deals']
   loop
     execute format('create policy "crm: leitura" on crm.%I for select to authenticated
                       using ((select core.can_see_channel(''crm''))
+                             and (select core.has_perm(''crm_funil'') or core.has_perm(''crm_vendedores'') or core.has_perm(''crm_origens''))
                              and ((select core.my_role()) <> ''vendedor'' or assigned_by_id = (select core.my_bitrix_id())))', t);
   end loop;
 end $$;

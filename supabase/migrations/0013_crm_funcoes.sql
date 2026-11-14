@@ -15,6 +15,9 @@
 -- (mesmo resultado, mas usa os indices de data).
 -- Percentuais 0-100 com 1 casa; dinheiro com 2; dias/horas com 1. Divisao por zero -> null.
 -- Todas security invoker (o RLS da 0012 vale: o vendedor so ve o que e dele), exceto crm_vendedores.
+-- Sem a permissao da tela devolvem zero linhas (a tela mostra "sem dados"), sem erro:
+--   resumo/funil/etapas/motivos_perda exigem crm_funil; origens exige crm_origens;
+--   opcoes exige qualquer crm_*; vendedores (definer) da erro sem crm_vendedores.
 -- =====================================================================
 
 -- Indices de periodo e de responsavel (leads ~270k, negocios ~48k, historico ~250k)
@@ -69,6 +72,7 @@ language sql stable security invoker set search_path = '' as $$
          round(coalesce((select sum(f.opportunity) from fech f where f.semantica = 'ganho'), 0), 2),
          round((select avg(extract(epoch from f.closedate - f.date_create) / 86400)
                   from fech f where f.semantica = 'ganho' and f.date_create is not null), 1)
+   where (select core.has_perm('crm_funil'))
 $$;
 
 -- ---------------------------------------------------------------------
@@ -109,15 +113,19 @@ language sql stable security invoker set search_path = '' as $$
       join cd on cd.id = h.deal_id
      group by h.stage_id
   )
-  select 1, 'Leads'::text, (select count(*) from lds)::int
-  union all
-  select 2, 'Negócios'::text, (select count(*) from cd)::int
-  union all
-  select 2 + st.n, coalesce(st.nome, st.status_id), coalesce(p.qtd, 0)
-    from st left join passou p on p.stage_id = st.status_id
-  union all
-  select 3 + (select count(*) from st)::int, 'Ganhos'::text, (select count(*) from cd where cd.semantica = 'ganho')::int
-  order by 1
+  select r.ordem, r.etapa, r.quantidade
+    from (
+      select 1 as ordem, 'Leads'::text as etapa, (select count(*) from lds)::int as quantidade
+      union all
+      select 2, 'Negócios'::text, (select count(*) from cd)::int
+      union all
+      select 2 + st.n, coalesce(st.nome, st.status_id), coalesce(p.qtd, 0)
+        from st left join passou p on p.stage_id = st.status_id
+      union all
+      select 3 + (select count(*) from st)::int, 'Ganhos'::text, (select count(*) from cd where cd.semantica = 'ganho')::int
+    ) r
+   where (select core.has_perm('crm_funil'))
+   order by r.ordem
 $$;
 
 -- ---------------------------------------------------------------------
@@ -185,6 +193,7 @@ language sql stable security invoker set search_path = '' as $$
          coalesce(r.status_id = (select r2.status_id from r r2 where r2.dias is not null
                                   order by r2.dias desc, r2.ordem nulls last, r2.status_id limit 1), false)
     from r
+   where (select core.has_perm('crm_funil'))
    order by r.ordem nulls last, r.status_id
 $$;
 
@@ -214,6 +223,7 @@ language sql stable security invoker set search_path = '' as $$
          g.qtd,
          round(g.qtd * 100.0 / nullif(sum(g.qtd) over (), 0), 1)
     from g
+   where (select core.has_perm('crm_funil'))
    order by g.qtd desc, g.stage_id
 $$;
 
@@ -405,6 +415,7 @@ language sql stable security invoker set search_path = '' as $$
     left join crm.sources s on s.status_id = t.source_id
     left join pl on pl.source_id is not distinct from t.source_id
     left join gan on gan.source_id is not distinct from t.source_id
+   where (select core.has_perm('crm_origens'))
    order by coalesce(pl.leads, 0) desc, coalesce(gan.valor, 0) desc, 2
 $$;
 
@@ -432,6 +443,7 @@ language sql stable security invoker set search_path = '' as $$
         from crm.origens_brinde o
        where o.ativo
     ) x
+   where (select core.has_perm('crm_funil') or core.has_perm('crm_vendedores') or core.has_perm('crm_origens'))
    order by x.tipo, x.rotulo, x.valor
 $$;
 

@@ -75,6 +75,19 @@ eq('vinculos listados', (await db.query(`select bitrix_id::int as b, tipo from c
 await db.exec(`select core.crm_origem_ativa('99', true)`);
 eq('origem ativa (upsert)', await val(`select ativo from crm.origens_brinde where source_id = '99'`), true);
 
+// Origens para a tela de administracao (o schema crm nao e exposto na Data API)
+await db.exec(`insert into crm.sources (status_id, nome) values ('19', 'Site BdB (Bitrix)'), ('UC_OUTRA', 'Outra origem')
+               on conflict do nothing`);
+const adm = (await db.query(`select source_id, nome, ativo from core.crm_origens_admin()`)).rows;
+eq('crm_origens_admin: semeadas + ativada, todas ativas',
+  adm.filter((r) => r.source_id !== 'UC_OUTRA').map((r) => [r.source_id, r.ativo]).sort(),
+  ['10|WHATSAPP', '14|FACEBOOK', '19', '23', '24', '38', '39', '42', '52|BITRIX_WHATCRM_NET_70680444', '53', '54', '99']
+    .map((x) => [x, true]).sort());
+eq('crm_origens_admin: origem do Bitrix fora da lista vem inativa', adm.find((r) => r.source_id === 'UC_OUTRA'),
+  { source_id: 'UC_OUTRA', nome: 'Outra origem', ativo: false });
+eq('crm_origens_admin: nome do Bitrix quando existe', adm.find((r) => r.source_id === '19').nome, 'Site BdB (Bitrix)');
+eq('crm_origens_admin: ordenada por nome', adm.map((r) => r.nome), [...adm.map((r) => r.nome)].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
+
 // RLS
 await db.exec(`reset role`);
 const deals = async (p, u) => {
@@ -96,6 +109,15 @@ await perfil('gestor');
 await erro('crm_vincular exige admin', `select core.crm_vincular('${U1}', 1)`, /permiss/);
 await erro('crm_desvincular_auto exige admin', `select core.crm_desvincular_auto('${U1}')`, /permiss/);
 await erro('crm_origem_ativa exige admin', `select core.crm_origem_ativa('19', false)`, /permiss/);
+await perfil('comercial');
+await erro('crm_origens_admin exige admin', `select * from core.crm_origens_admin()`, /permiss/);
+
+// Sem nenhuma permissao crm_* (visualizador): nada do CRM, mesmo vendo o canal
+await perfil('visualizador'); await uid(U1); await db.exec(`set role authenticated`);
+try {
+  eq('RLS visualizador (sem crm_*): crm.deals vazio', await val(`select count(*)::int from crm.deals`), 0);
+  eq('RLS visualizador (sem crm_*): crm.users vazio', await val(`select count(*)::int from crm.users`), 0);
+} finally { await db.exec(`reset role`); }
 
 // ---------------- 0013: funcoes de analise analytics.crm_* ----------------
 // 4 leads da origem 19 em outubro (um em 01/11 02:30+03 = 31/10 20:30 em Brasilia) + 1 lead do Bazar (UC_BVPCTK).
@@ -140,6 +162,14 @@ eq('lead de 01/11 02:30+03 conta em outubro (nao em novembro)', (await rows(RESU
 eq('crm_resumo novembro: zeros, sem erro', (await rows(RESUMO(NOV)))[0], {
   leads_novos: 0, leads_com_negocio: 0, negocios_coorte: 0, ganhos_coorte: 0,
   ganhos: 0, perdidos: 0, valor_ganho: '0.00', ciclo_medio_dias: null });
+// CLOSEDATE gravada como o dia em Brasilia (mapDeal): ganho de 01/11 conta em novembro
+await db.exec(`insert into crm.deals (id, category_id, stage_id, source_id, assigned_by_id, opportunity, date_create, closedate, area)
+               values (205, 10, 'C10:WON', '19', 7, 700, '2026-10-25T12:00:00-03:00', '2026-11-01T00:00:00-03:00', 'Brinde do Bem')`);
+eq('ganho com closedate 01/11 conta em novembro', (await rows(`select ganhos, valor_ganho from analytics.crm_resumo(${NOV})`))[0],
+  { ganhos: 1, valor_ganho: '700.00' });
+eq('ganho com closedate 01/11 nao conta em outubro', (await rows(`select ganhos, valor_ganho from analytics.crm_resumo(${OUT})`))[0],
+  { ganhos: 1, valor_ganho: '1000.00' });
+await db.exec(`delete from crm.deals where id = 205`);
 eq('filtro p_area = Pedido Online zera os negocios', (await rows(RESUMO(ARGS('2026-10-01', '2026-10-31', `, 'Pedido Online'`))))[0], {
   leads_novos: 4, leads_com_negocio: 0, negocios_coorte: 0, ganhos_coorte: 0,
   ganhos: 0, perdidos: 0, valor_ganho: '0.00', ciclo_medio_dias: null });
@@ -203,6 +233,31 @@ eq('crm_opcoes', await rows(`select tipo, valor, rotulo from analytics.crm_opcoe
   { tipo: 'vendedor', valor: '7', rotulo: 'Ana' }, { tipo: 'vendedor', valor: '8', rotulo: 'Beto' }]);
 eq('crm_opcoes: origens ativas', (await rows(`select valor from analytics.crm_opcoes() where tipo = 'origem'`)).length, 12);
 
+// Sem permissao crm_*: as funcoes devolvem nada (a tela mostra "sem dados"), sem erro
+await perfil('visualizador');
+eq('visualizador: crm_resumo sem linhas', await rows(RESUMO(OUT)), []);
+eq('visualizador: crm_funil sem linhas', await rows(`select * from analytics.crm_funil(${OUT})`), []);
+eq('visualizador: crm_etapas sem linhas', await rows(`select * from analytics.crm_etapas(${OUT})`), []);
+eq('visualizador: crm_motivos_perda sem linhas', await rows(`select * from analytics.crm_motivos_perda(${OUT})`), []);
+eq('visualizador: crm_origens sem linhas', await rows(`select * from analytics.crm_origens(${OUT})`), []);
+eq('visualizador: crm_opcoes sem linhas', await rows(`select * from analytics.crm_opcoes()`), []);
+await db.exec(`set role authenticated`);
+try {
+  eq('visualizador (RLS): crm_resumo sem linhas', await rows(RESUMO(OUT)), []);
+} finally { await db.exec(`reset role`); }
+// So crm_origens: ve as origens e as opcoes, mas nao o funil
+await db.exec(`update core.role_permissions set allowed = (permission = 'crm_origens')
+                where role = 'visualizador' and permission like 'crm\_%'`);
+eq('so crm_origens: crm_origens tem linhas', (await rows(`select * from analytics.crm_origens(${OUT})`)).length > 0, true);
+eq('so crm_origens: crm_opcoes tem linhas', (await rows(`select * from analytics.crm_opcoes()`)).length > 0, true);
+eq('so crm_origens: crm_resumo sem linhas', await rows(RESUMO(OUT)), []);
+await db.exec(`update core.role_permissions set allowed = false where role = 'visualizador' and permission like 'crm\_%'`);
+await perfil('comercial');
+await db.exec(`set role authenticated`);
+try {
+  eq('comercial (RLS): crm_resumo com dados', (await rows(RESUMO(OUT)))[0].leads_novos, 4);
+} finally { await db.exec(`reset role`); }
+
 // Como vendedor 7 (U1 ligado por e-mail), com o RLS valendo
 await perfil('vendedor'); await uid(U1); await db.exec(`set role authenticated`);
 try {
@@ -213,6 +268,7 @@ try {
   eq('vendedor 7: crm_resumo so dele', (await rows(RESUMO(OUT)))[0], {
     leads_novos: 2, leads_com_negocio: 2, negocios_coorte: 2, ganhos_coorte: 1,
     ganhos: 1, perdidos: 1, valor_ganho: '1000.00', ciclo_medio_dias: '14.0' });
+  eq('vendedor 7: my_bitrix_id pela API', await val(`select core.my_bitrix_id()`), 7);
   eq('vendedor 7: crm_opcoes so ele', await rows(`select valor from analytics.crm_opcoes() where tipo = 'vendedor'`), [{ valor: '7' }]);
 } finally { await db.exec(`reset role`); }
 await uid(U2); await db.exec(`set role authenticated`);

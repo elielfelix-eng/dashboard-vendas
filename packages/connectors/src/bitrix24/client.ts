@@ -63,11 +63,14 @@ export class BitrixClient {
   private readonly base: string;
   /** Intervalo mínimo entre chamadas (limite do Bitrix: ~2 req/s). */
   private readonly intervaloMs: number;
+  /** Espera base antes de repetir um batch com comando falho (2 s, 4 s, 8 s). */
+  private readonly retentativaMs: number;
   private ultima = 0;
 
-  constructor(webhookUrl: string, opts: { intervaloMs?: number } = {}) {
+  constructor(webhookUrl: string, opts: { intervaloMs?: number; retentativaMs?: number } = {}) {
     this.base = normalizarWebhook(webhookUrl);
     this.intervaloMs = opts.intervaloMs ?? 550;
+    this.retentativaMs = opts.retentativaMs ?? 2000;
   }
 
   async call<T>(method: string, params: Record<string, unknown> = {}): Promise<BitrixResponse<T>> {
@@ -123,6 +126,9 @@ export class BitrixClient {
    * crescente de ID, e para no primeiro comando com menos de 50 itens (os seguintes
    * são ignorados, mesmo com erro). Se todos vierem cheios, começa outro lote a
    * partir do maior ID recebido. Parâmetros extras (ex.: entityTypeId) vão em todo comando.
+   * Se um comando alcançado vier sem resultado (erro dentro do batch), repete o batch a
+   * partir do último ID bom até 3 vezes (espera 2 s, 4 s, 8 s) antes de desistir; o
+   * contador zera quando há progresso.
    */
   async *listarPorId<T extends { ID: string }>(
     method: string,
@@ -133,6 +139,7 @@ export class BitrixClient {
     const itens = opts.itens ?? ((r: unknown) => (Array.isArray(r) ? (r as T[]) : []));
     const caminho = opts.itens ? '[items]' : '';
     let ultimoId: string | undefined;
+    let tentativas = 0;
     for (;;) {
       const cmds: Record<string, [string, Record<string, unknown>]> = {};
       for (let i = 0; i < PAGINA; i++) {
@@ -144,9 +151,15 @@ export class BitrixClient {
       for (let i = 0; i < PAGINA; i++) {
         const k = `c${i}`;
         if (!(k in result)) {
-          throw new Error(`Bitrix ${method}: comando ${k} do batch falhou ${JSON.stringify(erros[k] ?? 'sem resposta')}`.slice(0, 300));
+          if (tentativas >= 3) {
+            throw new Error(`Bitrix ${method}: comando ${k} do batch falhou ${JSON.stringify(erros[k] ?? 'sem resposta')}`.slice(0, 300));
+          }
+          tentativas++;
+          await sleep(this.retentativaMs * 2 ** (tentativas - 1));
+          break; // recomeça o batch a partir de ultimoId
         }
         const lista = itens(result[k]);
+        tentativas = 0;
         if (lista.length) yield lista;
         if (lista.length < PAGINA) return;
         ultimoId = String((lista[lista.length - 1] as unknown as Record<string, unknown>)[idCampo]);

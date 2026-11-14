@@ -22,6 +22,10 @@ export async function syncBitrix24(sql: Sql): Promise<number> {
   const stats = {
     leads: 0, leads_origens_novas: 0, deals: 0, fora_do_funil: 0, historico: 0, atividades: 0, apagados: 0,
     origens: [] as string[],
+    /** Consultas de 1ª atividade que falharam (a etapa não derruba a execução). */
+    erros_atividade: 0,
+    erro_atividade: null as string | null,
+    erro_reconciliacao: null as string | null,
   };
   try {
     const bx = new BitrixClient(requireEnv('BITRIX_WEBHOOK_URL'));
@@ -59,9 +63,27 @@ export async function syncBitrix24(sql: Sql): Promise<number> {
     stats.fora_do_funil = negocios.removidos.size;
 
     stats.historico = await syncHistorico(sql, bx, negocios.removidos, agora);
-    stats.atividades = await syncPrimeiraAtividade(sql, bx, completa ? 365 : 30, agora);
 
-    if (completa || domingoEmBrasilia(agora)) stats.apagados = await reconciliar(sql, bx, origens);
+    // 1ª atividade e reconciliação não derrubam a execução: os leads/negócios já gravados
+    // valem, e os pendentes são tentados de novo na próxima vez.
+    try {
+      const at = await syncPrimeiraAtividade(sql, bx, completa ? 365 : 30, agora);
+      stats.atividades = at.gravadas;
+      stats.erros_atividade = at.falhas;
+    } catch (err) {
+      stats.erro_atividade = curta(err);
+      stats.erros_atividade++;
+      console.warn('[Bitrix] 1ª atividade falhou (segue sem ela):', stats.erro_atividade);
+    }
+
+    if (completa || domingoEmBrasilia(agora)) {
+      try {
+        stats.apagados = await reconciliar(sql, bx, origens);
+      } catch (err) {
+        stats.erro_reconciliacao = curta(err);
+        console.warn('[Bitrix] reconciliação falhou (segue sem ela):', stats.erro_reconciliacao);
+      }
+    }
 
     await sql`update core.sync_runs set status = 'success', finished_at = now(), stats = ${sql.json(stats)} where id = ${run.id}`;
     console.log('[Bitrix] OK', stats);
@@ -72,6 +94,11 @@ export async function syncBitrix24(sql: Sql): Promise<number> {
     await sql`update core.sync_runs set status = 'error', finished_at = now(), error = ${msg}, stats = ${sql.json(stats)} where id = ${run.id}`;
     return 1;
   }
+}
+
+/** Mensagem curta do erro (o cliente do Bitrix nunca põe a URL do webhook na mensagem). */
+function curta(err: unknown): string {
+  return String((err as Error)?.message ?? err).slice(0, 200);
 }
 
 /** Remove linhas repetidas pela chave (o upsert falha com a mesma chave duas vezes no mesmo INSERT). */
@@ -209,7 +236,7 @@ async function syncPrimeiraAtividade(sql: Sql, bx: BitrixClient, dias: number, a
     await lote.add(linhas);
   }
   if (falhas) console.warn(`[Bitrix] 1ª atividade: ${falhas} consulta(s) falharam (serão tentadas de novo)`);
-  return lote.fim();
+  return { gravadas: await lote.fim(), falhas };
 }
 
 async function listarIds(bx: BitrixClient, method: string, filter: Record<string, unknown>) {

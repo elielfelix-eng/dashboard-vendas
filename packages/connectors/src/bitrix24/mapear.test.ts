@@ -16,8 +16,18 @@ test('mapear: mapDeal converte tipos, vazio vira null e a área vira o rótulo',
     id: 5, category_id: 10, stage_id: 'C10:WON', stage_semantic_id: 'S', source_id: '19',
     assigned_by_id: 77, lead_id: null, contact_id: 12, company_id: null, opportunity: 1500.5,
     currency_id: 'BRL', date_create: '2026-11-01T02:30:00+03:00', date_modify: '2026-11-02T10:00:00+03:00',
-    closedate: '2026-11-03T00:00:00+03:00', closed: true, area: 'Pedido Online',
+    closedate: '2026-11-03T00:00:00-03:00', closed: true, area: 'Pedido Online',
   });
+});
+
+test('mapear: CLOSEDATE é só data (fuso do portal) e vira o mesmo dia em Brasília', () => {
+  const m = new Map<string, string>();
+  assert.equal(mapDeal({ ID: '9', CLOSEDATE: '2026-11-01T03:00:00+03:00' }, m).closedate, '2026-11-01T00:00:00-03:00');
+  assert.equal(mapDeal({ ID: '9', CLOSEDATE: '2026-11-01' }, m).closedate, '2026-11-01T00:00:00-03:00');
+  assert.equal(mapDeal({ ID: '9', CLOSEDATE: '' }, m).closedate, null);
+  assert.equal(mapDeal({ ID: '9' }, m).closedate, null);
+  // as outras datas ficam como vieram
+  assert.equal(mapDeal({ ID: '9', DATE_CREATE: '2026-11-01T03:00:00+03:00' }, m).date_create, '2026-11-01T03:00:00+03:00');
 });
 
 test('mapear: mapDeal com CLOSED N, área desconhecida ou vazia e área em lista', () => {

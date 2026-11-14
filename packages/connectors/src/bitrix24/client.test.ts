@@ -71,7 +71,8 @@ function lerQuery(qs: string): Record<string, string> {
 }
 
 /** Fake do Bitrix com registros de ID 1..total; resolve $result dentro do batch. */
-function fakeBitrix(total: number, opts: { comItems?: boolean } = {}) {
+function fakeBitrix(total: number, opts: { comItems?: boolean; falhar?: (chamada: number, chave: string) => boolean } = {}) {
+  let chamada = 0;
   const metodos: string[] = [];
   globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
     const method = String(input).slice(SEGREDO.length);
@@ -79,15 +80,19 @@ function fakeBitrix(total: number, opts: { comItems?: boolean } = {}) {
     const body = JSON.parse(String(init?.body ?? '{}'));
     assert.equal(method, 'batch');
     assert.equal(body.halt, 0);
+    chamada++;
     const resultados: Record<string, unknown> = {};
+    const erros: Record<string, unknown> = {};
     for (const [chave, cmd] of Object.entries(body.cmd as Record<string, string>)) {
       const [m, qs] = cmd.split('?');
       metodos.push(m);
+      if (opts.falhar?.(chamada, chave)) { erros[chave] = { error: 'QUERY_LIMIT_EXCEEDED' }; continue; }
       const q = lerQuery(qs);
       assert.equal(q.start, '-1');
       assert.equal(q['order[ID]'], 'ASC');
       let de = Number(q['filter[>ID]'] ?? 0);
       const ref = q['filter[>ID]']?.match(/^\$result\[(c\d+)\](\[items\])?\[49\]\[ID\]$/);
+      if (ref && !(ref[1] in resultados)) { erros[chave] = { error: 'referência sem resultado' }; continue; }
       if (ref) {
         const anterior = resultados[ref[1]];
         const lista = (ref[2] ? (anterior as { items: { ID: string }[] }).items : anterior) as { ID: string }[];
@@ -97,7 +102,7 @@ function fakeBitrix(total: number, opts: { comItems?: boolean } = {}) {
       for (let id = de + 1; id <= total && itens.length < 50; id++) itens.push({ ID: String(id) });
       resultados[chave] = opts.comItems ? { items: itens } : itens;
     }
-    return json({ result: { result: resultados, result_error: [], result_total: {}, result_time: {} } });
+    return json({ result: { result: resultados, result_error: Object.keys(erros).length ? erros : [], result_total: {}, result_time: {} } });
   }) as typeof fetch;
   return metodos;
 }
@@ -157,6 +162,24 @@ test('bitrix: listarPorId com resposta em items e parâmetro extra', async () =>
   const ids = await todos(bx, { select: ['ID'], entityTypeId: 2 }, { itens: (r) => (r as { items: { ID: string }[] }).items });
   assert.deepEqual(ids, de1a(120));
   assert.ok(semEscrita(metodos));
+});
+
+test('bitrix: listarPorId repete a partir do último ID bom quando um comando do batch falha', async () => {
+  // 1ª chamada: c1 falha (c0 = IDs 1..50 ok); 2ª chamada recomeça em >50
+  const metodos = fakeBitrix(120, { falhar: (n, k) => n === 1 && k === 'c1' });
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0, retentativaMs: 0 });
+  const ids = await todos(bx, { select: ['ID'] });
+  assert.deepEqual(ids, de1a(120));
+  assert.equal(new Set(ids).size, 120);
+  assert.equal(metodos.filter((m) => m === 'batch').length, 2);
+});
+
+test('bitrix: listarPorId desiste depois de 3 novas tentativas', async () => {
+  // 1ª chamada: c0 ok e c1 falha; nas seguintes o c0 (>50) falha sempre, sem progresso
+  const metodos = fakeBitrix(120, { falhar: (n, k) => (n === 1 ? k === 'c1' : k === 'c0') });
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0, retentativaMs: 0 });
+  await assert.rejects(todos(bx, { select: ['ID'] }), /c0 do batch falhou/);
+  assert.equal(metodos.filter((m) => m === 'batch').length, 4);
 });
 
 test('bitrix: batch com 51 comandos dá erro', async () => {

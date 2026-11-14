@@ -1,7 +1,8 @@
 /**
  * Conversão das respostas do Bitrix24 para as linhas das tabelas crm.*.
  * Funções puras: '' e null viram null, IDs viram number e as datas ficam como a
- * string ISO recebida (com o fuso, ex. +03:00), que o Postgres grava como timestamptz.
+ * string ISO recebida (com o fuso, ex. +03:00), que o Postgres grava como timestamptz
+ * (exceto CLOSEDATE, que é só data: vira o dia à meia-noite de Brasília).
  */
 
 /** Campo do negócio "Área de Negócio" (enumeração). */
@@ -64,6 +65,16 @@ function num(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * CLOSEDATE é campo só de data: o Bitrix manda meia-noite no fuso do portal
+ * (ex. '2026-11-01T03:00:00+03:00' = dia 01/11). Guarda o dia como veio, à
+ * meia-noite de Brasília, para não cair no dia anterior.
+ */
+function dataBrasilia(v: unknown): string | null {
+  const s = txt(v);
+  return s === null ? null : `${s.slice(0, 10)}T00:00:00-03:00`;
+}
+
 function id(v: unknown): number {
   const n = num(v);
   if (n === null) throw new Error(`Bitrix: registro sem ID válido (${String(v)})`);
@@ -98,7 +109,7 @@ export function mapDeal(r: Bruto, areas: Map<string, string>): LinhaDeal {
     source_id: txt(r.SOURCE_ID), assigned_by_id: num(r.ASSIGNED_BY_ID), lead_id: num(r.LEAD_ID),
     contact_id: num(r.CONTACT_ID), company_id: num(r.COMPANY_ID), opportunity: num(r.OPPORTUNITY),
     currency_id: txt(r.CURRENCY_ID), date_create: txt(r.DATE_CREATE), date_modify: txt(r.DATE_MODIFY),
-    closedate: txt(r.CLOSEDATE), closed: simNao(r.CLOSED), area: areaId === null ? null : (areas.get(areaId) ?? null),
+    closedate: dataBrasilia(r.CLOSEDATE), closed: simNao(r.CLOSED), area: areaId === null ? null : (areas.get(areaId) ?? null),
   };
 }
 

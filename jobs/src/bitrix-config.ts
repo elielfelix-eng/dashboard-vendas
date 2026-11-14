@@ -30,24 +30,32 @@ async function main() {
 
   console.log('\n=== FUNIS DE NEGÓCIO ===');
   const cats = (await bx.call<{ categories: { id: number; name: string; isDefault?: string }[] }>('crm.category.list', { entityTypeId: 2 })).result.categories;
-  for (const c of cats) {
-    console.log(`[${c.id}] ${c.name}${c.isDefault === 'Y' ? ' (padrão)' : ''} — negócios: ${await total('crm.deal.list', { CATEGORY_ID: c.id })}`);
-  }
+  for (const c of cats) console.log(`[${c.id}] ${c.name}${c.isDefault === 'Y' ? ' (padrão)' : ''}`);
 
   const status = await bx.listarTudo<Status>('crm.status.list', { order: { ENTITY_ID: 'ASC', SORT: 'ASC' } });
   const grupo = (pred: (s: Status) => boolean) => status.filter(pred).sort((a, b) => Number(a.SORT) - Number(b.SORT));
-  const imprimir = (titulo: string, lista: Status[]) => {
-    console.log(`\n=== ${titulo} ===`);
-    for (const s of lista) console.log(`  ${s.STATUS_ID.padEnd(22)} ${s.NAME}${s.SEMANTICS ? ` (${SEM[s.SEMANTICS] ?? s.SEMANTICS})` : ''}`);
-  };
-  imprimir('ETAPAS DO LEAD', grupo((s) => s.ENTITY_ID === 'STATUS'));
-  for (const c of cats) {
-    const ent = c.id === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${c.id}`;
-    imprimir(`ETAPAS DO FUNIL [${c.id}] ${c.name}`, grupo((s) => s.ENTITY_ID === ent));
+  // Funis escolhidos pelo dono (padrão: Brinde do Bem = 10)
+  const funis = (process.env.BITRIX_FUNIS || '10').split(',').map((x) => Number(x.trim()));
+  for (const id of funis) {
+    const ent = id === 0 ? 'DEAL_STAGE' : `DEAL_STAGE_${id}`;
+    const nome = cats.find((c) => c.id === id)?.name ?? '?';
+    console.log(`\n=== ETAPAS DO FUNIL [${id}] ${nome} (negócios por etapa) ===`);
+    for (const s of grupo((s) => s.ENTITY_ID === ent)) {
+      const n = await total('crm.deal.list', { CATEGORY_ID: id, STAGE_ID: s.STATUS_ID });
+      console.log(`  ${s.STATUS_ID.padEnd(22)} ${s.NAME}${s.SEMANTICS ? ` (${SEM[s.SEMANTICS] ?? s.SEMANTICS})` : ''} — ${n}`);
+    }
   }
-  imprimir('ORIGENS', grupo((s) => s.ENTITY_ID === 'SOURCE'));
 
-  for (const [ent, nome] of [['crm.deal.fields', 'NEGÓCIO'], ['crm.lead.fields', 'LEAD']] as const) {
+  const desde = new Date(Date.now() - 365 * 86400_000).toISOString().slice(0, 10);
+  console.log(`\n=== ORIGENS: leads (total | últimos 12 meses) e negócios nos funis ${funis.join(',')} ===`);
+  for (const s of grupo((s) => s.ENTITY_ID === 'SOURCE')) {
+    const leads = await total('crm.lead.list', { SOURCE_ID: s.STATUS_ID });
+    const leads12 = await total('crm.lead.list', { SOURCE_ID: s.STATUS_ID, '>=DATE_CREATE': desde });
+    const negocios = await total('crm.deal.list', { SOURCE_ID: s.STATUS_ID, '@CATEGORY_ID': funis });
+    console.log(`  ${s.STATUS_ID.padEnd(22)} ${s.NAME.padEnd(34)} leads: ${String(leads).padStart(6)} | ${String(leads12).padStart(6)}   negócios: ${negocios}`);
+  }
+
+  for (const [ent, nome] of [['crm.deal.fields', 'NEGÓCIO']] as const) {
     console.log(`\n=== CAMPOS PERSONALIZADOS DO ${nome} ===`);
     const campos = (await bx.call<Record<string, Campo>>(ent)).result;
     for (const [k, c] of Object.entries(campos)) {

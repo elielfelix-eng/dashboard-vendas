@@ -6,6 +6,7 @@ const DEC1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumF
 
 export const brl = (v: number | null | undefined) => (v == null ? '—' : BRL.format(v));
 export const num = (v: number | null | undefined) => (v == null ? '—' : INT.format(v));
+export const dec1 = (v: number | null | undefined) => (v == null ? '—' : DEC1.format(v));
 export const pct = (v: number | null | undefined) => (v == null ? '—' : `${DEC1.format(v)}%`);
 export const dataBr = (iso: string | null | undefined) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}` : '—');
 

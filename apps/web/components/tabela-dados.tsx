@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { FotoProduto } from '@/components/foto-produto';
 import { exportarXlsx, type Coluna } from '@/lib/exportar';
-import { brl, num, pct } from '@/lib/formato';
+import { brl, dec1, num, pct } from '@/lib/formato';
 
 export type { Coluna } from '@/lib/exportar';
 
@@ -22,7 +22,7 @@ interface Props<T extends object> {
   /** Controles extras ao lado da busca (ex.: seletor da curva ABC). */
   extra?: React.ReactNode;
 }
-// Convenções das linhas: `href` vira link na primeira coluna; `ruim: true` pinta a linha de vermelho.
+// Convenções das linhas: `href` vira link na primeira coluna; `ruim: true` pinta a linha de vermelho; `destaque: true` deixa em cinza e itálico (linhas de referência).
 
 function valorOrdenacao(v: unknown): number | string {
   if (v == null) return Number.NEGATIVE_INFINITY;
@@ -38,6 +38,7 @@ function formatar(tipo: Coluna<object>['tipo'], v: unknown): string {
   switch (tipo) {
     case 'brl': return brl(Number(v));
     case 'num': return num(Number(v));
+    case 'dec1': return dec1(Number(v));
     case 'pct': return pct(Number(v));
     case 'variacao': return (v as { rotulo: string }).rotulo;
     default: return String(v);
@@ -109,8 +110,9 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
             {visiveis.map((l, i) => {
               const href = (l as { href?: string }).href;
               const ruim = (l as { ruim?: boolean }).ruim === true;
+              const destaque = (l as { destaque?: boolean }).destaque === true;
               return (
-                <tr key={i} className={`border-b border-border last:border-0 ${ruim ? 'text-bad' : ''}`}>
+                <tr key={i} className={`border-b border-border last:border-0 ${ruim ? 'text-bad' : ''} ${destaque ? 'italic text-muted' : ''}`}>
                   {colunas.map((c, j) => {
                     const v = (l as Record<string, unknown>)[c.chave];
                     const txt = formatar(c.tipo, v);

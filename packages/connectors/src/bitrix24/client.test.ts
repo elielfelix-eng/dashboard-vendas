@@ -133,6 +133,24 @@ test('bitrix: listarPorId com 100 registros (última página cheia) termina sem 
   assert.ok(semEscrita(metodos));
 });
 
+test('bitrix: listarPorId com 2600 registros passa para o 2º batch a partir do último ID', async () => {
+  const metodos = fakeBitrix(2600);
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  const ids = await todos(bx, { select: ['ID'] });
+  assert.deepEqual(ids, de1a(2600));
+  assert.equal(new Set(ids).size, 2600);
+  assert.equal(metodos.filter((m) => m === 'batch').length, 2);
+  assert.ok(semEscrita(metodos));
+});
+
+test('bitrix: listarPorId com exatamente 2500 registros (batch inteiro cheio) termina sem repetir', async () => {
+  const metodos = fakeBitrix(2500);
+  const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });
+  assert.deepEqual(await todos(bx, { select: ['ID'] }), de1a(2500));
+  assert.equal(metodos.filter((m) => m === 'batch').length, 2);
+  assert.ok(semEscrita(metodos));
+});
+
 test('bitrix: listarPorId com resposta em items e parâmetro extra', async () => {
   const metodos = fakeBitrix(120, { comItems: true });
   const bx = new BitrixClient(SEGREDO, { intervaloMs: 0 });

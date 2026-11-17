@@ -17,6 +17,8 @@ Funções definer acessíveis ao `gateway_writer`:
 ## Ordem por item (gateway)
 1. **Fotos:** baixa cada `url_assinada`, converte para JPG e envia ao S3 com a `s3_key`. Uma falha impede o passo 2 do item (`site = pulado`, `fotos = erro`).
 2. **Site:** uma transação, conforme `contracts/site-escrita.md`. Uma falha faz rollback e o item fica com `site = erro`.
-3. **Bling:** só se `site = ok` e o item não tiver o alerta `sem_ncm`, conforme `contracts/bling.md`. Uma falha deixa o item como `bling = pendente`, e ele é reenviado na próxima publicação daquele ref.
+3. **Bling:** só se `site = ok` (ou item do grupo `bling_pendente`, que pula os passos 1 e 2) e sem o alerta `sem_ncm`.
+   - Se `bling_modo = simulacao`: monta as chamadas, grava em `bling_previsto`, marca `bling = simulado` e **não chama o Bling**.
+   - Se `real`: conforme `contracts/bling.md`. Uma falha deixa o item como `bling = pendente`; ele volta na revisão no grupo `bling_pendente`.
 
 As mensagens de erro passam pelo `mask()` do gateway antes de serem gravadas (princípio I).

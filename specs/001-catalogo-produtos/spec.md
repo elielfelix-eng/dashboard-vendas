@@ -165,9 +165,10 @@ Antes do primeiro uso, o sistema importa os produtos que já estão publicados n
 - **FR-023a**: Os SKUs de cor MUST ser mantidos no Bling no formato em que já existem hoje (produtos simples), sempre atualizando o mesmo cadastro, sem recriar nem mudar o identificador. SKUs novos MUST ser criados também como produtos simples.
 - **FR-024**: O sistema MUST NOT alterar produtos de marketplace nem composições no Bling.
 - **FR-025**: Uma falha no Bling MUST NOT desfazer o site. O produto fica "Bling pendente" e é reenviado na próxima publicação.
+- **FR-025a**: Enquanto o destino da publicação for o ambiente de teste do site, o envio ao Bling MUST ficar em modo **simulação**: nada é gravado no Bling; a tela mostra, por SKU, o que seria enviado (criar, atualizar, situação). O envio real ao Bling MUST ser ligado junto com a virada do site para produção.
 
 **Carga inicial e segurança**
-- **FR-026**: Antes do primeiro uso, o sistema MUST importar do site os dados atuais dos produtos e, do Bling, a identificação dos SKUs existentes. Antes de virar para produção, MUST comparar de novo com o site de produção.
+- **FR-026**: Antes do primeiro uso, o sistema MUST importar do site os dados atuais dos produtos e, do Bling, a identificação dos SKUs existentes (busca somente leitura por código, sem alterar nada). Antes de virar para produção, MUST comparar de novo com o site de produção.
 - **FR-027**: Senhas e chaves de acesso ao banco do site, ao armazenamento de fotos e ao Bling MUST ficar guardadas de forma protegida, nunca em telas, registros ou documentos.
 - **FR-028**: As atualizações MUST aparecer no site para os visitantes sem ação manual adicional. Segundo o dono, a gravação no banco do site aparece na hora (sem cache a limpar); isso é confirmado no primeiro teste no ambiente de teste.
 
@@ -198,6 +199,7 @@ Antes do primeiro uso, o sistema importa os produtos que já estão publicados n
 ## Assumptions
 
 - O site tem um ambiente de teste que espelha a produção e um usuário de banco com leitura e gravação. A publicação começa no teste.
+- "Computador de publicação" = o gateway instalado na rede da empresa (mesmo programa que já envia os custos do ERP).
 - A publicação é executada por um computador da rede da empresa que fica ligado. Se ele estiver desligado, a publicação espera.
 - O ERP continua sendo o dono de referência, cores, status, custos, margens, medidas, fornecedores e personalizações. O Catálogo é o dono dos dados exclusivos do site.
 - Categorias, caixas, atributos e valores de personalização continuam sendo criados no próprio site. O Catálogo apenas os utiliza.

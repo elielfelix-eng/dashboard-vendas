@@ -24,7 +24,7 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 **Purpose**: ramo, dependências e esqueleto de arquivos
 
-- [ ] T001 Criar o ramo `001-catalogo-produtos` a partir do `main` e registrar a ordem de migrations `… 0013 → 0014 → 0015` no cabeçalho de `supabase/migrations/0014_catalogo_tabelas.sql` (arquivo novo, ainda vazio de conteúdo)
+- [ ] T001 Criar o ramo `001-catalogo-produtos` a partir do `main` (git, raiz do repositório)
 - [ ] T002 [P] Adicionar `boto3` e `Pillow` às dependências do gateway em `gateway/pyproject.toml` e ao build em `gateway/build/BrindeGateway.spec`
 - [ ] T003 [P] Adicionar `node supabase/tests/catalogo.test.mjs` ao script `test:sql` em `package.json` e criar o esqueleto do teste (helpers `eq`/`erro`, stubs, `set role authenticated`) em `supabase/tests/catalogo.test.mjs`
 - [ ] T004 [P] Acrescentar `create schema catalogo` e a tabela `auth.users` (se ainda não houver) a `supabase/tests/stubs.sql`
@@ -54,7 +54,7 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 ### Implementação da fundação
 
-- [ ] T008 Criar `supabase/migrations/0014_catalogo_tabelas.sql`. Deve ser reexecutável.
+- [ ] T008 Criar `supabase/migrations/0014_catalogo_tabelas.sql`, com o cabeçalho de ordem `… 0013 → 0014 → 0015`. Deve ser reexecutável.
   - **Tabelas `erp.cat_*`**, conforme `data-model.md` §1: `erp.cat_produtos`, `erp.cat_cores`, `erp.cat_faixas`, `erp.cat_personalizacoes`, `erp.cat_pers_precos` e `erp.cat_site_*`, com os checks de `erp.cat_produtos.status` e `erp.cat_cores.status`.
   - **Tabelas `catalogo.*`**, conforme `data-model.md` §2–4:
     - `catalogo.produtos`, com `catalogo.produtos.nome` not null, `catalogo.produtos.versao` default 1 e `catalogo.produtos.slug` nulo até a 1ª publicação;
@@ -62,7 +62,8 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
     - `catalogo.fotos`, com os checks de `catalogo.fotos.tipo`, `catalogo.fotos.sku` e `catalogo.fotos.situacao`;
     - `catalogo.publicado`;
     - `catalogo.publicacoes`, com check em `catalogo.publicacoes.situacao` e `catalogo.publicacoes.destino`;
-    - `catalogo.publicacao_itens`, com checks em `catalogo.publicacao_itens.site` e `catalogo.publicacao_itens.bling`;
+    - `catalogo.publicacoes.bling_modo` (`data-model.md`), com check `simulacao|real`;
+    - `catalogo.publicacao_itens`, com checks em `catalogo.publicacao_itens.site` e `catalogo.publicacao_itens.bling` (incluindo `simulado`), e a coluna `catalogo.publicacao_itens.bling_previsto` (`data-model.md`);
     - `catalogo.bling_componentes` e `catalogo.alteracoes`.
   - **Permissão `catalogo`** em `core.role_permissions`: só admin = true.
   - **RLS** com `(select core.has_perm('catalogo'))`.
@@ -71,7 +72,7 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 - [ ] T009 [P] Criar as views de leitura no SQL Server, `painel.cat_produtos`, `painel.cat_cores`, `painel.cat_faixas`, `painel.cat_personalizacoes` e `painel.cat_pers_precos`, com o grant para o usuário de leitura, em `gateway/sqlserver/views_catalogo.sql`. Seguir as colunas e regras de `contracts/gateway-datasets.md`, inclusive a normalização de status, o NCM pela lógica de `NEWFORD_NCM` e o `nome_padrao` vindo do bdb_pricing. Comentar a alternativa para quando SERPZERADO/bdb_pricing estiverem em outra instância.
 - [ ] T010 [P] Criar as consultas dos datasets em `gateway/consultas/cat_produtos.sql`, `cat_cores.sql`, `cat_faixas.sql`, `cat_personalizacoes.sql` e `cat_pers_precos.sql`, e os blocos `[[datasets]]` correspondentes em `gateway/config.exemplo.toml`.
 - [ ] T011 Estender `gateway/src/brinde_gateway/config.py` para ler as seções `[site]` (conexão ODBC; destino ativo `site_teste|site_producao`; segredo `site`), `[s3]` (bucket, região e prefixo; segredo `s3`) e `[bling]` (Client ID; segredo `bling`), mais o `source` opcional por dataset. A leitura das referências do site usa a conexão `[site]`.
-- [ ] T012 Criar a função `catalogo.produto_desejado(ref) returns jsonb` em `supabase/migrations/0015_catalogo_funcoes.sql`, conforme `data-model.md` §3 e as regras validadas em T006. O arquivo deve ser reexecutável.
+- [ ] T012 Criar a função `catalogo.produto_desejado(ref) returns jsonb` em `supabase/migrations/0015_catalogo_funcoes.sql`, conforme `data-model.md` §3, usando `data-model.md` → `erp.cat_faixas.custo`, `erp.cat_faixas.margem` e `erp.cat_faixas.data_alt` (conjunto mais recente), e as regras validadas em T006. O arquivo deve ser reexecutável.
 - [ ] T013 Criar `catalogo.apos_leitura()` em `supabase/migrations/0015_catalogo_funcoes.sql`. A função compara a contagem com a leitura anterior; se cair mais de 20%, grava o alerta `leitura_suspeita` e mantém a revisão anterior (FR-003). Chamar a função ao fim do `run` em `gateway/src/brinde_gateway/runner.py`, com teste em `supabase/tests/catalogo.test.mjs` (queda de 30% → alerta, nada desativado).
 
 **Checkpoint**: a leitura diária grava `erp.cat_*` e o banco sabe montar o documento desejado de qualquer produto.
@@ -98,7 +99,8 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 - [ ] T016 [US5] Criar, em `gateway/consultas/site_*.sql`, as consultas de leitura do site (products, productsPrices, productsCategories, productsQuantities, productsBoxes, productsImages, values, productsAttributesValues, valuesPrices) e as tabelas destino `erp.cat_site_produtos…` em `supabase/migrations/0014_catalogo_tabelas.sql`
 - [ ] T017 [US5] Implementar o comando `import-site --from teste|producao`, que abre a conexão em modo somente leitura (`ApplicationIntent=ReadOnly` e transação com `SET TRANSACTION READ ONLY` quando suportado), em `gateway/src/brinde_gateway/cli.py` e `gateway/src/brinde_gateway/importar_site.py`
-- [ ] T018 [US5] Implementar `catalogo.importar_do_site()` e o relatório de diferenças "desde a carga", usado antes da virada para produção (FR-026), em `supabase/migrations/0015_catalogo_funcoes.sql`
+- [ ] T018 [US5] Implementar `catalogo.importar_do_site()`, preenchendo `data-model.md` → `catalogo.fotos.s3_key` com a chave atual de cada foto, e o relatório de diferenças "desde a carga", usado antes da virada para produção (FR-026), em `supabase/migrations/0015_catalogo_funcoes.sql`
+- [ ] T018a [US5] Implementar no comando `import-site` a busca somente leitura dos IDs do Bling por código (`GET /produtos?codigo=`), gravando em `data-model.md` → `catalogo.publicado.bling`, em `gateway/src/brinde_gateway/importar_site.py`. Depende do cliente de T044: se a US3 ainda não estiver feita, executar esta tarefa logo depois de T044.
 
 **Checkpoint**: o Catálogo e o `catalogo.publicado` refletem o site atual.
 
@@ -114,7 +116,8 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 - [ ] T019 [P] [US1] Testes da view `catalogo.revisao` e de `catalogo.revisao_resumo()` em `supabase/tests/catalogo.test.mjs`:
   - os grupos `novo`, `preco` (comparação faixa a faixa), `texto_foto`, `desativado`, `reativado` e `personalizacao`;
-  - `bloqueado = true` quando houver alerta bloqueante.
+  - `bloqueado = true` quando houver alerta bloqueante;
+  - o grupo `bling_pendente` aparece para documento inalterado com SKU `bling ≠ ok`.
 - [ ] T020 [P] [US1] Testes da fila em `supabase/tests/catalogo.test.mjs`:
   - `catalogo.pedir_publicacao()` congela os documentos, pula os bloqueados e exige a permissão;
   - `catalogo.pegar_publicacao()` usa skip locked: dois chamados seguidos não pegam o mesmo pedido, e um pedido `publicando` há mais de 2 h volta para a fila;
@@ -131,12 +134,13 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 - [ ] T022 [P] [US1] Testes do laço `publish` em `gateway/tests/test_publicar.py`:
   - ordem fotos → site → Bling por item;
   - uma falha de site não interrompe os demais itens;
-  - as mensagens de erro passam pelo `mask()`.
+  - as mensagens de erro passam pelo `mask()`;
+  - um item `bling_pendente` pula fotos e site.
 
 ### Implementação da US1
 
-- [ ] T023 [US1] Criar a view `catalogo.revisao` e as funções `catalogo.revisao_resumo()`, `catalogo.revisao()`, `catalogo.pedir_publicacao()`, `catalogo.pegar_publicacao()`, `catalogo.registrar_item()`, `catalogo.concluir_publicacao()` e `catalogo.publicacoes_recentes()` em `supabase/migrations/0015_catalogo_funcoes.sql`, seguindo `contracts/publicacao.md` e `contracts/painel-rpc.md`
-- [ ] T024 [US1] Implementar a gravação de um produto no site (transação por produto, `SET XACT_ABORT ON`, upserts e inativações, `OUTPUT inserted.identify`) em `gateway/src/brinde_gateway/site_escrita.py`, conforme `contracts/site-escrita.md`
+- [ ] T023 [US1] Criar a view `catalogo.revisao` e as funções `catalogo.revisao_resumo()`, `catalogo.revisao()`, `catalogo.pedir_publicacao()`, `catalogo.pegar_publicacao()`, `catalogo.registrar_item()`, `catalogo.concluir_publicacao()` e `catalogo.publicacoes_recentes()` em `supabase/migrations/0015_catalogo_funcoes.sql`, seguindo `contracts/publicacao.md` e `contracts/painel-rpc.md`, incluindo o grupo `bling_pendente` em `catalogo.revisao` (`data-model.md` §3) e o `bling_modo` do pedido (`data-model.md` → `catalogo.publicacoes.bling_modo`, `simulacao` quando o destino for `site_teste`)
+- [ ] T024 [US1] Implementar a gravação de um produto no site (transação por produto, `SET XACT_ABORT ON`, upserts e inativações, `OUTPUT inserted.identify`) em `gateway/src/brinde_gateway/site_escrita.py`, conforme `contracts/site-escrita.md`. O `data-model.md` → `catalogo.produtos.slug` é gravado no site só no insert e nunca alterado
 - [ ] T025 [US1] Implementar o comando `publish` (pegar pedido, processar itens, registrar resultados, concluir) e os helpers de conexão com o site (pyodbc, segredo `site`) em `gateway/src/brinde_gateway/publicar.py` e `gateway/src/brinde_gateway/cli.py`
 - [ ] T026 [US1] Registrar a tarefa agendada `publish` a cada 5 minutos e a leitura do Catálogo às 05:00 em `gateway/install.ps1`, com as instruções em `gateway/LEIAME.md`
 - [ ] T027 [P] [US1] Criar as chamadas tipadas (`revisao`, `revisaoResumo`, `pedirPublicacao`, `publicacoesRecentes`) em `apps/web/lib/catalogo.ts`
@@ -169,10 +173,10 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 ### Implementação da US2
 
-- [ ] T034 [US2] Criar as funções `catalogo.lista()`, `catalogo.produto()`, `catalogo.salvar()`, `catalogo.copiar_de()`, `catalogo.fotos_ordenar()` e `catalogo.foto_remover()` em `supabase/migrations/0015_catalogo_funcoes.sql`, seguindo `contracts/painel-rpc.md`
-- [ ] T035 [US2] Implementar `gateway/src/brinde_gateway/fotos.py`: download, Pillow → JPG qualidade 85, boto3 com o segredo `s3`. Integrar ao `publish` e marcar `catalogo.fotos.situacao='publicada'` (`data-model.md`), apagando o arquivo do Storage depois do sucesso
+- [ ] T034 [US2] Criar as funções `catalogo.lista()`, `catalogo.produto()`, `catalogo.salvar()`, `catalogo.copiar_de()`, `catalogo.fotos_ordenar()` e `catalogo.foto_remover()` em `supabase/migrations/0015_catalogo_funcoes.sql`, seguindo `contracts/painel-rpc.md`. A letra das extras vem de `data-model.md` → `catalogo.fotos.ordem`
+- [ ] T035 [US2] Implementar `gateway/src/brinde_gateway/fotos.py`: download, Pillow → JPG qualidade 85, boto3 com o segredo `s3`. Integrar ao `publish`, gravar `data-model.md` → `catalogo.fotos.s3_key` com a chave enviada e marcar `catalogo.fotos.situacao='publicada'` (`data-model.md`), apagando o arquivo do Storage depois do sucesso
 - [ ] T036 [US2] Criar a rota `POST /api/catalogo/fotos/upload-url` (URL de envio assinada, valida tipo e tamanho ≤ 10 MB, exige a permissão) em `apps/web/app/api/catalogo/fotos/upload-url/route.ts`
-- [ ] T037 [P] [US2] Criar as funções de nome de foto e as chamadas tipadas (`lista`, `produto`, `salvar`, `copiarDe`, `fotosOrdenar`, `fotoRemover`) em `apps/web/lib/catalogo.ts`
+- [ ] T037 [P] [US2] Criar as funções de nome de foto (a letra das extras vem de `data-model.md` → `catalogo.fotos.ordem`) e as chamadas tipadas (`lista`, `produto`, `salvar`, `copiarDe`, `fotosOrdenar`, `fotoRemover`) em `apps/web/lib/catalogo.ts`
 - [ ] T038 [US2] Criar a lista de produtos (busca e filtros todos / novos / alterados / alertas / inativos) em `apps/web/app/(app)/catalogo/page.tsx`
 - [ ] T039 [US2] Criar a tela do produto em `apps/web/app/(app)/catalogo/[ref]/page.tsx`, `apps/web/app/(app)/catalogo/actions.ts` e `apps/web/components/catalogo/campos-produto.tsx`:
   - dados do ERP somente para leitura, marcados "vem do ERP";
@@ -201,7 +205,9 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
   - em `429`, espera e tenta de novo;
   - o refresh do token roda com trava;
   - nenhuma chamada usa endpoint de exclusão definitiva;
-  - uma falha resulta em `data-model.md` → `catalogo.publicacao_itens.bling='pendente'`.
+  - uma falha resulta em `data-model.md` → `catalogo.publicacao_itens.bling='pendente'`;
+  - com `bling_modo = simulacao`, nenhuma chamada de escrita é feita ao Bling, o item fica com `bling = simulado` e o `bling_previsto` é preenchido;
+  - um produto com código não gerenciado (de marketplace) nunca recebe PUT, PATCH nem POST.
 - [ ] T042 [P] [US3] Testes SQL em `supabase/tests/catalogo.test.mjs`:
   - `catalogo.bling_token()` e `catalogo.bling_salvar_token()` (Vault, trava);
   - `catalogo.bling_componentes_substituir()`;
@@ -210,7 +216,7 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 ### Implementação da US3
 
 - [ ] T043 [US3] Criar as funções `catalogo.bling_token()`, `catalogo.bling_salvar_token()` e `catalogo.bling_componentes_substituir()`, com os grants ao `gateway_writer`, em `supabase/migrations/0015_catalogo_funcoes.sql`
-- [ ] T044 [US3] Implementar `gateway/src/brinde_gateway/bling.py` (cliente v3, refresh, criação e atualização, situações, cache de componentes de kit, limite de requisições) e integrá-lo ao `publish` em `gateway/src/brinde_gateway/publicar.py`
+- [ ] T044 [US3] Implementar `gateway/src/brinde_gateway/bling.py` (cliente v3, refresh, criação e atualização, situações, cache de componentes de kit, limite de requisições e modo simulação conforme `data-model.md` → `catalogo.publicacoes.bling_modo`) e integrá-lo ao `publish` em `gateway/src/brinde_gateway/publicar.py`
 - [ ] T045 [US3] Criar as rotas OAuth `GET /api/bling/conectar` e `GET /api/bling/callback` (só admin, `state`, gravação no Vault) em `apps/web/app/api/bling/conectar/route.ts` e `apps/web/app/api/bling/callback/route.ts`, e o botão "Conectar Bling" em `apps/web/app/(app)/configuracoes/conexoes/page.tsx`
 - [ ] T046 [US3] Adicionar o comando de diagnóstico `bling-check <SKU>` (mostra o id e o formato, sem alterar nada) em `gateway/src/brinde_gateway/cli.py`
 
@@ -233,7 +239,7 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 ### Implementação da US4
 
-- [ ] T048 [US4] Implementar `catalogo.marcar_edicao()`, a checagem de versão em `catalogo.salvar()` e o gatilho de auditoria em `supabase/migrations/0015_catalogo_funcoes.sql`
+- [ ] T048 [US4] Implementar `catalogo.marcar_edicao()` (grava `data-model.md` → `catalogo.produtos.editando_por` e `catalogo.produtos.editando_ate`), a checagem de versão em `catalogo.salvar()` e o gatilho de auditoria em `supabase/migrations/0015_catalogo_funcoes.sql`
 - [ ] T049 [US4] Criar o aviso "Fulano está editando" (renovação a cada 2 min) e o diálogo de conflito (recarregar ou sobrescrever) em `apps/web/components/catalogo/aviso-edicao.tsx`, integrados a `apps/web/app/(app)/catalogo/[ref]/page.tsx`
 - [ ] T050 [US4] Mostrar o histórico de alterações e de publicações do produto na tela do produto, em `apps/web/app/(app)/catalogo/[ref]/page.tsx`
 
@@ -245,8 +251,8 @@ description: "Lista de tarefas — Catálogo de produtos (fase 1)"
 
 - [ ] T051 [P] Atualizar a skill do projeto em `.claude/skills/dashboard-mercado-livre-brinde-do-bem/SKILL.md`: seção Catálogo, ordem das migrations 0014→0015, comandos `run`, `publish`, `import-site` e `bling-check`, e a regra de que nenhum segredo vai para o chat
 - [ ] T052 [P] Guia passo a passo do dono em `gateway/LEIAME.md`: `set-secret site|s3|bling`, criação das views, permissão de leitura, criação do app no Bling e troca do destino para produção
-- [ ] T053 Rodar `npm run test:sql`, `npm run test:web`, `npm run typecheck`, `npm run build` e `cd gateway && python -m pytest -q`. Tudo deve passar
-- [ ] T054 Executar os cenários 1–11 de `specs/001-catalogo-produtos/quickstart.md` no site de teste com o dono e registrar o resultado em `specs/001-catalogo-produtos/quickstart.md` (coluna de status)
+- [ ] T053 Rodar `npm run test:sql`, `npm run test:web`, `npm run typecheck`, `npm run build` e `cd gateway && python -m pytest -q`. Tudo deve passar. Medir também o tempo das telas do Catálogo com ~2.000 modelos fictícios no PGlite: deve ficar abaixo de 8 s
+- [ ] T054 Executar os cenários 1–14 de `specs/001-catalogo-produtos/quickstart.md` no site de teste com o dono e registrar o resultado em `specs/001-catalogo-produtos/quickstart.md` (coluna de status)
 - [ ] T055 Conferir com o Access o preço de 20 produtos (SC-005, diferença máxima de R$ 0,01) e anotar o resultado em `specs/001-catalogo-produtos/quickstart.md`
 
 ---

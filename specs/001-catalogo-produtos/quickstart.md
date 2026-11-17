@@ -38,6 +38,9 @@ Esperado: tudo passa (preço, status, documento desejado, diff, alertas, RLS, ve
 | 9 | Dois usuários no mesmo produto | Salvar nos dois | 2º recebe aviso de conflito; auditoria mostra os dois |
 | 10 | Usuário sem permissão `catalogo` | Abrir tela / chamar RPC direto | Negado nos dois |
 | 11 | Leitura do ERP com 30% menos produtos | `run` | Alerta "leitura do ERP suspeita"; revisão anterior mantida; nada desativado |
+| 12 | 50 produtos alterados (≈250 SKUs) | Publicar tudo | Resultado na tela em ≤ 10 min (FR-016/SC-002); anotar o tempo de cada etapa |
+| 13 | Bling indisponível na publicação anterior; documento sem mudança | Abrir revisão | Produto aparece em "Bling pendente"; publicar reenvia só ao Bling |
+| 14 | Destino = site de teste | Publicar 1 produto | Bling **não** é alterado; tela mostra "Bling (simulação)" com o que seria enviado |
 
 ## Virada para produção
 1. `import-site --from producao` de novo → revisar diferenças surgidas desde a carga.

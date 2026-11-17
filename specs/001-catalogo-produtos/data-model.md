@@ -98,7 +98,8 @@ Regras aplicadas aqui:
 `ref` PK, `documento jsonb` (último documento aplicado com sucesso no site), `bling jsonb` (`{sku: {id_bling, situacao}}`), `publicado_em`, `publicado_por`.
 
 ### catalogo.revisao (view)
-Por `ref`: `grupo` (`novo` \| `preco` \| `texto_foto` \| `desativado` \| `reativado` \| `personalizacao`), `antes jsonb`, `depois jsonb`, `alertas text[]`, `bloqueado bool`.
+Por `ref`: `grupo` (`novo` \| `preco` \| `texto_foto` \| `desativado` \| `reativado` \| `personalizacao` \| `bling_pendente`), `antes jsonb`, `depois jsonb`, `alertas text[]`, `bloqueado bool`.
+- `bling_pendente`: produto cujo documento não mudou, mas tem SKU com `bling ≠ ok` no último `catalogo.publicacao_itens` (ou `catalogo.publicado.bling` incompleto); ao ser publicado, só o passo Bling roda.
 
 ## 4. Publicação
 
@@ -108,12 +109,13 @@ Por `ref`: `grupo` (`novo` \| `preco` \| `texto_foto` \| `desativado` \| `reativ
 | id | bigserial PK | |
 | destino | text | `site_teste` \| `site_producao` (configuração ativa) |
 | situacao | text | `na_fila` → `publicando` → `concluida` \| `concluida_com_erros` \| `falhou` |
+| bling_modo | text | `simulacao` (destino `site_teste`) \| `real` (destino `site_producao`); definido no pedido, não editável |
 | pedido_por, pedido_em, inicio, fim | | |
 
 Transições: só o gateway muda de `na_fila` para `publicando` (com `skip locked`); `publicando` há mais de 2 h volta a `na_fila`.
 
 ### catalogo.publicacao_itens
-`publicacao_id`, `ref`, `documento jsonb` (congelado no clique), `fotos jsonb` (`[{s3_key, url_assinada}]`), `site` (`ok|erro|pulado`), `fotos_status`, `bling` (`ok|erro|pendente|bloqueado`), `erro text` (sem segredos), `concluido_em`.
+`publicacao_id`, `ref`, `documento jsonb` (congelado no clique), `fotos jsonb` (`[{s3_key, url_assinada}]`), `site` (`ok|erro|pulado`), `fotos_status`, `bling` (`ok|erro|pendente|bloqueado|simulado`), `bling_previsto jsonb` (chamadas que seriam feitas, no modo simulação), `erro text` (sem segredos), `concluido_em`.
 Ao concluir com `site=ok`: `catalogo.publicado` ← documento; fotos `pendente` → `publicada` (storage apagado).
 
 ### catalogo.bling_componentes

@@ -142,8 +142,12 @@ $$;
 --  nao_atribuido   = investimento - investimento atribuido a modelos (= linha modelo nulo de ads_modelos;
 --                    inclui o gasto de anuncios "sem modelo")
 --  tem_detalhe     = ha dados por anuncio no periodo
+-- p_detalhe = false: nao calcula nao_atribuido (devolve nulo); evita a atribuicao por modelo (cara)
+-- quando a tela so precisa dos cartoes (periodo atual e anterior).
+-- Assinatura antiga (3 parametros) removida: chamadas com 3 argumentos usam o padrao p_detalhe = true.
 -- ---------------------------------------------------------------------
-create or replace function analytics.ads_resumo(p_canal text, p_de date, p_ate date)
+drop function if exists analytics.ads_resumo(text, date, date);
+create or replace function analytics.ads_resumo(p_canal text, p_de date, p_ate date, p_detalhe boolean default true)
 returns table (investimento numeric, vendas_ads numeric, roas numeric, acos numeric, tacos numeric,
                pct_vendas_ads numeric, vendas_brutas_canal numeric, nao_atribuido numeric, tem_detalhe boolean)
 language plpgsql stable security invoker set search_path = '' as $$
@@ -186,7 +190,7 @@ begin
               and coalesce(o.cancel_detail_code, '') <> 'pack_splitted'
               and coalesce(o.shipment_substatus, '') <> 'pack_splitted'));
 
-  if v_det then
+  if v_det and coalesce(p_detalhe, true) then
     select coalesce(sum(a.investimento), 0) into v_atr
       from analytics.ads_metricas_modelo(p_canal, p_de, p_ate) a
      where a.modelo is not null;
@@ -200,7 +204,7 @@ begin
     case when v_vb > 0 then round(v_inv / v_vb * 100, 2) end,
     case when v_vb > 0 then round(v_vend / v_vb * 100, 2) end,
     round(v_vb, 2),
-    round(v_inv - v_atr, 2),
+    case when coalesce(p_detalhe, true) then round(v_inv - v_atr, 2) end,
     v_det;
 end $$;
 
@@ -212,6 +216,9 @@ end $$;
 -- e respeita core.can_see_channel / core.my_channels() explicitamente (a RLS nao vale aqui).
 -- Componentes: fatura de Product Ads ligada a pedido (pela data da venda) + fatura sem pedido antes
 -- do primeiro dia da API (data_ref) + mkt.ads_campaign_daily. A soma dos dias = dash_ads_periodo.
+-- ATENCAO: repete, dia a dia, a regra de analytics.dash_ads_periodo (0009). Quem mudar uma muda a outra
+-- junto (ex.: o projeto "Shopee completa", quando o investimento da Shopee entrar em dash_ads_periodo).
+-- Execucao revogada de public e anon, concedida a authenticated (como ads_orcamento).
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_serie(p_canal text, p_de date, p_ate date)
 returns table (dia date, investimento numeric, vendas_ads numeric)
@@ -264,6 +271,9 @@ language sql stable security definer set search_path = '' as $$
    order by 1
 $$;
 
+revoke execute on function analytics.ads_serie(text, date, date) from public, anon;
+grant execute on function analytics.ads_serie(text, date, date) to authenticated;
+
 -- ---------------------------------------------------------------------
 -- Numero no padrao brasileiro para os motivos das sugestoes: 1.234,56.
 -- p_qtd = contagem (cliques, unidades): sem casas quando for inteira.
@@ -275,6 +285,13 @@ language sql stable set search_path = '' as $$
                            case when p_qtd and p_valor = trunc(p_valor) then 'FM999,999,999,990'
                                 else 'FM999,999,999,990.00' end),
                    ',.', '.,')
+$$;
+
+-- Contagem com a palavra no singular ou plural: 1 dia, 2 dias, 0 cliques, 1,50 unidades.
+create or replace function analytics.ads_qtd(p_n numeric, p_um text, p_varios text)
+returns text
+language sql stable set search_path = '' as $$
+  select analytics.ads_fmt(p_n, true) || ' ' || case when p_n = 1 then p_um else p_varios end
 $$;
 
 -- ---------------------------------------------------------------------
@@ -481,45 +498,46 @@ begin
            when 'pausar' then
              case when d.inv >= d.pausar_gasto_min
                   then format('gastou R$ %s em 30 dias sem venda', analytics.ads_fmt(d.inv))
-                  else format('%s cliques em 30 dias sem venda (gastou R$ %s)', analytics.ads_fmt(d.cli, true), analytics.ads_fmt(d.inv))
+                  else format('%s em 30 dias sem venda (gastou R$ %s)', analytics.ads_qtd(d.cli, 'clique', 'cliques'), analytics.ads_fmt(d.inv))
              end
            when 'reduzir' then format('ACOS %s%% acima do equilíbrio %s%%', analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb))
-           when 'revisar' then format('%s cliques e conversão %s%% (abaixo de %s%%)',
-                                      analytics.ads_fmt(d.cli, true), analytics.ads_fmt(d.conv), analytics.ads_fmt(d.revisar_conversao_max_pct))
-           when 'escalar' then format('ACOS %s%% bem abaixo do equilíbrio %s%% com %s unidades vendidas por Ads',
-                                      analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.un, true))
-           when 'testar' then format('margem %s%% e %s unidades vendidas sem Ads', analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true))
+           when 'revisar' then format('%s e conversão %s%% (abaixo de %s%%)',
+                                      analytics.ads_qtd(d.cli, 'clique', 'cliques'), analytics.ads_fmt(d.conv), analytics.ads_fmt(d.revisar_conversao_max_pct))
+           when 'escalar' then format('ACOS %s%% bem abaixo do equilíbrio %s%% com %s por Ads',
+                                      analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_qtd(d.un, 'unidade vendida', 'unidades vendidas'))
+           when 'testar' then format('margem %s%% e %s sem Ads', analytics.ads_fmt(d.eqb), analytics.ads_qtd(d.pagas, 'unidade vendida', 'unidades vendidas'))
            when 'manter' then   -- diz por que nenhuma regra disparou
              case when (d.inv >= d.pausar_gasto_min or d.cli >= d.pausar_cliques_min) and d.un = 0
-                    then format('%s em 30 dias sem venda, mas só %s dias com dados; mínimo %s',
+                    then format('%s em 30 dias sem venda, mas só %s com dados; mínimo %s',
                                 case when d.inv >= d.pausar_gasto_min then format('gastou R$ %s', analytics.ads_fmt(d.inv))
-                                     else format('%s cliques', analytics.ads_fmt(d.cli, true)) end,
-                                d.dias, d.min_dias_dados)
+                                     else analytics.ads_qtd(d.cli, 'clique', 'cliques') end,
+                                analytics.ads_qtd(d.dias, 'dia', 'dias'), d.min_dias_dados)
                   when d.sem_custo and d.inv > 0
-                    then format('sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ %s em 30 dias e vendeu %s unidades por Ads',
-                                analytics.ads_fmt(d.inv), analytics.ads_fmt(d.un, true))
+                    then format('sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ %s em 30 dias e vendeu %s por Ads',
+                                analytics.ads_fmt(d.inv), analytics.ads_qtd(d.un, 'unidade', 'unidades'))
                   when d.sem_custo
-                    then format('sem custo cadastrado e sem investimento em Ads em 30 dias; %s unidades vendidas',
-                                analytics.ads_fmt(d.pagas, true))
+                    then format('sem custo cadastrado e sem investimento em Ads em 30 dias; %s',
+                                analytics.ads_qtd(d.pagas, 'unidade vendida', 'unidades vendidas'))
                   when d.acos is not null and d.eqb is not null and d.acos <= d.eqb - d.escalar_folga_pp
-                    then format('ACOS %s%% bem abaixo do equilíbrio %s%%, mas só %s unidades vendidas por Ads; mínimo %s',
-                                analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.un, true), d.escalar_unidades_min)
+                    then format('ACOS %s%% bem abaixo do equilíbrio %s%%, mas só %s por Ads; mínimo %s',
+                                analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_qtd(d.un, 'unidade vendida', 'unidades vendidas'),
+                                d.escalar_unidades_min)
                   when d.acos is not null and d.eqb is not null
                     then format('ACOS %s%% dentro do equilíbrio %s%%, sem folga de %s pontos para escalar',
                                 analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.escalar_folga_pp))
                   when d.inv > 0 and d.vend = 0
-                    then format('investiu R$ %s e teve %s cliques em 30 dias sem venda, abaixo dos limites para pausar (R$ %s ou %s cliques)',
-                                analytics.ads_fmt(d.inv), analytics.ads_fmt(d.cli, true),
-                                analytics.ads_fmt(d.pausar_gasto_min), analytics.ads_fmt(d.pausar_cliques_min::numeric, true))
+                    then format('investiu R$ %s e teve %s em 30 dias sem venda, abaixo dos limites para pausar (R$ %s ou %s)',
+                                analytics.ads_fmt(d.inv), analytics.ads_qtd(d.cli, 'clique', 'cliques'),
+                                analytics.ads_fmt(d.pausar_gasto_min), analytics.ads_qtd(d.pausar_cliques_min::numeric, 'clique', 'cliques'))
                   when d.inv > 0
                     then format('ACOS %s%% sem ACOS de equilíbrio (sem venda paga em 30 dias)', analytics.ads_fmt(d.acos))
                   when d.eqb is not null and d.eqb < d.testar_margem_min_pct
                     then format('sem Ads em 30 dias: margem %s%% abaixo do mínimo de %s%% para testar',
                                 analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.testar_margem_min_pct))
                   when d.eqb is not null
-                    then format('sem Ads em 30 dias: margem %s%%, mas só %s unidades vendidas; mínimo %s para testar',
-                                analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true), d.testar_unidades_min)
-                  else format('sem Ads em 30 dias e sem margem calculada; %s unidades vendidas', analytics.ads_fmt(d.pagas, true))
+                    then format('sem Ads em 30 dias: margem %s%%, mas só %s; mínimo %s para testar',
+                                analytics.ads_fmt(d.eqb), analytics.ads_qtd(d.pagas, 'unidade vendida', 'unidades vendidas'), d.testar_unidades_min)
+                  else format('sem Ads em 30 dias e sem margem calculada; %s', analytics.ads_qtd(d.pagas, 'unidade vendida', 'unidades vendidas'))
              end
          end,
          d.pausado, d.inv, d.cli, d.vend, d.un, d.conv, d.acos, d.eqb, d.eqb,
@@ -532,7 +550,8 @@ end $$;
 -- ---------------------------------------------------------------------
 -- Tabela por modelo (sugestao/motivo: analytics.ads_sugestoes na janela de 30 dias ate p_ate; nulos se pausado).
 -- Universo (data-model §3): modelos com dados de Ads no periodo ou com venda paga no canal nos
--- 30 dias ate p_ate. Linha final modelo nulo = "nao atribuido a anuncio": investimento do cartao
+-- 30 dias ate p_ate, mais os modelos de ads_sugestoes (Ads na janela de 30 dias): um modelo com sugestao
+-- aparece mesmo com as metricas do periodo zeradas. Linha final modelo nulo = "nao atribuido a anuncio": investimento do cartao
 -- (dash_ads_periodo) menos o atribuido aos modelos; inclui os anuncios "sem modelo" (uma so linha nula),
 -- assim a soma da tabela = cartao.
 -- Metricas = soma(metrica do anuncio x peso de ads_peso_modelo), arredondadas por canal e modelo
@@ -543,7 +562,9 @@ end $$;
 -- Lucro pos-Ads = contribuicao antes do Ads - investimento atribuido. Nulos sem 'custos' (FR-009)
 -- e para modelo sem custo (sem_custo > 0). Modelo sem venda no periodo: contribuicao 0
 -- (lucro = -investimento); sem venda e sem Ads no periodo (so venda na janela de 30 dias): nulos.
--- pausado: todos os anuncios do modelo pausados (anuncio ou campanha). modo: core.ads_modo (padrao manual).
+-- pausado: todos os anuncios do modelo pausados (anuncio ou campanha), no mesmo conjunto de anuncios da
+-- sugestao (ads_sugestoes.pausado, janela de 30 dias); sem linha nas sugestoes, os anuncios do periodo.
+-- Assim sugestao nula com custos e limites vigentes sempre vem com pausado. modo: core.ads_modo (padrao manual).
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_modelos(p_canal text, p_de date, p_ate date)
 returns table (modelo text, produto text, foto text, investimento numeric, impressoes numeric, cliques numeric,
@@ -632,7 +653,7 @@ begin
        and r.modelo is not null
   ),
   sug as materialized (
-    select sg.modelo, sg.sugestao, sg.motivo from analytics.ads_sugestoes(p_canal, p_ate) sg
+    select sg.modelo, sg.sugestao, sg.motivo, sg.pausado from analytics.ads_sugestoes(p_canal, p_ate) sg
   ),
   dm as materialized (
     -- vendas por modelo so existem no Mercado Livre: na Shopee nao roda (dash_itens e caro)
@@ -666,9 +687,13 @@ begin
      group by r.modelo
   ),
   uni as (
+    -- + os modelos das sugestoes (Ads nos 30 dias, mesmo sem nada no periodo): a contagem por sugestao
+    -- da tela bate com a tabela (ex.: Pausar de quem gastou antes de um periodo curto)
     select a.modelo from ads_mod a
     union
     select v.modelo from vendidos v
+    union
+    select sg.modelo from sug sg
   ),
   linhas as (
     select u.modelo,
@@ -686,7 +711,8 @@ begin
                      + coalesce(fm.ads, 0)
            end as antes,
            case when v_ve and coalesce(d.sem_custo, 0) = 0 then d.contribuicao_pct end as cpct,
-           coalesce(a.pausado, false) as pausado,
+           -- mesmo conjunto de anuncios da sugestao (30 dias); sem linha nas sugestoes, os anuncios do periodo
+           coalesce(sg.pausado, a.pausado, false) as pausado,
            sg.sugestao as sug, sg.motivo as mot,
            cm.campaign_id,
            coalesce((select min(x.modo) from core.ads_modo x   -- 'automatico' < 'manual'
@@ -749,6 +775,10 @@ end $$;
 -- (nome -- ou o id --, status, orcamento diario, ROAS objetivo, ACOS equivalente = 100 / ROAS objetivo,
 -- automatica). modelos = modelos distintos atribuidos aos anuncios da campanha no periodo.
 -- Entram as campanhas com dados no periodo e as ativas no cadastro.
+-- Linha final campanha_id = null = "nao atribuido a campanha" (como a linha nula de ads_modelos):
+-- investimento do cartao (dash_ads_periodo) menos a soma das campanhas, assim a aba soma o cartao
+-- (ex.: Product Ads da fatura ligada a pedido e a fatura anterior a API); vendas por Ads dos anuncios sem
+-- campanha. Demais colunas nulas. So aparece se o valor nao for zero ou se houver anuncio sem campanha.
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_campanhas(p_canal text, p_de date, p_ate date)
 returns table (campanha_id text, nome text, status text, automatica boolean, orcamento_diario numeric,
@@ -756,10 +786,13 @@ returns table (campanha_id text, nome text, status text, automatica boolean, orc
                acos numeric, roas numeric, modelos integer, modo text)
 language plpgsql stable security invoker set search_path = '' as $$
 #variable_conflict use_column
+declare
+  v_inv numeric;
 begin
   if not core.has_perm('ads') or coalesce(p_canal, '') not in ('consolidado', 'mercadolivre', 'shopee') then
     return;
   end if;
+  v_inv := coalesce(analytics.dash_ads_periodo(p_canal, p_de, p_ate), 0);
 
   return query
   with ci as materialized (
@@ -803,26 +836,44 @@ begin
      where lower(c.status) = 'active'
        and (p_canal = 'consolidado' and c.channel in ('mercadolivre', 'shopee') or c.channel = p_canal)
   )
-  select k.campaign_id,
-         coalesce(nullif(c.name, ''), k.campaign_id),
-         c.status,
-         c.automatica,
-         c.budget::numeric,
-         c.roas_target,
-         case when c.roas_target > 0 then round(100 / c.roas_target, 2) end,
-         round(coalesce(ci.inv, 0), 2),
-         round(coalesce(vc.vend, 0), 2),
-         case when vc.vend > 0 then round(coalesce(ci.inv, 0) / vc.vend * 100, 2) end,
-         case when ci.inv > 0 then round(coalesce(vc.vend, 0) / ci.inv, 2) end,
-         coalesce(mc.n, 0)::integer,
-         coalesce((select x.modo from core.ads_modo x
-                    where x.channel = k.channel and x.tipo = 'campanha' and x.chave = k.campaign_id), 'manual')
-    from k
-    left join mkt.ads_campaigns c on c.channel = k.channel and c.campaign_id = k.campaign_id
-    left join ci on ci.channel = k.channel and ci.campaign_id = k.campaign_id
-    left join vc on vc.channel = k.channel and vc.campaign_id = k.campaign_id
-    left join mc on mc.channel = k.channel and mc.campaign_id = k.campaign_id
-   order by coalesce(ci.inv, 0) desc, coalesce(nullif(c.name, ''), k.campaign_id), k.campaign_id;
+  ,
+  linhas as (
+    select k.campaign_id,
+           coalesce(nullif(c.name, ''), k.campaign_id) as nome,
+           c.status,
+           c.automatica,
+           c.budget::numeric as orc,
+           c.roas_target,
+           case when c.roas_target > 0 then round(100 / c.roas_target, 2) end as acos_eq,
+           round(coalesce(ci.inv, 0), 2) as inv,
+           round(coalesce(vc.vend, 0), 2) as vend,
+           case when vc.vend > 0 then round(coalesce(ci.inv, 0) / vc.vend * 100, 2) end as acos,
+           case when ci.inv > 0 then round(coalesce(vc.vend, 0) / ci.inv, 2) end as roas,
+           coalesce(mc.n, 0)::integer as n,
+           coalesce((select x.modo from core.ads_modo x
+                      where x.channel = k.channel and x.tipo = 'campanha' and x.chave = k.campaign_id), 'manual') as modo,
+           k.campaign_id as desempate
+      from k
+      left join mkt.ads_campaigns c on c.channel = k.channel and c.campaign_id = k.campaign_id
+      left join ci on ci.channel = k.channel and ci.campaign_id = k.campaign_id
+      left join vc on vc.channel = k.channel and vc.campaign_id = k.campaign_id
+      left join mc on mc.channel = k.channel and mc.campaign_id = k.campaign_id
+  ),
+  nao as (
+    select round(v_inv - coalesce((select sum(l.inv) from linhas l), 0), 2) as inv,
+           round(coalesce((select sum(m.vend) from met m where m.campaign_id is null), 0), 2) as vend,
+           exists (select 1 from met m where m.campaign_id is null) as tem
+  )
+  select r.campaign_id, r.nome, r.status, r.automatica, r.orc, r.roas_target, r.acos_eq, r.inv, r.vend, r.acos, r.roas, r.n, r.modo
+    from (
+      select l.*, 0 as ordem from linhas l
+      union all
+      select null::text, null::text, null::text, null::boolean, null::numeric, null::numeric, null::numeric,
+             n.inv, n.vend, null::numeric, null::numeric, null::integer, null::text, null::text, 1
+        from nao n
+       where n.inv <> 0 or n.tem
+    ) r
+   order by r.ordem, r.inv desc, r.nome, r.desempate;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -914,9 +965,9 @@ grant execute on function analytics.ads_parametros(text, date),
                           analytics.ads_peso_sem_venda(text, date, date, text[]),
                           analytics.ads_peso_modelo(text, date, date),
                           analytics.ads_fmt(numeric, boolean),
+                          analytics.ads_qtd(numeric, text, text),
                           analytics.ads_sugestoes(text, date),
                           analytics.ads_metricas_modelo(text, date, date),
-                          analytics.ads_resumo(text, date, date),
-                          analytics.ads_serie(text, date, date),
+                          analytics.ads_resumo(text, date, date, boolean),
                           analytics.ads_modelos(text, date, date),
                           analytics.ads_campanhas(text, date, date) to authenticated;

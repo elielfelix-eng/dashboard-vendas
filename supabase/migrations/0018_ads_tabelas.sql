@@ -42,7 +42,7 @@ select r.role::core.app_role, p.permission,
 on conflict (role, permission) do nothing;
 
 -- ---------------------------------------------------------------------
--- 3. Orcamento mensal por canal e vigencia (editavel por quem tem editar_ads)
+-- 3. Orcamento mensal por canal e vigencia (leitura com 'ads'; editavel por quem tem editar_ads)
 --    Vale a linha com o maior vigente_desde <= data consultada.
 -- ---------------------------------------------------------------------
 create table if not exists core.orcamento_ads (
@@ -59,7 +59,9 @@ on conflict (channel, vigente_desde) do nothing;
 alter table core.orcamento_ads enable row level security;
 drop policy if exists "orcamento ads: leitura" on core.orcamento_ads;
 drop policy if exists "orcamento ads: edicao" on core.orcamento_ads;
-create policy "orcamento ads: leitura" on core.orcamento_ads for select to authenticated using (true);
+-- leitura so com a permissao 'ads' (a tela Ads); o calculo do mes usa analytics.ads_orcamento (definer)
+create policy "orcamento ads: leitura" on core.orcamento_ads for select to authenticated
+  using ((select core.has_perm('ads')));
 create policy "orcamento ads: edicao" on core.orcamento_ads for all to authenticated
   using ((select core.has_perm('editar_ads'))) with check ((select core.has_perm('editar_ads')));
 grant select, insert, update, delete on core.orcamento_ads to authenticated;

@@ -93,11 +93,14 @@ await canais('mercadolivre,shopee');
 eq('RLS ads_anuncios: sem escrita para authenticated', await comoAuth(() => tenta(`insert into mkt.ads_anuncios (channel, item_id) values ('mercadolivre', 'X')`)), 'negado');
 eq('RLS ads_anuncios: politica usa (select ...)', await val(`select qual ~* 'SELECT core\\.' from pg_policies where schemaname = 'mkt' and tablename = 'ads_anuncios'`), true);
 
-for (const p of ['comercial', 'visualizador', 'vendedor']) {
+// orcamento_ads: leitura so com a permissao ads; parametros_ads: qualquer usuario logado
+for (const [p, n] of [['admin', 2], ['gestor', 2], ['comercial', 2], ['visualizador', 0], ['vendedor', 0]]) {
   await perfil(p);
-  eq(`RLS orcamento legivel por ${p}`, await comoAuth(() => val(`select count(*)::int from core.orcamento_ads`)), 2);
+  eq(`RLS orcamento ${n ? 'legivel' : 'invisivel'} para ${p}`, await comoAuth(() => val(`select count(*)::int from core.orcamento_ads`)), n);
   eq(`RLS parametros legiveis por ${p}`, await comoAuth(() => val(`select count(*)::int from core.parametros_ads`)), 2);
 }
+eq('RLS orcamento: politica de leitura usa (select core.has_perm(...))', await val(`select qual ~* 'SELECT core\\.has_perm' from pg_policies
+  where schemaname = 'core' and tablename = 'orcamento_ads' and policyname = 'orcamento ads: leitura'`), true);
 const novo = (d) => `insert into core.orcamento_ads (channel, vigente_desde, valor_mensal) values ('shopee', '${d}', 7000)`;
 await perfil('gestor');
 eq('gestor grava orcamento', await comoAuth(() => tenta(novo('2026-12-01'))), 'ok');
@@ -314,6 +317,12 @@ eq('resumo consolidado: sem o canal brindedobem (FR-010)', await resumo('consoli
   investimento: 209, vendas_ads: 440, roas: 2.11, acos: 47.5, tacos: 55, pct_vendas_ads: 115.79,
   vendas_brutas_canal: 380, nao_atribuido: 69, tem_detalhe: true,
 }]);
+const RES4 = RES.replace('$3::date)', '$3::date, $4::boolean)');
+eq('resumo sem detalhe (p_detalhe false, periodo anterior da tela): nao_atribuido nulo, resto igual', await rows(RES4, ['mercadolivre', ...OUT, false]), [{
+  investimento: 209, vendas_ads: 440, roas: 2.11, acos: 47.5, tacos: 55, pct_vendas_ads: 115.79,
+  vendas_brutas_canal: 380, nao_atribuido: null, tem_detalhe: true,
+}]);
+eq('resumo com p_detalhe true = chamada sem o parametro', await rows(RES4, ['mercadolivre', ...OUT, true]), await resumo('mercadolivre'));
 eq('resumo shopee: so o shopee (sem fonte conferida ainda)', (await resumo('shopee')).map((r) => [r.investimento, r.vendas_ads, r.vendas_brutas_canal, r.tem_detalhe]),
   [[0, 0, 0, true]]);
 await perfil('comercial');
@@ -353,6 +362,11 @@ eq('serie: canal ML nao liberado nao mostra investimento nem vendas', (await com
   .reduce((s, d) => s + d.investimento + d.vendas_ads, 0), 0);
 await perfil('admin'); await canais('mercadolivre,shopee');
 eq('serie e definer so com agregados (excecao documentada)', await val(`select prosecdef from pg_proc where proname = 'ads_serie'`), true);
+eq('ads_serie: execucao so para authenticated (revogada de public e anon)', await rows(`select
+  has_function_privilege('anon', 'analytics.ads_serie(text, date, date)', 'execute') as anon,
+  has_function_privilege('authenticated', 'analytics.ads_serie(text, date, date)', 'execute') as auth,
+  exists (select 1 from pg_proc p, aclexplode(p.proacl) a where p.proname = 'ads_serie' and a.grantee = 0) as publico`),
+  [{ anon: false, auth: true, publico: false }]);
 
 // ---------------- T011: ads_modelos ----------------
 const MOD = `select modelo, produto, investimento::float as inv, impressoes::float as imp, cliques::float as cli, ctr::float, cpc::float,
@@ -440,10 +454,22 @@ eq('campanhas: agregacao, atributos, ACOS equivalente, nome = id quando sem cada
   { campanha_id: 'c1', nome: 'Campanha 1', status: 'active', automatica: false, orc: 40, roas_obj: 4, acos_eq: 25, inv: 150, vend: 440, acos: 34.09, roas: 2.93, modelos: 2, modo: 'automatico' },
   { campanha_id: 'c2', nome: 'c2', status: null, automatica: null, orc: null, roas_obj: null, acos_eq: null, inv: 30, vend: 0, acos: null, roas: 0, modelos: 1, modo: 'manual' },
   { campanha_id: 'c3', nome: 'Campanha 3', status: 'active', automatica: true, orc: 10, roas_obj: null, acos_eq: null, inv: 0, vend: 0, acos: null, roas: null, modelos: 0, modo: 'manual' },
+  // linha final "nao atribuido a campanha": cartao (209) - campanhas (180) = fatura ligada a pedido e anterior a API
+  { campanha_id: null, nome: null, status: null, automatica: null, orc: null, roas_obj: null, acos_eq: null, inv: 29, vend: 0, acos: null, roas: null, modelos: null, modo: null },
 ]);
-eq('campanhas consolidado: sem brindedobem', (await rows(CAMP, ['consolidado', ...OUT])).map((c) => c.campanha_id), ['c1', 'c2', 'c3']);
+eq('campanhas: soma da aba = cartao', (await rows(CAMP, ['mercadolivre', ...OUT])).reduce((s, c) => s + c.inv, 0), (await resumo('mercadolivre'))[0].investimento);
+eq('campanhas consolidado: sem brindedobem; anuncio da Shopee sem campanha entra na linha nula', (await rows(CAMP, ['consolidado', ...OUT])).map((c) => [c.campanha_id, c.inv, c.vend]),
+  [['c1', 150, 440], ['c2', 30, 0], ['c3', 0, 0], [null, 29, 0]]);
+await db.exec(`insert into mkt.ads_metrics_daily (channel, item_id, day, campaign_id, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units)
+  values ('mercadolivre','MLB8','2026-10-11',null,10,1,0,15,0,1,0,0)`);
+eq('campanhas: vendas de anuncio sem campanha ficam na linha nula', (await rows(CAMP, ['mercadolivre', ...OUT])).filter((c) => c.campanha_id === null).map((c) => [c.inv, c.vend]), [[29, 15]]);
+await db.exec(`delete from mkt.ads_metrics_daily where item_id = 'MLB8'`);
+eq('campanhas: periodo vazio sem linha nula', await rows(CAMP, ['mercadolivre', '2020-01-01', '2020-01-31']), [
+  { campanha_id: 'c1', nome: 'Campanha 1', status: 'active', automatica: false, orc: 40, roas_obj: 4, acos_eq: 25, inv: 0, vend: 0, acos: null, roas: null, modelos: 0, modo: 'automatico' },
+  { campanha_id: 'c3', nome: 'Campanha 3', status: 'active', automatica: true, orc: 10, roas_obj: null, acos_eq: null, inv: 0, vend: 0, acos: null, roas: null, modelos: 0, modo: 'manual' },
+]);
 await perfil('comercial');
-eq('campanhas: comercial ve', (await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT]))).map((c) => [c.campanha_id, c.inv]), [['c1', 150], ['c2', 30], ['c3', 0]]);
+eq('campanhas: comercial ve', (await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT]))).map((c) => [c.campanha_id, c.inv]), [['c1', 150], ['c2', 30], ['c3', 0], [null, 29]]);
 await perfil('visualizador');
 eq('campanhas sem ads: nada', await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT])), []);
 await perfil('gestor'); await canais('crm');
@@ -567,7 +593,12 @@ await db.exec(`update mkt.ads_campaigns set status = 'active' where campaign_id 
 eq('poucos dias com dados: nao pausa (R$ 60 em 3 dias) -> Manter', [mf.find((m) => m.modelo === 'POU10').sugestao, motivo('POU10')],
   ['manter', 'gastou R$ 60,00 em 30 dias sem venda, mas só 3 dias com dados; mínimo 7']);
 eq('Manter: motivo diz por que (sem folga para escalar)', motivo('MAN08'), 'ACOS 25,00% dentro do equilíbrio 30,00%, sem folga de 10,00 pontos para escalar');
-eq('Manter sem custo: motivo', motivo('SCU09'), 'sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ 40,00 em 30 dias e vendeu 1 unidades por Ads');
+eq('Manter sem custo: motivo (singular: 1 unidade)', motivo('SCU09'), 'sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ 40,00 em 30 dias e vendeu 1 unidade por Ads');
+eq('ads_qtd: singular so quando a contagem e 1', await rows(`select analytics.ads_qtd(1, 'dia', 'dias') as a, analytics.ads_qtd(1, 'clique', 'cliques') as b,
+  analytics.ads_qtd(1, 'unidade vendida', 'unidades vendidas') as c, analytics.ads_qtd(0, 'dia', 'dias') as d, analytics.ads_qtd(2, 'clique', 'cliques') as e,
+  analytics.ads_qtd(1.5, 'unidade', 'unidades') as f, analytics.ads_qtd(1234, 'clique', 'cliques') as g`),
+  [{ a: '1 dia', b: '1 clique', c: '1 unidade vendida', d: '0 dias', e: '2 cliques', f: '1,50 unidades', g: '1.234 cliques' }]);
+eq('motivos sem "1 unidades", "1 dias" ou "1 cliques"', mf.filter((m) => /(^|\D)1 (unidades|dias|cliques)/.test(m.motivo ?? '')).map((m) => m.motivo), []);
 eq('modelo sem custo: so Pausar/Revisar/Manter (ACOS 40 nao vira Reduzir)', [mf.find((m) => m.modelo === 'SCU09').sugestao, /sem custo/.test(motivo('SCU09'))], ['manter', true]);
 eq('linha nao atribuido sem sugestao', mf.filter((m) => m.modelo === null).map((m) => [m.sugestao, m.motivo]), [[null, null]]);
 
@@ -589,9 +620,28 @@ eq('ads_sugestoes: equilibrio de 30 dias = ads_modelos quando o periodo e a jane
 
 // Janela de 30 dias ate p_ate (R4), nao o periodo
 const curto = await modelos('mercadolivre', '2027-02-20', FEV[1]);
-eq('janela: periodo curto ainda usa os 30 dias (RED02 so vendeu na janela -> Reduzir; POU10 -> Manter)',
+eq('janela: periodo curto ainda usa os 30 dias (RED02 so vendeu na janela -> Reduzir; POU10 -> Manter; universo = o das sugestoes)',
   curto.filter((m) => m.modelo).map((m) => [m.modelo, m.sugestao]).sort((a, b) => a[0].localeCompare(b[0])),
-  [['ESC04', 'escalar'], ['MAN08', 'manter'], ['POU10', 'manter'], ['RED02', 'reduzir'], ['REV03', 'revisar'], ['SCU09', 'manter'], ['TES05', 'testar']]);
+  [['ESC04', 'escalar'], ['MAN08', 'manter'], ['PAU01', 'pausar'], ['POU10', 'manter'], ['PRI06', 'pausar'], ['PSD07', null],
+   ['RED02', 'reduzir'], ['REV03', 'revisar'], ['SCU09', 'manter'], ['TES05', 'testar']]);
+// Periodo de 7 dias (22-28/02): PAU01 gastou so entre 10 e 19/02, sem venda -> aparece zerado com Pausar
+const sete = await modelos('mercadolivre', '2027-02-22', FEV[1]);
+eq('periodo de 7 dias: Pausar aparece com metricas do periodo zeradas',
+  sete.filter((m) => m.modelo === 'PAU01').map((m) => ({ inv: m.inv, imp: m.imp, cli: m.cli, vend: m.vend, un: m.un, eqb: m.eqb, lucro: m.lucro, pausado: m.pausado, sugestao: m.sugestao, motivo: m.motivo })),
+  [{ inv: 0, imp: 0, cli: 0, vend: 0, un: 0, eqb: null, lucro: null, pausado: false, sugestao: 'pausar', motivo: 'gastou R$ 60,00 em 30 dias sem venda' }]);
+eq('periodo de 7 dias: todo modelo com sugestao em ads_sugestoes esta na tabela',
+  (await rows(SUG, ['mercadolivre', FEV[1]])).filter((s) => s.sugestao).map((s) => s.modelo).filter((x) => !sete.some((m) => m.modelo === x)), []);
+eq('periodo de 7 dias: contagem por sugestao = ads_sugestoes', sete.filter((m) => m.modelo && m.sugestao).length,
+  (await rows(SUG, ['mercadolivre', FEV[1]])).filter((s) => s.sugestao).length);
+eq('periodo de 7 dias: sugestao nula (com custos e limites) so com pausado', sete.filter((m) => m.modelo && !m.sugestao).map((m) => [m.modelo, m.pausado]), [['PSD07', true]]);
+eq('periodo de 7 dias: soma da tabela = cartao', sete.reduce((s, m) => s + m.inv, 0), (await resumo('mercadolivre', '2027-02-22', FEV[1]))[0].investimento);
+// pausado igual ao da sugestao: WIN11 tem um anuncio ativo so em janeiro e outro, pausado, na janela de 30 dias
+await db.exec(`insert into mkt.items (channel, item_id, title, sku) values ('mercadolivre','MLW12','Win 2','WIN11-PRE');
+  insert into mkt.ads_anuncios (channel, item_id, campaign_id, status) values ('mercadolivre','MLW12',null,'paused');
+  insert into mkt.ads_metrics_daily (channel, item_id, day, impressions, clicks, cost) values ('mercadolivre','MLW12','2027-02-15',10,1,1)`);
+eq('pausado vem da mesma janela da sugestao (sugestao nula sempre com o motivo pausado)',
+  (await modelos('mercadolivre', '2027-01-01', FEV[1])).filter((m) => m.modelo === 'WIN11').map((m) => [m.inv, m.pausado, m.sugestao]), [[101, true, null]]);
+await db.exec(`delete from mkt.ads_metrics_daily where item_id = 'MLW12'; delete from mkt.ads_anuncios where item_id = 'MLW12'; delete from mkt.items where item_id = 'MLW12'`);
 eq('janela: modelo com Ads so fora dos 30 dias fica sem sugestao', (await modelos('mercadolivre', '2027-01-01', FEV[1])).filter((m) => m.modelo === 'WIN11').map((m) => [m.inv, m.sugestao, m.motivo]),
   [[100, null, null]]);
 eq('janela: p_ate mais tarde (so 1 dia de PAU01 na janela) -> Manter', (await rows(SUG, ['mercadolivre', '2027-03-20'])).filter((s) => s.modelo === 'PAU01').map((s) => [s.inv, s.dias, s.sugestao]),

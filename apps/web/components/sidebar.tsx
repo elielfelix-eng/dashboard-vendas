@@ -10,11 +10,11 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { href: '/', label: 'Visão Geral', ready: true, perm: 'visao_geral' },
     { href: '/vendas', label: 'Vendas', ready: true, perm: 'vendas' },
     { href: '/rentabilidade', label: 'Rentabilidade', ready: true, perm: 'rentabilidade' },
+    { href: '/ads', label: 'Ads', ready: true, perm: 'ads' },
     { href: '/comparativo', label: 'Comparativo anual', ready: true, perm: 'vendas' },
     { href: '/metas', label: 'Metas e Projeção', ready: true, perm: 'metas' },
     { href: '/anuncios', label: 'Anúncios', ready: false },
-    { href: '/ads', label: 'Ads', ready: false },
-    { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
+        { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
   ]},
   { section: 'CRM', items: [
     { href: '/crm/funil', label: 'Funil', ready: true, perm: 'crm_funil' },

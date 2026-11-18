@@ -383,7 +383,10 @@ eq('DDD44: vendido sem Ads aparece zerado', (({ inv, imp, cli, ctr, cpc, conv, v
   ({ inv, imp, cli, ctr, cpc, conv, vend, un, acos, eqb, lucro, pausado, campanha_id }))(mo.find((m) => m.modelo === 'DDD44')),
   { inv: 0, imp: 0, cli: 0, ctr: null, cpc: null, conv: null, vend: 0, un: 0, acos: null, eqb: 94.56, lucro: 28.37, pausado: false, campanha_id: null });
 eq('AAA11: modo automatico, campanha c1, produto', [A.modo, A.campanha_id, A.produto, A.pausado], ['automatico', 'c1', 'Produto A', false]);
-eq('sugestao e motivo ainda nulos', mo.every((m) => m.sugestao === null && m.motivo === null), true);
+// Outubro e antes da primeira vigencia (01/11/2026): vale a primeira linha de core.parametros_ads
+eq('sugestao antes da primeira vigencia usa a primeira linha de parametros; pausado e nao atribuido sem sugestao',
+  mo.map((m) => [m.modelo, m.sugestao]), [['AAA11', 'escalar'], ['CCC33', null], ['BBB22', 'manter'], ['DDD44', 'manter'], [null, null]]);
+eq('linha nao atribuido sem motivo', mo.find((m) => m.modelo === null).motivo, null);
 const nulo = mo.find((m) => m.modelo === null);
 eq('linha nao atribuido = investimento do resumo - modelos (inclui o anuncio sem modelo)', nulo.inv, 74);
 eq('reconciliacao: soma da tabela = cartao', mo.reduce((s, m) => s + m.inv, 0), (await resumo('mercadolivre'))[0].investimento);
@@ -477,6 +480,162 @@ eq('funcoes da tela: invoker (exceto ads_serie)', await rows(`select proname, pr
   [{ proname: 'ads_campanhas', prosecdef: false }, { proname: 'ads_modelos', prosecdef: false }, { proname: 'ads_resumo', prosecdef: false }]);
 await db.exec(mig('0019_ads_funcoes.sql'));
 eq('0019 reexecutavel com as funcoes da tela', (await resumo('mercadolivre'))[0].investimento, 209);
+
+// =====================================================================
+// US2 (T019): sugestoes em ads_modelos (janela de 30 dias ate p_ate, research R4)
+// Cenario novo (fevereiro/2027, ML; limites da vigencia de 01/11/2026: 50 / 100 / 7 / 100 / 1% / 10 pp / 3 / 20% / 3).
+//   Equilibrio (contribuicao antes do Ads / receita): RED02 30%, REV03 50%, ESC04 30%, MAN08 30%, TES05 25%; SCU09 sem custo.
+//   Product Ads da API (c9, 100) e rateado em dash_modelos e devolvido no equilibrio (R2): nao muda os numeros acima.
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee');
+const dias = (ini, n) => Array.from({ length: n }, (_, k) => { const d = new Date(`${ini}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); });
+const met = (ch, item, dia, cli, custo, valor = 0, un = 0, camp = null, ind = [0, 0]) =>
+  `('${ch}','${item}','${dia}',${camp ? `'${camp}'` : 'null'},${cli * 10},${cli},${custo},${valor},${ind[0]},${un},${ind[1]},0)`;
+const metUS2 = [
+  ...dias('2027-02-10', 10).map((d) => met('mercadolivre', 'MLP1', d, 3, 6)),                 // PAU01: R$ 60, 10 dias, sem venda
+  met('mercadolivre', 'MLR2', '2027-02-10', 20, 35, 100, 1),                                    // RED02: ACOS 35
+  met('mercadolivre', 'MLV3', '2027-02-11', 200, 10, 50, 1),                                    // REV03: 200 cliques, conversao 0,5%
+  met('mercadolivre', 'MLE4', '2027-02-12', 50, 90, 300, 3, null, [200, 2]),                   // ESC04: ACOS 18, 3 diretas + 2 indiretas
+  ...dias('2027-02-01', 8).map((d, k) => met('mercadolivre', 'MLP6', d, k < 6 ? 15 : 30, 2.5)), // PRI06: 150 cliques, R$ 20, 8 dias
+  ...dias('2027-02-10', 10).map((d) => met('mercadolivre', 'MLP7', d, 3, 6)),                 // PSD07: como PAU01, mas pausado
+  met('mercadolivre', 'MLM8', '2027-02-13', 20, 50, 200, 2),                                    // MAN08: ACOS 25
+  met('mercadolivre', 'MLS9', '2027-02-14', 20, 40, 100, 1),                                    // SCU09: sem custo, ACOS 40
+  ...dias('2027-02-20', 3).map((d) => met('mercadolivre', 'MLO10', d, 1, 20)),                // POU10: R$ 60 em so 3 dias
+  ...dias('2027-01-05', 10).map((d) => met('mercadolivre', 'MLW11', d, 3, 10)),               // WIN11: so fora da janela
+  ...dias('2027-02-01', 8).map((d) => met('shopee', 'SHX', d, 2, 3.75)),                      // SHP12 (Shopee): R$ 30, 8 dias
+];
+await db.exec(`
+delete from mkt.order_items; delete from mkt.orders; delete from mkt.item_variations; delete from mkt.items;
+delete from mkt.ads_metrics_daily; delete from mkt.ads_campaigns; delete from mkt.ads_anuncios; delete from mkt.ads_campaign_daily;
+delete from mkt.billing_details; delete from map.modelo_de_para; delete from core.ads_modo; delete from erp.cost_tiers;
+insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, source) values
+ ('RED02',1,49,70,'2026-01-01','erp'), ('REV03',1,49,25,'2026-01-01','erp'), ('ESC04',1,49,70,'2026-01-01','erp'),
+ ('MAN08',1,49,70,'2026-01-01','erp'), ('TES05',1,49,75,'2026-01-01','erp'), ('PAU01',1,49,10,'2026-01-01','erp'),
+ ('PRI06',1,49,10,'2026-01-01','erp'), ('PSD07',1,49,10,'2026-01-01','erp'), ('POU10',1,49,10,'2026-01-01','erp'),
+ ('WIN11',1,49,10,'2026-01-01','erp');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','R1','paid','2027-02-10 12:00+00','2027-02-10 12:00+00',100,'{}'),
+ ('mercadolivre','V1','paid','2027-02-11 12:00+00','2027-02-11 12:00+00',50,'{}'),
+ ('mercadolivre','E1','paid','2027-02-12 12:00+00','2027-02-12 12:00+00',500,'{}'),
+ ('mercadolivre','M1','paid','2027-02-13 12:00+00','2027-02-13 12:00+00',200,'{}'),
+ ('mercadolivre','S1','paid','2027-02-14 12:00+00','2027-02-14 12:00+00',100,'{}'),
+ ('mercadolivre','T1','paid','2027-02-15 12:00+00','2027-02-15 12:00+00',400,'{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','R1',1,'MLR2','RED02-AZU','Red',1,100), ('mercadolivre','V1',1,'MLV3','REV03-AZU','Rev',1,50),
+ ('mercadolivre','E1',1,'MLE4','ESC04-AZU','Esc',5,100), ('mercadolivre','M1',1,'MLM8','MAN08-AZU','Man',2,100),
+ ('mercadolivre','S1',1,'MLS9','SCU09-AZU','Scu',1,100), ('mercadolivre','T1',1,'MLT5','TES05-AZU','Tes',4,100);
+insert into mkt.items (channel, item_id, title, sku) values
+ ('mercadolivre','MLP1','Pau','PAU01-AZU'), ('mercadolivre','MLP6','Pri','PRI06-AZU'), ('mercadolivre','MLP7','Psd','PSD07-AZU'),
+ ('mercadolivre','MLO10','Pou','POU10-AZU'), ('mercadolivre','MLW11','Win','WIN11-AZU'), ('shopee','SHX','Shp','SHP12-X');
+insert into mkt.ads_anuncios (channel, item_id, campaign_id, status) values
+ ('mercadolivre','MLP7',null,'paused'), ('mercadolivre','MLM8','c9','active');
+insert into mkt.ads_campaigns (channel, campaign_id, name, status) values ('mercadolivre','c9','Campanha 9','active');
+insert into mkt.ads_campaign_daily (channel, campaign_id, day, cost) values ('mercadolivre','c9','2027-02-10',100);
+insert into mkt.ads_metrics_daily (channel, item_id, day, campaign_id, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units) values
+ ${metUS2.join(',\n ')};
+`);
+const FEV = ['2027-02-01', '2027-02-28'];
+const ord = (o) => Object.fromEntries(Object.entries(o).sort((a, b) => a[0].localeCompare(b[0])));
+const porModelo = (lst) => ord(Object.fromEntries(lst.filter((m) => m.modelo).map((m) => [m.modelo, m.sugestao])));
+const sug = async (c, de = FEV[0], ate = FEV[1]) => porModelo(await modelos(c, de, ate));
+const mf = await modelos('mercadolivre', ...FEV);
+const motivo = (mod) => mf.find((m) => m.modelo === mod)?.motivo;
+eq('US2: universo de fevereiro (WIN11 so tem Ads fora do periodo)', mf.map((m) => m.modelo).filter(Boolean).sort(),
+  ['ESC04', 'MAN08', 'PAU01', 'POU10', 'PRI06', 'PSD07', 'RED02', 'REV03', 'SCU09', 'TES05']);
+eq('US2: uma sugestao por modelo', porModelo(mf), ord({
+  PAU01: 'pausar', RED02: 'reduzir', REV03: 'revisar', ESC04: 'escalar', TES05: 'testar', PRI06: 'pausar',
+  PSD07: null, MAN08: 'manter', SCU09: 'manter', POU10: 'manter',
+}));
+eq('cenario 1: Pausar com o motivo', [mf.find((m) => m.modelo === 'PAU01').sugestao, motivo('PAU01')], ['pausar', 'gastou R$ 60,00 em 30 dias sem venda']);
+eq('cenario 2: Reduzir (ACOS acima do equilibrio)', [mf.find((m) => m.modelo === 'RED02').sugestao, motivo('RED02')], ['reduzir', 'ACOS 35,00% acima do equilíbrio 30,00%']);
+eq('cenario 3: Revisar anuncio (cliques e conversao baixa)', [mf.find((m) => m.modelo === 'REV03').sugestao, motivo('REV03')],
+  ['revisar', '200 cliques e conversão 0,50% (abaixo de 1,00%)']);
+eq('cenario 4: Escalar (12 pontos abaixo, 5 unidades por Ads: diretas + indiretas)', [mf.find((m) => m.modelo === 'ESC04').sugestao, motivo('ESC04')],
+  ['escalar', 'ACOS 18,00% bem abaixo do equilíbrio 30,00% com 5 unidades vendidas por Ads']);
+eq('cenario 5: Testar Ads (sem Ads, margem 25%, 4 unidades pagas) aparece na tabela zerado',
+  (({ modelo, inv, cli, un, sugestao, motivo: mt }) => ({ modelo, inv, cli, un, sugestao, mt }))(mf.find((m) => m.modelo === 'TES05')),
+  { modelo: 'TES05', inv: 0, cli: 0, un: 0, sugestao: 'testar', mt: 'margem 25,00% e 4 unidades vendidas sem Ads' });
+eq('cenario 6: Pausar prevalece sobre Revisar (150 cliques, 0 venda, 8 dias)', [mf.find((m) => m.modelo === 'PRI06').sugestao, motivo('PRI06')],
+  ['pausar', '150 cliques em 30 dias sem venda (gastou R$ 20,00)']);
+eq('cenario 7: anuncio pausado -> pausado e sem sugestao nem motivo', (({ pausado, sugestao, motivo: mt }) => ({ pausado, sugestao, mt }))(mf.find((m) => m.modelo === 'PSD07')),
+  { pausado: true, sugestao: null, mt: null });
+await db.exec(`update mkt.ads_campaigns set status = 'paused' where campaign_id = 'c9'`);
+eq('cenario 7: campanha pausada -> pausado e sem sugestao', (await modelos('mercadolivre', ...FEV)).filter((m) => m.modelo === 'MAN08').map((m) => [m.pausado, m.sugestao, m.motivo]),
+  [[true, null, null]]);
+await db.exec(`update mkt.ads_campaigns set status = 'active' where campaign_id = 'c9'`);
+eq('poucos dias com dados: nao pausa (R$ 60 em 3 dias) -> Manter', [mf.find((m) => m.modelo === 'POU10').sugestao, motivo('POU10')],
+  ['manter', 'investiu R$ 60,00 em 30 dias e vendeu 0 unidades por Ads']);
+eq('Manter: motivo com os numeros', motivo('MAN08'), 'ACOS 25,00% dentro do equilíbrio 30,00%');
+eq('modelo sem custo: so Pausar/Revisar/Manter (ACOS 40 nao vira Reduzir)', [mf.find((m) => m.modelo === 'SCU09').sugestao, /sem custo/.test(motivo('SCU09'))], ['manter', true]);
+eq('linha nao atribuido sem sugestao', mf.filter((m) => m.modelo === null).map((m) => [m.sugestao, m.motivo]), [[null, null]]);
+
+// Entradas da sugestao (ads_sugestoes)
+const SUG = `select modelo, canal, sugestao, investimento_30d::float as inv, cliques_30d::float as cli, unidades_ads_30d::float as un,
+  conversao_30d::float as conv, acos_30d::float as acos, acos_equilibrio_30d::float as eqb, contribuicao_pct_30d::float as cpct,
+  unidades_pagas_30d::float as pagas, dias_com_dados as dias, pausado
+  from analytics.ads_sugestoes($1, $2::date) order by modelo`;
+const sf = await rows(SUG, ['mercadolivre', FEV[1]]);
+eq('ads_sugestoes: entradas de ESC04', sf.find((s) => s.modelo === 'ESC04'),
+  { modelo: 'ESC04', canal: 'mercadolivre', sugestao: 'escalar', inv: 90, cli: 50, un: 5, conv: 10, acos: 18, eqb: 30, cpct: 30, pagas: 5, dias: 1, pausado: false });
+eq('ads_sugestoes: entradas de TES05 (sem Ads)', sf.find((s) => s.modelo === 'TES05'),
+  { modelo: 'TES05', canal: 'mercadolivre', sugestao: 'testar', inv: 0, cli: 0, un: 0, conv: null, acos: null, eqb: 25, cpct: 25, pagas: 4, dias: 0, pausado: false });
+eq('ads_sugestoes: dias com dados e pausado', sf.filter((s) => ['PAU01', 'PRI06', 'PSD07', 'POU10'].includes(s.modelo)).map((s) => [s.modelo, s.dias, s.pausado, s.sugestao]),
+  [['PAU01', 10, false, 'pausar'], ['POU10', 3, false, 'manter'], ['PRI06', 8, false, 'pausar'], ['PSD07', 10, true, null]]);
+eq('ads_sugestoes: equilibrio de 30 dias = ads_modelos quando o periodo e a janela',
+  sf.filter((s) => s.eqb !== null).map((s) => [s.modelo, s.eqb]),
+  (await modelos('mercadolivre', '2027-01-30', FEV[1])).filter((m) => m.modelo && m.eqb !== null).map((m) => [m.modelo, m.eqb]).sort((a, b) => a[0].localeCompare(b[0])));
+
+// Janela de 30 dias ate p_ate (R4), nao o periodo
+const curto = await modelos('mercadolivre', '2027-02-20', FEV[1]);
+eq('janela: periodo curto ainda usa os 30 dias (RED02 so vendeu na janela -> Reduzir; POU10 -> Manter)',
+  curto.filter((m) => m.modelo).map((m) => [m.modelo, m.sugestao]).sort((a, b) => a[0].localeCompare(b[0])),
+  [['ESC04', 'escalar'], ['MAN08', 'manter'], ['POU10', 'manter'], ['RED02', 'reduzir'], ['REV03', 'revisar'], ['SCU09', 'manter'], ['TES05', 'testar']]);
+eq('janela: modelo com Ads so fora dos 30 dias fica sem sugestao', (await modelos('mercadolivre', '2027-01-01', FEV[1])).filter((m) => m.modelo === 'WIN11').map((m) => [m.inv, m.sugestao, m.motivo]),
+  [[100, null, null]]);
+eq('janela: p_ate mais tarde (so 1 dia de PAU01 na janela) -> Manter', (await rows(SUG, ['mercadolivre', '2027-03-20'])).filter((s) => s.modelo === 'PAU01').map((s) => [s.inv, s.dias, s.sugestao]),
+  [[6, 1, 'manter']]);
+
+// Limites lidos da vigencia em p_ate
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, pausar_gasto_min, escalar_unidades_min) values ('mercadolivre', '2027-02-20', 70, 6)`);
+eq('limites: nova vigencia muda o resultado (gasto minimo 70, unidades para escalar 6)', await sug('mercadolivre'), ord({
+  PAU01: 'manter', RED02: 'reduzir', REV03: 'revisar', ESC04: 'manter', TES05: 'testar', PRI06: 'pausar',
+  PSD07: null, MAN08: 'manter', SCU09: 'manter', POU10: 'manter',
+}));
+eq('limites: p_ate antes da nova vigencia usa a anterior', (await rows(SUG, ['mercadolivre', '2027-02-19'])).filter((s) => ['PAU01', 'ESC04'].includes(s.modelo)).map((s) => [s.modelo, s.sugestao]),
+  [['ESC04', 'escalar'], ['PAU01', 'pausar']]);
+await db.exec(`delete from core.parametros_ads where channel = 'mercadolivre' and vigente_desde = '2027-02-20'`);
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, revisar_conversao_max_pct, testar_unidades_min) values ('mercadolivre', '2027-02-20', 0.4, 5)`);
+eq('limites: conversao maxima 0,4% e 5 unidades para testar', [(await sug('mercadolivre')).REV03, (await sug('mercadolivre')).TES05], ['manter', 'manter']);
+await db.exec(`delete from core.parametros_ads where channel = 'mercadolivre' and vigente_desde = '2027-02-20'`);
+
+// Consolidado: limites do canal de cada linha
+eq('consolidado sem vigencia propria da Shopee: SHP12 (R$ 30) mantem', (await sug('consolidado')).SHP12, 'manter');
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, pausar_gasto_min) values ('shopee', '2027-02-01', 20)`);
+const cf = await modelos('consolidado', ...FEV);
+eq('consolidado: SHP12 usa o limite da Shopee (20) -> Pausar', cf.filter((m) => m.modelo === 'SHP12').map((m) => [m.sugestao, m.motivo]),
+  [['pausar', 'gastou R$ 30,00 em 30 dias sem venda']]);
+eq('consolidado: modelos do ML com o limite do ML (iguais ao canal ML)', porModelo(cf.filter((m) => m.modelo !== 'SHP12')), porModelo(mf));
+eq('shopee: limite da Shopee', (await sug('shopee')).SHP12, 'pausar');
+await db.exec(`delete from core.parametros_ads where channel = 'shopee' and vigente_desde = '2027-02-01'`);
+
+// Sem custos (FR-009): so Pausar/Revisar ou nulo, como authenticated
+await perfil('comercial');
+const semCustos = await comoAuth(() => modelos('mercadolivre', ...FEV));
+eq('FR-009: comercial (authenticated) so ve Pausar/Revisar; o resto nulo', porModelo(semCustos), ord({
+  PAU01: 'pausar', RED02: null, REV03: 'revisar', ESC04: null, TES05: null, PRI06: 'pausar',
+  PSD07: null, MAN08: null, SCU09: null, POU10: null,
+}));
+eq('FR-009: sem sugestao, sem motivo', semCustos.filter((m) => m.sugestao === null).every((m) => m.motivo === null), true);
+eq('FR-009: motivo de Pausar com os numeros tambem para o comercial', semCustos.find((m) => m.modelo === 'PAU01').motivo, 'gastou R$ 60,00 em 30 dias sem venda');
+eq('FR-009: ads_sugestoes sem equilibrio nem margem', (await comoAuth(() => rows(SUG, ['mercadolivre', FEV[1]]))).every((s) => s.eqb === null && s.cpct === null), true);
+await perfil('gestor');
+eq('gestor (authenticated, com custos): mesmas sugestoes do admin', await comoAuth(() => sug('mercadolivre')), porModelo(mf));
+await perfil('visualizador');
+eq('ads_sugestoes sem a permissao ads: nada', await comoAuth(() => rows(SUG, ['mercadolivre', FEV[1]])), []);
+await perfil('admin');
+eq('ads_sugestoes: invoker', await val(`select prosecdef from pg_proc where proname = 'ads_sugestoes'`), false);
+await db.exec(mig('0019_ads_funcoes.sql'));
+eq('0019 reexecutavel com as sugestoes', (await sug('mercadolivre')).ESC04, 'escalar');
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

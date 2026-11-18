@@ -19,10 +19,57 @@ language sql stable security invoker set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------
--- Peso de cada modelo dentro de cada anuncio com metricas na janela (pesquisa R3).
---  1. Com venda na janela: unidades do modelo no anuncio / unidades do anuncio (dash_itens; pago, cancelado, devolvido).
+-- Peso dos anuncios SEM venda na janela (passos 2 e 3 da pesquisa R3), para os anuncios com metricas
+-- na janela que nao estao em p_com_venda ('canal:anuncio'). Usado por ads_peso_modelo e ads_sugestoes,
+-- que calculam o passo 1 (com venda) a partir do dash_itens que ja tem em maos.
 --  2. Sem venda: modelo(s) do SKU do anuncio (mkt.items e mkt.item_variations), via ref_erp; varios = divisao igual.
 --  3. Sem nada: uma linha com modelo nulo ("sem modelo"), peso 1.
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_peso_sem_venda(p_canal text, p_de date, p_ate date, p_com_venda text[])
+returns table (channel text, item_id text, modelo text, peso numeric)
+language sql stable security invoker set search_path = '' as $$
+  with ads as materialized (
+    select distinct m.channel, m.item_id
+      from mkt.ads_metrics_daily m
+     where m.day between p_de and p_ate
+       and (p_canal = 'consolidado' and m.channel in ('mercadolivre', 'shopee') or m.channel = p_canal)
+       and not (m.channel || ':' || m.item_id = any (coalesce(p_com_venda, '{}'::text[])))
+  ),
+  skus as materialized (
+    select a.channel, a.item_id, s.sku
+      from ads a
+      join lateral (
+        select it.sku from mkt.items it where it.channel = a.channel and it.item_id = a.item_id
+        union
+        select v.sku from mkt.item_variations v where v.channel = a.channel and v.item_id = a.item_id
+      ) s on true
+     where nullif(split_part(s.sku, '-', 1), '') is not null
+  ),
+  modelos_sku as materialized (
+    select distinct k.channel, k.item_id, r.modelo
+      from skus k
+     cross join lateral analytics.ref_erp(
+       k.sku,
+       nullif(split_part(k.sku, '-', 1), ''),
+       case when split_part(k.sku, '-', 2) ~ '^(K\d+|V\d+)?$' then null else split_part(k.sku, '-', 2) end,
+       (p_ate::timestamp + time '12:00') at time zone 'America/Sao_Paulo') r
+     where r.modelo is not null
+  ),
+  por_sku as materialized (
+    select ms.channel, ms.item_id, ms.modelo, 1.0 / count(*) over (partition by ms.channel, ms.item_id) as peso
+      from modelos_sku ms
+  )
+  select s.channel, s.item_id, s.modelo, s.peso from por_sku s
+  union all
+  select a.channel, a.item_id, null::text, 1.0
+    from ads a
+   where not exists (select 1 from por_sku s where s.channel = a.channel and s.item_id = a.item_id)
+$$;
+
+-- ---------------------------------------------------------------------
+-- Peso de cada modelo dentro de cada anuncio com metricas na janela (pesquisa R3).
+--  1. Com venda na janela: unidades do modelo no anuncio / unidades do anuncio (dash_itens; pago, cancelado, devolvido).
+--  2 e 3. Sem venda: analytics.ads_peso_sem_venda (SKU do anuncio; senao "sem modelo").
 -- O peso de cada (canal, anuncio) soma 1. Vendas so existem para o Mercado Livre (dash_itens).
 -- dash_itens (caro) so roda quando ha anuncio do Mercado Livre na janela (nunca para p_canal = 'shopee').
 -- ---------------------------------------------------------------------
@@ -48,40 +95,12 @@ language sql stable security invoker set search_path = '' as $$
   por_venda as materialized (
     select v.channel, v.item_id, v.modelo, v.unid / sum(v.unid) over (partition by v.channel, v.item_id) as peso
       from vendas v
-  ),
-  skus as materialized (
-    select a.channel, a.item_id, s.sku
-      from ads a
-      join lateral (
-        select it.sku from mkt.items it where it.channel = a.channel and it.item_id = a.item_id
-        union
-        select v.sku from mkt.item_variations v where v.channel = a.channel and v.item_id = a.item_id
-      ) s on true
-     where not exists (select 1 from por_venda p where p.channel = a.channel and p.item_id = a.item_id)
-       and nullif(split_part(s.sku, '-', 1), '') is not null
-  ),
-  modelos_sku as materialized (
-    select distinct k.channel, k.item_id, r.modelo
-      from skus k
-     cross join lateral analytics.ref_erp(
-       k.sku,
-       nullif(split_part(k.sku, '-', 1), ''),
-       case when split_part(k.sku, '-', 2) ~ '^(K\d+|V\d+)?$' then null else split_part(k.sku, '-', 2) end,
-       (p_ate::timestamp + time '12:00') at time zone 'America/Sao_Paulo') r
-     where r.modelo is not null
-  ),
-  por_sku as materialized (
-    select channel, item_id, modelo, 1.0 / count(*) over (partition by channel, item_id) as peso
-      from modelos_sku
   )
   select p.channel, p.item_id, p.modelo, p.peso from por_venda p
   union all
-  select s.channel, s.item_id, s.modelo, s.peso from por_sku s
-  union all
-  select a.channel, a.item_id, null::text, 1.0
-    from ads a
-   where not exists (select 1 from por_venda p where p.channel = a.channel and p.item_id = a.item_id)
-     and not exists (select 1 from por_sku s where s.channel = a.channel and s.item_id = a.item_id)
+  select s.channel, s.item_id, s.modelo, s.peso
+    from analytics.ads_peso_sem_venda(p_canal, p_de, p_ate,
+                                      array(select distinct p.channel || ':' || p.item_id from por_venda p)) s
 $$;
 
 -- ---------------------------------------------------------------------
@@ -246,7 +265,257 @@ language sql stable security definer set search_path = '' as $$
 $$;
 
 -- ---------------------------------------------------------------------
--- Tabela por modelo (sugestao/motivo ficam para a tarefa das sugestoes: nulos aqui).
+-- Numero no padrao brasileiro para os motivos das sugestoes: 1.234,56.
+-- p_qtd = contagem (cliques, unidades): sem casas quando for inteira.
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_fmt(p_valor numeric, p_qtd boolean default false)
+returns text
+language sql immutable set search_path = '' as $$
+  select translate(to_char(round(p_valor, 2),
+                           case when p_qtd and p_valor = trunc(p_valor) then 'FM999,999,999,990'
+                                else 'FM999,999,999,990.00' end),
+                   ',.', '.,')
+$$;
+
+-- ---------------------------------------------------------------------
+-- Sugestao por modelo (US2, FR-011/FR-012/FR-014; data-model §3 "Sugestao").
+-- Janela: 30 dias terminando em p_ate, [p_ate - 29, p_ate] (pesquisa R4), qualquer que seja o periodo da tela.
+-- Universo: modelos com dados de Ads na janela ou com venda paga no canal na janela (dash_itens, classe 'pago').
+-- Entradas (na janela):
+--   investimento, cliques, vendas e unidades por Ads (diretas + indiretas) = metricas x peso do modelo no
+--     anuncio (mesma regra de ads_peso_modelo; dinheiro arredondado por canal e modelo, como ads_metricas_modelo);
+--   dias_com_dados = dias distintos com metricas dos anuncios do modelo;
+--   acos_equilibrio = contribuicao antes do Ads / receita (pesquisa R2, mesma conta de ads_modelos);
+--   contribuicao_pct = margem de contribuicao ANTES do Ads (= acos_equilibrio): o Product Ads de outros modelos
+--     nao derruba a margem de quem ainda nao anuncia (regra Testar);
+--   unidades_pagas = unidades vendidas em pedidos pagos no canal (dash_itens, classe 'pago').
+-- Limites: core.parametros_ads vigente em p_ate no canal da linha (consolidado: o canal em que o modelo mais
+-- investiu na janela; sem Ads, mercadolivre). Antes da primeira vigencia vale a primeira linha do canal.
+-- Prioridade: pausar > reduzir > revisar > escalar > testar > manter.
+-- Sem 'custos' (FR-009): equilibrio/margem nulos -> so pausar, revisar ou nulo. Modelo sem custo: so
+-- pausar, revisar ou manter. Pausado (todos os anuncios do modelo pausados, anuncio ou campanha): sem sugestao.
+-- dash_itens da janela roda uma vez e serve para os pesos, a contribuicao e as unidades pagas.
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_sugestoes(p_canal text, p_ate date)
+returns table (modelo text, canal text, sugestao text, motivo text, pausado boolean,
+               investimento_30d numeric, cliques_30d numeric, vendas_ads_30d numeric, unidades_ads_30d numeric,
+               conversao_30d numeric, acos_30d numeric, acos_equilibrio_30d numeric, contribuicao_pct_30d numeric,
+               lucro_pos_ads_30d numeric, unidades_pagas_30d numeric, dias_com_dados integer)
+language plpgsql stable security invoker set search_path = '' as $$
+#variable_conflict use_column
+declare
+  v_de date := p_ate - 29;
+  v_ve boolean;
+begin
+  if p_ate is null or not core.has_perm('ads') or coalesce(p_canal, '') not in ('consolidado', 'mercadolivre', 'shopee') then
+    return;
+  end if;
+  v_ve := core.has_perm('custos');
+
+  return query
+  with itens as materialized (
+    -- vendas por item so existem no Mercado Livre: na Shopee nao roda
+    select i.* from analytics.dash_itens(p_canal, v_de, p_ate) i where p_canal <> 'shopee'
+  ),
+  met as materialized (
+    select m.channel, m.item_id, m.day, m.campaign_id,
+           coalesce(m.cost, 0) as inv, coalesce(m.clicks, 0) as cli,
+           coalesce(m.direct_amount, 0) + coalesce(m.indirect_amount, 0) as vend,
+           coalesce(m.direct_units, 0) + coalesce(m.indirect_units, 0) as un
+      from mkt.ads_metrics_daily m
+     where m.day between v_de and p_ate
+       and (p_canal = 'consolidado' and m.channel in ('mercadolivre', 'shopee') or m.channel = p_canal)
+  ),
+  vendas as materialized (
+    -- passo 1 de ads_peso_modelo, com o dash_itens desta funcao
+    select 'mercadolivre'::text as channel, i.item_id, i.modelo, sum(i.qtd)::numeric as unid
+      from itens i
+     where i.classe in ('pago', 'cancelado', 'devolvido') and i.modelo is not null
+       and exists (select 1 from met a where a.channel = 'mercadolivre' and a.item_id = i.item_id)
+     group by i.item_id, i.modelo
+    having sum(i.qtd) > 0
+  ),
+  pesos as materialized (
+    select v.channel, v.item_id, v.modelo, v.unid / sum(v.unid) over (partition by v.channel, v.item_id) as peso
+      from vendas v
+    union all
+    select s.channel, s.item_id, s.modelo, s.peso
+      from analytics.ads_peso_sem_venda(p_canal, v_de, p_ate,
+                                        array(select distinct v.channel || ':' || v.item_id from vendas v)) s
+  ),
+  anuncio as materialized (
+    -- anuncio pausado (ele ou a campanha dele), como ads_modelos
+    select a.channel, a.item_id,
+           coalesce(lower(an.status) = 'paused', false) or coalesce(lower(c.status) = 'paused', false) as pausado
+      from (select m.channel, m.item_id,
+                   (array_agg(m.campaign_id order by m.day desc) filter (where m.campaign_id is not null))[1] as campaign_id
+              from met m
+             group by m.channel, m.item_id) a
+      left join mkt.ads_anuncios an on an.channel = a.channel and an.item_id = a.item_id
+      left join mkt.ads_campaigns c on c.channel = a.channel and c.campaign_id = coalesce(a.campaign_id, an.campaign_id)
+  ),
+  am as materialized (
+    select m.channel, m.item_id, m.day, p.modelo,
+           m.inv * p.peso as inv, m.cli * p.peso as cli, m.vend * p.peso as vend, m.un * p.peso as un
+      from met m
+      join pesos p on p.channel = m.channel and p.item_id = m.item_id
+     where p.modelo is not null
+  ),
+  pm as (
+    select am.channel, am.modelo, round(sum(am.inv), 2) as inv, sum(am.cli) as cli,
+           round(sum(am.vend), 2) as vend, sum(am.un) as un
+      from am
+     group by am.channel, am.modelo
+  ),
+  ads_mod as materialized (
+    select pm.modelo, sum(pm.inv) as inv, sum(pm.cli) as cli, sum(pm.vend) as vend, sum(pm.un) as un,
+           (array_agg(pm.channel order by pm.inv desc, pm.channel))[1] as canal
+      from pm
+     group by pm.modelo
+  ),
+  dias as (
+    select am.modelo, count(distinct am.day)::integer as dias from am group by am.modelo
+  ),
+  pau as (
+    select x.modelo, bool_and(an.pausado) as pausado
+      from (select distinct am.channel, am.item_id, am.modelo from am) x
+      join anuncio an on an.channel = x.channel and an.item_id = x.item_id
+     group by x.modelo
+  ),
+  vm as materialized (
+    -- vendas por modelo na janela (como dash_modelos, sem o rateio)
+    select i.modelo, sum(i.receita) as receita, sum(i.custo) as custo, sum(i.tarifas) as tarifas, sum(i.impemb) as impemb,
+           coalesce(bool_or(i.sem_custo), false) as sem_custo,
+           coalesce(sum(i.qtd) filter (where i.classe = 'pago'), 0) as pagas
+      from itens i
+     group by i.modelo
+  ),
+  cp as materialized (
+    -- custos do periodo (rateio de dash_modelos) e a parte product_ads (devolvida no equilibrio, R2)
+    select coalesce(sum(c.valor), 0) as total,
+           coalesce(sum(c.valor) filter (where c.categoria = 'product_ads'), 0) as ads,
+           (select coalesce(sum(v.receita), 0) from vm v) as receita
+      from analytics.dash_custos_periodo(p_canal, v_de, p_ate) c
+     where p_canal <> 'shopee'
+  ),
+  fped as materialized (
+    -- Product Ads da fatura ligada a pedidos da janela (pela data da venda), como ads_modelos
+    select o.order_id, coalesce(o.date_closed, o.date_created) as sale_ts, sum(f.valor) as ads
+      from analytics.ml_fatura f
+      join mkt.orders o on o.channel = 'mercadolivre' and o.order_id = f.order_id
+     where v_ve and p_canal in ('consolidado', 'mercadolivre')
+       and f.categoria = 'product_ads'
+       and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between v_de and p_ate
+     group by o.order_id, coalesce(o.date_closed, o.date_created)
+  ),
+  fat_mod as (
+    select r.modelo,
+           sum(fp.ads * case when t.vv > 0 then oi.unit_price * oi.quantity / t.vv else 1.0 / t.n end) as ads
+      from fped fp
+      join mkt.order_items oi on oi.channel = 'mercadolivre' and oi.order_id = fp.order_id
+     cross join lateral (select sum(x.unit_price * x.quantity) as vv, count(*) as n
+                           from mkt.order_items x
+                          where x.channel = 'mercadolivre' and x.order_id = fp.order_id) t
+     cross join lateral analytics.ref_erp(oi.sku, oi.modelo, oi.cor, fp.sale_ts) r
+     group by r.modelo
+  ),
+  uni as (
+    select a.modelo from ads_mod a
+    union
+    select v.modelo from vm v where v.modelo is not null and v.pagas > 0
+  ),
+  base as (
+    select u.modelo,
+           coalesce(a.canal, case when p_canal = 'shopee' then 'shopee' else 'mercadolivre' end) as canal,
+           coalesce(a.inv, 0) as inv, coalesce(a.cli, 0) as cli_b, coalesce(a.vend, 0) as vend, coalesce(a.un, 0) as un_b,
+           coalesce(d.dias, 0) as dias, coalesce(pa.pausado, false) as pausado,
+           coalesce(v.pagas, 0) as pagas, coalesce(v.receita, 0) as receita,
+           v_ve and coalesce(v.sem_custo, false) as sem_custo,
+           case when not v_ve then null
+                when v.modelo is null then 0                  -- Ads sem venda na janela
+                when v.sem_custo then null                    -- modelo sem custo
+                else v.receita - v.custo - v.tarifas - v.impemb
+                     - case when cp.receita > 0 then (cp.total - cp.ads) * v.receita / cp.receita else 0 end
+                     + coalesce(fm.ads, 0)
+           end as antes
+      from uni u
+      left join ads_mod a on a.modelo = u.modelo
+      left join dias d on d.modelo = u.modelo
+      left join pau pa on pa.modelo = u.modelo
+      left join vm v on v.modelo = u.modelo
+      left join fat_mod fm on fm.modelo = u.modelo
+     cross join cp
+  ),
+  calc as (
+    select b.*, round(b.cli_b, 2) as cli, round(b.un_b, 2) as un,
+           case when b.cli_b > 0 then round(b.un_b / b.cli_b * 100, 2) end as conv,
+           case when b.vend > 0 then round(b.inv / b.vend * 100, 2) end as acos,
+           case when b.receita > 0 then round(b.antes / b.receita * 100, 2) end as eqb
+      from base b
+  ),
+  regra as (
+    select c.*, pa.vigente_desde, pa.pausar_gasto_min, pa.pausar_cliques_min, pa.min_dias_dados,
+           pa.revisar_cliques_min, pa.revisar_conversao_max_pct, pa.escalar_folga_pp, pa.escalar_unidades_min,
+           pa.testar_margem_min_pct, pa.testar_unidades_min
+      from calc c
+      left join lateral (
+        -- vigente em p_ate; antes da primeira vigencia, a primeira
+        select x.* from core.parametros_ads x
+         where x.channel = c.canal
+         order by (x.vigente_desde <= p_ate) desc, abs(x.vigente_desde - p_ate)
+         limit 1) pa on true
+  ),
+  dec as (
+    select r.*,
+           case
+             when r.pausado or r.vigente_desde is null then null
+             when (r.inv >= r.pausar_gasto_min or r.cli >= r.pausar_cliques_min)
+                  and r.un = 0 and r.dias >= r.min_dias_dados then 'pausar'
+             when r.acos is not null and r.eqb is not null and r.acos > r.eqb then 'reduzir'
+             when r.cli >= r.revisar_cliques_min and r.conv < r.revisar_conversao_max_pct then 'revisar'
+             when r.acos is not null and r.eqb is not null and r.acos <= r.eqb - r.escalar_folga_pp
+                  and r.un >= r.escalar_unidades_min then 'escalar'
+             when r.eqb is not null and r.inv = 0 and r.eqb >= r.testar_margem_min_pct
+                  and r.pagas >= r.testar_unidades_min then 'testar'
+             when v_ve then 'manter'
+           end as sug
+      from regra r
+  )
+  select d.modelo, d.canal, d.sug,
+         case d.sug
+           when 'pausar' then
+             case when d.inv >= d.pausar_gasto_min
+                  then format('gastou R$ %s em 30 dias sem venda', analytics.ads_fmt(d.inv))
+                  else format('%s cliques em 30 dias sem venda (gastou R$ %s)', analytics.ads_fmt(d.cli, true), analytics.ads_fmt(d.inv))
+             end
+           when 'reduzir' then format('ACOS %s%% acima do equilíbrio %s%%', analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb))
+           when 'revisar' then format('%s cliques e conversão %s%% (abaixo de %s%%)',
+                                      analytics.ads_fmt(d.cli, true), analytics.ads_fmt(d.conv), analytics.ads_fmt(d.revisar_conversao_max_pct))
+           when 'escalar' then format('ACOS %s%% bem abaixo do equilíbrio %s%% com %s unidades vendidas por Ads',
+                                      analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.un, true))
+           when 'testar' then format('margem %s%% e %s unidades vendidas sem Ads', analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true))
+           when 'manter' then
+             case when d.sem_custo
+                    then format('sem custo cadastrado; investiu R$ %s em 30 dias e vendeu %s unidades por Ads',
+                                analytics.ads_fmt(d.inv), analytics.ads_fmt(d.un, true))
+                  when d.acos is not null and d.eqb is not null
+                    then format('ACOS %s%% dentro do equilíbrio %s%%', analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb))
+                  when d.inv > 0
+                    then format('investiu R$ %s em 30 dias e vendeu %s unidades por Ads', analytics.ads_fmt(d.inv), analytics.ads_fmt(d.un, true))
+                  when d.eqb is not null
+                    then format('sem Ads em 30 dias: margem %s%% e %s unidades vendidas', analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true))
+                  else format('sem Ads em 30 dias e %s unidades vendidas', analytics.ads_fmt(d.pagas, true))
+             end
+         end,
+         d.pausado, d.inv, d.cli, d.vend, d.un, d.conv, d.acos, d.eqb, d.eqb,
+         case when d.antes is not null then round(d.antes - d.inv, 2) end,
+         d.pagas::numeric, d.dias
+    from dec d
+   order by d.modelo;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Tabela por modelo (sugestao/motivo: analytics.ads_sugestoes na janela de 30 dias ate p_ate; nulos se pausado).
 -- Universo (data-model §3): modelos com dados de Ads no periodo ou com venda paga no canal nos
 -- 30 dias ate p_ate. Linha final modelo nulo = "nao atribuido a anuncio": investimento do cartao
 -- (dash_ads_periodo) menos o atribuido aos modelos; inclui os anuncios "sem modelo" (uma so linha nula),
@@ -347,6 +616,9 @@ begin
        and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between p_ate - 29 and p_ate
        and r.modelo is not null
   ),
+  sug as materialized (
+    select sg.modelo, sg.sugestao, sg.motivo from analytics.ads_sugestoes(p_canal, p_ate) sg
+  ),
   dm as materialized (
     -- vendas por modelo so existem no Mercado Livre: na Shopee nao roda (dash_itens e caro)
     select * from analytics.dash_modelos(p_canal, p_de, p_ate) where p_canal <> 'shopee'
@@ -400,6 +672,7 @@ begin
            end as antes,
            case when v_ve and coalesce(d.sem_custo, 0) = 0 then d.contribuicao_pct end as cpct,
            coalesce(a.pausado, false) as pausado,
+           sg.sugestao as sug, sg.motivo as mot,
            cm.campaign_id,
            coalesce((select min(x.modo) from core.ads_modo x   -- 'automatico' < 'manual'
                       where x.tipo = 'modelo' and x.chave = u.modelo
@@ -411,6 +684,7 @@ begin
       left join fat_mod fm on fm.modelo = u.modelo
       left join camp cm on cm.modelo = u.modelo
       left join topo tp on tp.modelo = u.modelo
+      left join sug sg on sg.modelo = u.modelo
       left join mkt.items it on it.channel = tp.channel and it.item_id = tp.item_id
      cross join rt
   ),
@@ -437,7 +711,8 @@ begin
              case when l.receita > 0 then round(l.antes / l.receita * 100, 2) end as acos_equilibrio,
              round(l.antes - l.inv, 2) as lucro_pos_ads,
              l.cpct as contribuicao_pct,
-             null::text as sugestao, null::text as motivo,
+             case when not l.pausado then l.sug end as sugestao,
+             case when not l.pausado then l.mot end as motivo,
              l.pausado, l.campaign_id as campanha_id, l.modo,
              0 as ordem
         from linhas l
@@ -536,7 +811,10 @@ begin
 end $$;
 
 grant execute on function analytics.ads_parametros(text, date),
+                          analytics.ads_peso_sem_venda(text, date, date, text[]),
                           analytics.ads_peso_modelo(text, date, date),
+                          analytics.ads_fmt(numeric, boolean),
+                          analytics.ads_sugestoes(text, date),
                           analytics.ads_metricas_modelo(text, date, date),
                           analytics.ads_resumo(text, date, date),
                           analytics.ads_serie(text, date, date),

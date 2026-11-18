@@ -1,4 +1,4 @@
-import { pct } from './formato.ts';
+import { brl, pct } from './formato.ts';
 
 // Rótulos e formatos da tela Ads (pt-BR). Funções puras, testadas com node --test.
 
@@ -49,4 +49,61 @@ export function contarSugestoes(linhas: { modelo: string | null; sugestao: Suges
 export function lerSugestao(v: string | string[] | undefined): SugestaoAds | null {
   const x = Array.isArray(v) ? v[0] : v;
   return ORDEM_SUGESTOES.find((s) => s === x) ?? null;
+}
+
+// ---- Orçamento do mês (aba Orçamento) ----
+export interface LinhaOrcamento {
+  canal: string; orcamento: number | null; gasto_mes: number; gasto_product_ads: number; gasto_seguidores: number; gasto_ate_ontem: number;
+  dias_mes: number; dias_completos: number; dias_restantes: number; pct_gasto: number | null; pct_mes: number; projecao: number | null;
+  saldo: number | null; valor_diario: number | null; alerta: 'estouro' | 'sobra' | null;
+}
+export type EstadoOrcamento = 'sem_orcamento' | 'esgotado' | 'primeiro_dia' | 'normal';
+
+export function estadoOrcamento(o: LinhaOrcamento): EstadoOrcamento {
+  if (o.orcamento == null) return 'sem_orcamento';
+  if (o.gasto_mes >= o.orcamento) return 'esgotado';
+  if (o.projecao == null) return 'primeiro_dia';
+  return 'normal';
+}
+
+/** Aviso de estouro (vermelho) ou sobra (amarelo); nulo se não há alerta ou não há projeção. */
+export function textoAlertaOrcamento(o: LinhaOrcamento): { tom: 'ruim' | 'alerta'; texto: string } | null {
+  if (o.orcamento == null || o.projecao == null) return null;
+  if (o.alerta === 'estouro') {
+    return { tom: 'ruim', texto: `No ritmo atual o mês fecha em ${brl(o.projecao)}, ${brl(o.projecao - o.orcamento)} acima do orçamento.` };
+  }
+  if (o.alerta === 'sobra') {
+    return { tom: 'alerta', texto: `No ritmo atual o mês fecha em ${brl(o.projecao)}, ${brl(o.orcamento - o.projecao)} abaixo do orçamento: verba sobrando.` };
+  }
+  return null;
+}
+
+export function textoValorDiario(o: LinhaOrcamento): string | null {
+  const e = estadoOrcamento(o);
+  if (e === 'sem_orcamento') return null;
+  if (e === 'esgotado') return 'Orçamento do mês esgotado.';
+  return o.valor_diario == null ? null : `Pode gastar ${brl(o.valor_diario)} por dia até o fim do mês.`;
+}
+
+/** 1º dia do mês seguinte a `hoje` (YYYY-MM-DD). */
+export function primeiroDiaProximoMes(hoje: string): string {
+  const a = Number(hoje.slice(0, 4)), m = Number(hoje.slice(5, 7));
+  return m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, '0')}-01`;
+}
+
+export type ResultadoOrcamento =
+  | { ok: true; valores: { channel: string; vigente_desde: string; valor_mensal: number } }
+  | { ok: false; erro: string };
+
+export function validarOrcamento(e: Record<string, unknown>): ResultadoOrcamento {
+  const channel = String(e.channel ?? '');
+  if (channel !== 'mercadolivre' && channel !== 'shopee') return { ok: false, erro: 'Escolha o canal.' };
+  const data = String(e.vigente_desde ?? '');
+  const ok = /^\d{4}-\d{2}-\d{2}$/.test(data) && new Date(`${data}T00:00:00Z`).toISOString().slice(0, 10) === data;
+  if (!ok) return { ok: false, erro: 'Informe a data a partir da qual o orçamento vale.' };
+  const t = String(e.valor_mensal ?? '').trim();
+  const n = t === '' ? NaN : Number(t.includes(',') ? t.replace(/\./g, '').replace(',', '.') : t);
+  if (!Number.isFinite(n)) return { ok: false, erro: 'Informe o valor mensal com um número, por exemplo 5000 ou 5.000,50.' };
+  if (n <= 0) return { ok: false, erro: 'O valor mensal precisa ser maior que zero.' };
+  return { ok: true, valores: { channel, vigente_desde: data, valor_mensal: Math.round(n * 100) / 100 } };
 }

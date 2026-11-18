@@ -72,3 +72,58 @@ test('valida o parametro sug da URL', () => {
   assert.equal(lerSugestao(undefined), null);
   assert.equal(lerSugestao(['pausar']), 'pausar');
 });
+
+// ---- Orçamento (T027-T029) ----
+import {
+  validarOrcamento, primeiroDiaProximoMes, textoAlertaOrcamento, estadoOrcamento, textoValorDiario, type LinhaOrcamento,
+} from './ads-regras.ts';
+
+const orc = (o: Partial<LinhaOrcamento> = {}): LinhaOrcamento => ({
+  canal: 'mercadolivre', orcamento: 5000, gasto_mes: 1000, gasto_product_ads: 900, gasto_seguidores: 100, gasto_ate_ontem: 900,
+  dias_mes: 30, dias_completos: 9, dias_restantes: 21, pct_gasto: 20, pct_mes: 30, projecao: 3000, saldo: 4000, valor_diario: 190.48, alerta: null, ...o,
+});
+
+test('primeiroDiaProximoMes: mes comum e virada de ano', () => {
+  assert.equal(primeiroDiaProximoMes('2026-11-18'), '2026-12-01');
+  assert.equal(primeiroDiaProximoMes('2026-12-31'), '2027-01-01');
+});
+
+test('validarOrcamento aceita valor com virgula e normaliza', () => {
+  const r = validarOrcamento({ channel: 'mercadolivre', vigente_desde: '2026-12-01', valor_mensal: '5.000,50' });
+  assert.deepEqual(r, { ok: true, valores: { channel: 'mercadolivre', vigente_desde: '2026-12-01', valor_mensal: 5000.5 } });
+});
+
+test('validarOrcamento recusa canal, data e valor invalidos', () => {
+  const base = { channel: 'shopee', vigente_desde: '2026-12-01', valor_mensal: '100' };
+  assert.equal(validarOrcamento({ ...base, channel: 'x' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, vigente_desde: '01/12/2026' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, vigente_desde: '2026-02-31' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, valor_mensal: '' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, valor_mensal: '0' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, valor_mensal: '-5' }).ok, false);
+  assert.equal(validarOrcamento({ ...base, valor_mensal: 'abc' }).ok, false);
+});
+
+test('estadoOrcamento cobre os estados especiais', () => {
+  assert.equal(estadoOrcamento(orc({ orcamento: null })), 'sem_orcamento');
+  assert.equal(estadoOrcamento(orc({ gasto_mes: 5000, saldo: 0 })), 'esgotado');
+  assert.equal(estadoOrcamento(orc({ dias_completos: 0, projecao: null })), 'primeiro_dia');
+  assert.equal(estadoOrcamento(orc()), 'normal');
+});
+
+test('textoAlertaOrcamento: estouro, sobra e nenhum', () => {
+  const e = textoAlertaOrcamento(orc({ alerta: 'estouro', projecao: 6000 }));
+  assert.equal(e?.tom, 'ruim');
+  assert.match(e!.texto, /No ritmo atual o mês fecha em R\$\s6\.000,00, R\$\s1\.000,00 acima do orçamento/);
+  const s = textoAlertaOrcamento(orc({ alerta: 'sobra' }));
+  assert.equal(s?.tom, 'alerta');
+  assert.match(s!.texto, /verba sobrando/);
+  assert.equal(textoAlertaOrcamento(orc()), null);
+  assert.equal(textoAlertaOrcamento(orc({ alerta: 'estouro', projecao: null })), null);
+});
+
+test('textoValorDiario: normal e esgotado', () => {
+  assert.match(textoValorDiario(orc())!, /Pode gastar R\$\s190,48 por dia até o fim do mês/);
+  assert.equal(textoValorDiario(orc({ gasto_mes: 5000, saldo: 0, valor_diario: 0 })), 'Orçamento do mês esgotado.');
+  assert.equal(textoValorDiario(orc({ orcamento: null, valor_diario: null })), null);
+});

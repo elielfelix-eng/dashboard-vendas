@@ -54,3 +54,21 @@ export const adsModelos = (canal: Canal, de: string, ate: string) =>
   rpc<AdsModelo>('ads_modelos', { p_canal: canal, p_de: de, p_ate: ate });
 export const adsCampanhas = (canal: Canal, de: string, ate: string) =>
   rpc<AdsCampanha>('ads_campanhas', { p_canal: canal, p_de: de, p_ate: ate });
+
+// Orçamento do mês (sempre o mês corrente; independe do período escolhido na tela).
+import type { LinhaOrcamento } from './ads-regras';
+export type { LinhaOrcamento };
+export const adsOrcamento = (canal: Canal) => rpc<LinhaOrcamento>('ads_orcamento', { p_canal: canal });
+
+export interface VigenciaOrcamento { channel: string; vigente_desde: string; valor_mensal: number }
+/** Histórico de vigências (leitura liberada a quem está logado). */
+export async function orcamentoVigencias(): Promise<VigenciaOrcamento[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.schema('core').from('orcamento_ads')
+    .select('channel, vigente_desde, valor_mensal').order('channel').order('vigente_desde', { ascending: false });
+  if (error) {
+    console.error('[ads] orcamento_ads');
+    throw new Error('Não foi possível carregar o orçamento agora. Tente de novo em alguns minutos.');
+  }
+  return (data ?? []).map((l) => ({ channel: l.channel as string, vigente_desde: l.vigente_desde as string, valor_mensal: Number(l.valor_mensal) }));
+}

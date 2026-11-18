@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { CartaoOrcamento } from '@/components/ads/cartao-orcamento';
+import { EditarOrcamento } from '@/components/ads/editar-orcamento';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoAds } from '@/components/grafico-ads';
 import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
 import {
-  avisoSemDetalhe, contarSugestoes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, roas, rotuloModelo, rotuloSugestao,
+  avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
 } from '@/lib/ads-regras';
 import * as dash from '@/lib/dash';
@@ -16,10 +18,10 @@ import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
-// Abas da tela; "orcamento" entra em uma etapa seguinte.
 const ABAS = [
   { chave: 'modelos', rotulo: 'Por modelo' },
   { chave: 'campanhas', rotulo: 'Campanhas' },
+  { chave: 'orcamento', rotulo: 'Orçamento' },
 ];
 
 const MODOS: Record<string, string> = { manual: 'Manual', automatico: 'Automático' };
@@ -84,6 +86,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const perms = await exigirPermissao('ads');
   const verCustos = perms.has('custos');
   const verVendas = perms.has('vendas');
+  const podeEditarOrcamento = perms.has('editar_ads');
   const params = await searchParams;
   const { canal, chave, periodo } = lerFiltros(params, hojeBrasilia());
   const abaParam = Array.isArray(params.aba) ? params.aba[0] : params.aba;
@@ -101,6 +104,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
     q.set('aba', 'modelos');
     return `/ads?${q.toString()}`;
   };
+  const msgOk = Array.isArray(params.ok) ? params.ok[0] : params.ok;
+  const msgErro = Array.isArray(params.erro) ? params.erro[0] : params.erro;
   const link = (novaAba: string) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
@@ -121,7 +126,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
       ads.adsCampanhas(canal, periodo.de, periodo.ate),
       dash.sincronizacoes(),
     ]);
-    d = { atual, anterior, serie, modelos, campanhas, sinc };
+    // Orçamento: só com a aba aberta; sempre do mês corrente.
+    const [orcamento, vigencias] = aba === 'orcamento' && canal !== 'shopee'
+      ? await Promise.all([ads.adsOrcamento(canal), podeEditarOrcamento ? ads.orcamentoVigencias() : Promise.resolve([])])
+      : [[], []];
+    d = { atual, anterior, serie, modelos, campanhas, sinc, orcamento, vigencias };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
@@ -214,7 +223,23 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
           </nav>
 
           <section className="mt-4">
-            {aba === 'campanhas' ? (
+            {aba === 'orcamento' ? (
+              <>
+                <p className="mb-3 text-sm text-muted">O acompanhamento do orçamento é sempre do mês atual, independente do período escolhido.</p>
+                {msgOk && <p className="mb-3 rounded-lg border border-border bg-surface px-4 py-2 text-sm">{msgOk}</p>}
+                {msgErro && <p className="mb-3 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">{msgErro}</p>}
+                {podeEditarOrcamento && (
+                  <EditarOrcamento canais={['mercadolivre', 'shopee']} vigencias={d.vigencias} hoje={hojeBrasilia()} sugestaoData={primeiroDiaProximoMes(hojeBrasilia())} />
+                )}
+                {d.orcamento.length === 0 ? (
+                  <SemDados texto="Nenhum canal conectado com orçamento para mostrar." />
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {d.orcamento.map((o) => <CartaoOrcamento key={o.canal} o={o} />)}
+                  </div>
+                )}
+              </>
+            ) : aba === 'campanhas' ? (
               <TabelaDados colunas={COL_CAMPANHAS} linhas={linhasCampanhas} busca="nome" nomeArquivo={`ads-campanhas_${periodo.de}_${periodo.ate}`}
                 titulo="Campanhas" vazio="Sem campanhas com Ads no período."
                 descricao="ROAS objetivo é a meta configurada no Mercado Livre; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS)." />

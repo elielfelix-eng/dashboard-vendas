@@ -1,6 +1,7 @@
 import { MercadoLivreConnector, refreshTokens, type MlAppCredentials, type Order } from '@dash/connectors';
 import { requireEnv, upsert, type Sql } from './db.ts';
 import { createTokenProvider } from './token-store.ts';
+import { diasRebuscaAds } from './ads-janela.ts';
 
 const DAY = 86_400_000;
 
@@ -57,7 +58,8 @@ export async function syncMercadoLivre(sql: Sql) {
       const [{ n: adsDays }] = await sql<{ n: number }[]>`
         select count(distinct day)::int as n from mkt.ads_campaign_daily where channel = 'mercadolivre'`;
       stats.ads_campaign_days = await syncAdsCampaigns(sql, ml, adsDays === 0 ? 89 : 3);
-      stats.ads_items = await syncAds(sql, ml, isFirstRun ? 89 : 3);
+      // Por anúncio: rebusca 30 dias (ADS_REFETCH_DAYS), porque vendas atribuídas chegam dias depois do clique
+      stats.ads_items = await syncAds(sql, ml, diasRebuscaAds(process.env.ADS_REFETCH_DAYS, isFirstRun));
       // Cadastro das campanhas e status dos anúncios: não fatais (erros só com rótulo, sem token)
       const camp = await syncAdsCampanhas(sql, ml);
       stats.ads_campanhas = camp.total;

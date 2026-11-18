@@ -11,6 +11,10 @@ on:
         type: choice
         options: [all, mercadolivre, bitrix24]
         default: all
+      ads_dias:
+        description: 'Dias de metricas de Ads por anuncio para buscar de novo (vazio = 30; maximo 89)'
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -39,6 +43,7 @@ jobs:
           ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
           BACKFILL_DAYS: '365'
+          ADS_REFETCH_DAYS: ${{ inputs.ads_dias }}
 
   # CRM Bitrix24: job separado, a falha de um não afeta o outro.
   bitrix:

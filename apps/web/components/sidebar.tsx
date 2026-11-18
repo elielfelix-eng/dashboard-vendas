@@ -14,7 +14,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { href: '/comparativo', label: 'Comparativo anual', ready: true, perm: 'vendas' },
     { href: '/metas', label: 'Metas e Projeção', ready: true, perm: 'metas' },
     { href: '/anuncios', label: 'Anúncios', ready: false },
-        { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
+    { href: '/novos-produtos', label: 'Novos Produtos', ready: false },
   ]},
   { section: 'CRM', items: [
     { href: '/crm/funil', label: 'Funil', ready: true, perm: 'crm_funil' },

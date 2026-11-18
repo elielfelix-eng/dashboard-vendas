@@ -81,18 +81,18 @@ export const metas = (canal: CanalMeta, ano: number) =>
   rpc<LinhaMeta>('dash_metas', { p_canal: canal, p_ano: ano });
 
 /** Última sincronização de cada fonte (para o selo "Atualizado às" e o aviso de falha). */
-export async function sincronizacoes(): Promise<Record<string, { status: string; quando: string | null; ultimoSucesso: string | null }>> {
+export async function sincronizacoes(): Promise<Record<string, { status: string; quando: string | null; ultimoSucesso: string | null; stats: Record<string, unknown> | null }>> {
   const supabase = await createClient();
   const { data } = await supabase
     .schema('core')
     .from('sync_runs')
-    .select('source, status, started_at, finished_at')
+    .select('source, status, started_at, finished_at, stats')
     .order('started_at', { ascending: false })
     .limit(60);
-  const out: Record<string, { status: string; quando: string | null; ultimoSucesso: string | null }> = {};
+  const out: Record<string, { status: string; quando: string | null; ultimoSucesso: string | null; stats: Record<string, unknown> | null }> = {};
   for (const r of data ?? []) {
     const quando = (r.finished_at ?? r.started_at) as string | null;
-    if (!out[r.source]) out[r.source] = { status: r.status, quando, ultimoSucesso: null };
+    if (!out[r.source]) out[r.source] = { status: r.status, quando, ultimoSucesso: null, stats: (r.stats as Record<string, unknown> | null) ?? null };
     if (r.status === 'success' && !out[r.source].ultimoSucesso) out[r.source].ultimoSucesso = quando;
   }
   return out;

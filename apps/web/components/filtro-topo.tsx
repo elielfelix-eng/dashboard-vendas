@@ -16,10 +16,12 @@ interface Props {
   periodo: Periodo;
   atualizadoEm: string | null;
   mostrarCanal?: boolean;
+  /** Habilita o botão da Shopee (telas que já tratam o canal sem dados). */
+  shopeeAtiva?: boolean;
   children?: React.ReactNode;
 }
 
-export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal = true, children }: Props) {
+export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal = true, shopeeAtiva = false, children }: Props) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -44,7 +46,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
       <div className="flex flex-wrap items-center gap-2">
         {mostrarCanal && (
           <div className="flex overflow-hidden rounded-lg border border-border text-sm">
-            {CANAIS.map((c) => (
+            {CANAIS.map((c0) => { const c = c0.chave === 'shopee' && shopeeAtiva ? { ...c0, ativo: true } : c0; return (
               <button
                 key={c.chave}
                 type="button"
@@ -55,7 +57,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
               >
                 {c.rotulo}{!c.ativo && <span className="ml-1 text-[10px]">em breve</span>}
               </button>
-            ))}
+            ); })}
           </div>
         )}
         <select

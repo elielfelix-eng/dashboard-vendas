@@ -289,20 +289,29 @@ export class MercadoLivreConnector implements MarketplaceConnector {
   }
 
   /**
-   * Status de TODOS os anúncios da busca de Product Ads, numa única passada (dia `day`).
+   * Status dos anúncios da busca de Product Ads, numa única passada (não por dia).
    * Separado de listAdsMetrics, que descarta anúncios sem impressões e custo.
+   *
+   * SUPOSIÇÃO A VERIFICAR (quickstart, cenário 2): o ads/search devolve todos os anúncios
+   * cadastrados, também os sem atividade na janela. Não confirmado na API real. Para dar a
+   * maior cobertura possível sem inventar parâmetros novos, usa a janela de `windowDays`
+   * dias (padrão 30) terminando em `to`, em vez de um único dia.
+   *
+   * Custo: 1 chamada por página de 50 anúncios, 1 vez por sincronização e por conta
+   * (ex.: 400 anúncios = 8 chamadas), pelo MercadoLivreClient (429 repetido com espera).
    */
-  async *listAdsStatus(day: Date): AsyncIterable<MlAdStatus[]> {
+  async *listAdsStatus(to: Date, windowDays = 30): AsyncIterable<MlAdStatus[]> {
     const adv = await this.getAdvertiser();
     if (!adv) return;
-    const d = ymd(day);
+    const dateTo = ymd(to);
+    const dateFrom = ymd(new Date(to.getTime() - (windowDays - 1) * 86_400_000));
     for (let offset = 0; ; offset += 50) {
       const r = await this.api.get<{
         paging?: Paging;
         results?: { item_id?: string; campaign_id?: number | string; status?: string | null }[];
       }>(
         `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/ads/search`,
-        { date_from: d, date_to: d, metrics: 'prints', limit: 50, offset },
+        { date_from: dateFrom, date_to: dateTo, metrics: 'prints', limit: 50, offset },
         { 'api-version': '2' },
       );
       const rows = (r.results ?? [])

@@ -290,7 +290,10 @@ async function syncAdsCampanhas(sql: Sql, ml: MercadoLivreConnector) {
   return { total, erro: false };
 }
 
-/** Status de todos os anúncios de Product Ads (mesma busca das métricas). Não fatal. */
+/**
+ * Status dos anúncios de Product Ads. Não fatal. Roda 1 vez por sincronização e por conta
+ * (não por dia): ~ceil(anúncios/50) chamadas ao ads/search, além da passagem das métricas.
+ */
 async function syncAdsAnuncios(sql: Sql, ml: MercadoLivreConnector) {
   let total = 0;
   try {

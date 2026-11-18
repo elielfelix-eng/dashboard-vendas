@@ -167,27 +167,32 @@ test('status dos anúncios: traz todos, mesmo sem impressões e custo, numa úni
     { itemId: 'MLB1', campaignId: '5', status: 'paused' },
     { itemId: 'MLB2', campaignId: null, status: 'active' },
   ]);
-  assert.equal(chamadas.filter((c) => c.path === ADS).length, 1);
+  const ch = chamadas.filter((c) => c.path === ADS);
+  assert.equal(ch.length, 1);
+  // janela de 30 dias terminando no dia pedido (cobertura maior que um único dia)
+  assert.equal(ch[0].params.get('date_to'), '2026-11-10');
+  assert.equal(ch[0].params.get('date_from'), '2026-10-12');
 });
 
-test('somente leitura: o conector do Mercado Livre não tem POST/PUT/PATCH/DELETE', () => {
+test('somente leitura: nenhuma escrita HTTP no conector do ML nem no cliente HTTP compartilhado', () => {
   const dir = fileURLToPath(new URL('.', import.meta.url));
-  // Exceção única: auth.ts troca/renova o token OAuth (POST em /oauth/token). Isso não altera a conta de anúncios.
-  const permitido = new Set(['auth.ts']);
-  const proibido = /method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]|\.(post|put|patch|delete)\(/i;
+  const arquivos = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts')).map((f) => dir + f);
+  arquivos.push(dir + '../http.ts'); // fetchJson, usado por client.ts e auth.ts
+  // Qualquer propriedade `method` (também a forma abreviada `{ method }` ou `method: variavel`) é suspeita.
+  const metodo = /method\s*[:,}]/g;
+  const escrita = /(api|client|http|ml|axios)\.(post|put|patch|delete)\s*\(/gi;
   const achados: string[] = [];
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue;
-    const src = readFileSync(dir + f, 'utf8');
-    if (proibido.test(src)) {
-      if (permitido.has(f)) {
-        // em auth.ts só vale o POST do token: nenhum outro método de escrita
-        const outros = src.match(/method:\s*['"`](PUT|PATCH|DELETE)['"`]|\.(post|put|patch|delete)\(/gi);
-        assert.equal(outros, null, 'auth.ts: só o POST do /oauth/token é permitido');
-        assert.equal((src.match(/method:\s*['"`]POST['"`]/g) ?? []).length, 1, 'auth.ts: exatamente um POST');
-        assert.ok(src.includes('/oauth/token'));
-      } else achados.push(f);
-    }
+  for (const f of arquivos) {
+    const src = readFileSync(f, 'utf8');
+    const nome = f.split('\\').join('/').split('/').slice(-2).join('/');
+    const usos = src.match(metodo) ?? [];
+    if (nome.endsWith('mercadolivre/auth.ts')) {
+      // Única exceção: o POST do /oauth/token (troca/renovação do token, não escreve na conta de anúncios)
+      assert.equal(usos.length, 1, 'auth.ts: só um `method`');
+      assert.match(src, /method:\s*'POST'/);
+      assert.ok(src.includes('/oauth/token'));
+    } else if (usos.length) achados.push(`${nome}: method`);
+    if (escrita.test(src)) achados.push(`${nome}: chamada de escrita`);
   }
   assert.deepEqual(achados, []);
 });

@@ -8,7 +8,7 @@ import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
 import {
-  avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, roas, rotuloModelo, rotuloSugestao,
+  avisoFalhaAds, avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
 } from '@/lib/ads-regras';
 import * as dash from '@/lib/dash';
@@ -35,7 +35,7 @@ interface LinhaModelo {
 }
 interface LinhaCampanha {
   nome: string; status: string; automatica: string; orcamento_diario: number | null; roas_target: number | null; acos_equivalente: number | null;
-  investimento: number; vendas_ads: number; acos: number | null; roas: number | null; modelos: number | null; modo: string;
+  investimento: number; vendas_ads: number; acos: number | null; roas: number | null; modelos: number | null; modo: string; destaque?: boolean;
 }
 
 const COL_MODELOS: Coluna<LinhaModelo>[] = [
@@ -77,9 +77,10 @@ const EXPLICACOES: [string, string][] = [
   ['ACOS', 'Quanto do valor vendido por Ads foi gasto em Ads (investimento ÷ vendas por Ads). É o inverso do ROAS: ROAS 5x equivale a ACOS de 20%.'],
   ['TACOS', 'Quanto do total vendido no canal (com e sem Ads) foi gasto em Ads (investimento ÷ vendas brutas do canal). Mostra o peso do Ads no negócio inteiro.'],
   ['% de vendas via Ads', 'Parte das vendas brutas do canal que veio de anúncios patrocinados.'],
-  ['ACOS de equilíbrio', 'É a margem do modelo antes do Ads (receita − tarifas − custo do produto − imposto e embalagem, sobre a receita). Se o ACOS passa disso, cada venda por Ads dá prejuízo.'],
-  ['Lucro após Ads', 'Margem do modelo antes do Ads nas vendas por Ads, menos o investimento em Ads do modelo.'],
-  ['Não atribuído a anúncio', 'Investimento que o Mercado Livre não ligou a um anúncio específico; aparece na última linha para a soma bater com o total.'],
+  ['ACOS de equilíbrio', 'É a margem do modelo antes do Ads dividida pela receita dele. A margem antes do Ads é o que sobra de todas as vendas do modelo no período: receita − custo do produto − tarifas e frete − imposto e embalagem − a parte dele nos custos do período (rateados pela receita), sem contar o Ads. Se o ACOS passa desse número, o Ads dá prejuízo.'],
+  ['Lucro após Ads', 'A margem antes do Ads do modelo (todas as vendas dele no período, depois de custo do produto, tarifas e frete, imposto e embalagem e a parte dele nos custos do período) menos o investimento em Ads atribuído ao modelo.'],
+  ['Não atribuído a anúncio', 'Investimento que não dá para ligar a um modelo: o gasto que o Mercado Livre não ligou a um anúncio e o gasto de anúncios sem modelo identificado. Aparece na última linha para a soma bater com o total.'],
+  ['Não atribuído a campanha', 'Na aba Campanhas, a última linha é o investimento do total que não aparece em nenhuma campanha (por exemplo, cobranças da fatura do Mercado Livre), para a soma bater com o total.'],
 ];
 
 export default async function AdsPage({ searchParams }: { searchParams: SP }) {
@@ -104,6 +105,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
     q.set('aba', 'modelos');
     return `/ads?${q.toString()}`;
   };
+  const filtrosTela: Record<string, string> = {};
+  for (const k of ['canal', 'periodo', 'de', 'ate']) {
+    const v = params[k];
+    if (typeof v === 'string') filtrosTela[k] = v;
+  }
   const msgOk = Array.isArray(params.ok) ? params.ok[0] : params.ok;
   const msgErro = Array.isArray(params.erro) ? params.erro[0] : params.erro;
   const link = (novaAba: string) => {
@@ -118,12 +124,14 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
 
   let d;
   try {
+    // Os cartões não usam nao_atribuido (a tabela tem a linha própria): detalhe = false pula a atribuição
+    // por modelo nas duas chamadas. Tabelas só da aba aberta; nada na Shopee (tela sem dados).
     const [atual, anterior, serie, modelos, campanhas, sinc] = await Promise.all([
-      ads.adsResumo(canal, periodo.de, periodo.ate),
-      ads.adsResumo(canal, periodo.anteriorDe, periodo.anteriorAte),
+      ads.adsResumo(canal, periodo.de, periodo.ate, false),
+      ads.adsResumo(canal, periodo.anteriorDe, periodo.anteriorAte, false),
       ads.adsSerie(canal, periodo.de, periodo.ate),
-      ads.adsModelos(canal, periodo.de, periodo.ate),
-      ads.adsCampanhas(canal, periodo.de, periodo.ate),
+      aba === 'modelos' && canal !== 'shopee' ? ads.adsModelos(canal, periodo.de, periodo.ate) : Promise.resolve([]),
+      aba === 'campanhas' && canal !== 'shopee' ? ads.adsCampanhas(canal, periodo.de, periodo.ate) : Promise.resolve([]),
       dash.sincronizacoes(),
     ]);
     // Orçamento: só com a aba aberta; sempre do mês corrente.
@@ -138,7 +146,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
-  const falhaDetalhe = !semShopee && !!(statsMl && (statsMl.erro_ads_campanhas || statsMl.erro_ads_anuncios));
+  const falhaAds = semShopee ? null : avisoFalhaAds(statsMl);
   const semDetalhe = a ? avisoSemDetalhe(a.tem_detalhe) : null;
 
   const contagem = contarSugestoes(d.modelos);
@@ -162,23 +170,29 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
     });
   }
   const linhasCampanhas: LinhaCampanha[] = d.campanhas
+    .filter((c) => c.campanha_id != null)
     .sort((x, y) => y.investimento - x.investimento)
     .map((c) => ({
       nome: c.nome, status: c.status ? (STATUS[c.status] ?? c.status) : '—', automatica: c.automatica == null ? '—' : c.automatica ? 'Sim' : 'Não',
       orcamento_diario: c.orcamento_diario, roas_target: c.roas_target, acos_equivalente: c.acos_equivalente, investimento: c.investimento,
       vendas_ads: c.vendas_ads, acos: c.acos, roas: c.roas, modelos: c.modelos, modo: rotuloModo(c.modo),
     }));
+  // Linha final da aba (campanha nula): o que o cartão tem a mais que as campanhas; a soma bate com o cartão.
+  const semCampanha = d.campanhas.find((c) => c.campanha_id == null);
+  if (semCampanha) {
+    linhasCampanhas.push({
+      nome: ROTULO_SEM_CAMPANHA, status: '—', automatica: '—', orcamento_diario: null, roas_target: null, acos_equivalente: null,
+      investimento: semCampanha.investimento, vendas_ads: semCampanha.vendas_ads, acos: null, roas: null, modelos: null, modo: '—', destaque: true,
+    });
+  }
 
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-semibold">Ads</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva atualizadoEm={d.sinc.mercadolivre?.ultimoSucesso ?? null} />
 
-      {falhaDetalhe && (
-        <div className="mb-4 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">
-          A última atualização não conseguiu buscar {statsMl?.erro_ads_campanhas ? 'as campanhas' : ''}{statsMl?.erro_ads_campanhas && statsMl?.erro_ads_anuncios ? ' e ' : ''}{statsMl?.erro_ads_anuncios ? 'o status dos anúncios' : ''} do
-          Mercado Livre. O status de pausa e as campanhas podem estar desatualizados.
-        </div>
+      {falhaAds && (
+        <div role="alert" className="mb-4 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">{falhaAds}</div>
       )}
 
       {semShopee ? (
@@ -229,7 +243,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
                 {msgOk && <p className="mb-3 rounded-lg border border-border bg-surface px-4 py-2 text-sm">{msgOk}</p>}
                 {msgErro && <p className="mb-3 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">{msgErro}</p>}
                 {podeEditarOrcamento && (
-                  <EditarOrcamento canais={['mercadolivre', 'shopee']} vigencias={d.vigencias} hoje={hojeBrasilia()} sugestaoData={primeiroDiaProximoMes(hojeBrasilia())} />
+                  <EditarOrcamento canais={['mercadolivre', 'shopee']} vigencias={d.vigencias} hoje={hojeBrasilia()} sugestaoData={primeiroDiaProximoMes(hojeBrasilia())}
+                    filtros={filtrosTela} />
                 )}
                 {d.orcamento.length === 0 ? (
                   <SemDados texto="Nenhum canal conectado com orçamento para mostrar." />
@@ -242,7 +257,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             ) : aba === 'campanhas' ? (
               <TabelaDados colunas={COL_CAMPANHAS} linhas={linhasCampanhas} busca="nome" nomeArquivo={`ads-campanhas_${periodo.de}_${periodo.ate}`}
                 titulo="Campanhas" vazio="Sem campanhas com Ads no período."
-                descricao="ROAS objetivo é a meta configurada no Mercado Livre; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS)." />
+                descricao="ROAS objetivo é a meta configurada no Mercado Livre; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS). A última linha reúne o investimento que não aparece em nenhuma campanha." />
             ) : (
               <>
               <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs" aria-label="Filtrar por sugestão">
@@ -259,7 +274,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               </div>
               <TabelaDados colunas={COL_MODELOS} linhas={linhasModelos} busca="modelo" nomeArquivo={`ads-modelos_${periodo.de}_${periodo.ate}`}
                 titulo="Resultado do Ads por modelo" vazio={sug ? 'Nenhum modelo com essa sugestão no período.' : 'Sem investimento por modelo no período.'}
-                descricao={`${verCustos ? 'Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo. ' : ''}A última linha reúne o que o Mercado Livre não ligou a um anúncio.`} />
+                descricao={`${verCustos ? 'Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo. ' : ''}A última linha reúne o que não dá para ligar a um modelo (gasto sem anúncio e anúncios sem modelo).`} />
               </>
             )}
           </section>

@@ -6,7 +6,7 @@ import type { Canal } from './periodo';
 
 export interface AdsResumo {
   investimento: number; vendas_ads: number; roas: number | null; acos: number | null; tacos: number | null;
-  pct_vendas_ads: number | null; vendas_brutas_canal: number; nao_atribuido: number; tem_detalhe: boolean;
+  pct_vendas_ads: number | null; vendas_brutas_canal: number; nao_atribuido: number | null; tem_detalhe: boolean;
 }
 export interface AdsSeriePonto { dia: string; investimento: number; vendas_ads: number }
 import type { SugestaoAds } from './ads-regras';
@@ -45,8 +45,9 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
   return ((data as Record<string, unknown>[] | null) ?? []).map((l) => numeros<T>(l));
 }
 
-export async function adsResumo(canal: Canal, de: string, ate: string): Promise<AdsResumo> {
-  return (await rpc<AdsResumo>('ads_resumo', { p_canal: canal, p_de: de, p_ate: ate }))[0];
+/** Cartões do período. `detalhe = false` pula o "não atribuído" (atribuição por modelo, cara): vem nulo. */
+export async function adsResumo(canal: Canal, de: string, ate: string, detalhe = true): Promise<AdsResumo> {
+  return (await rpc<AdsResumo>('ads_resumo', { p_canal: canal, p_de: de, p_ate: ate, p_detalhe: detalhe }))[0];
 }
 export const adsSerie = (canal: Canal, de: string, ate: string) =>
   rpc<AdsSeriePonto>('ads_serie', { p_canal: canal, p_de: de, p_ate: ate });
@@ -61,7 +62,7 @@ export type { LinhaOrcamento };
 export const adsOrcamento = (canal: Canal) => rpc<LinhaOrcamento>('ads_orcamento', { p_canal: canal });
 
 export interface VigenciaOrcamento { channel: string; vigente_desde: string; valor_mensal: number }
-/** Histórico de vigências (leitura liberada a quem está logado). */
+/** Histórico de vigências (RLS: leitura só com a permissão 'ads'). */
 export async function orcamentoVigencias(): Promise<VigenciaOrcamento[]> {
   const supabase = await createClient();
   const { data, error } = await supabase.schema('core').from('orcamento_ads')

@@ -5,13 +5,16 @@ import { salvarOrcamento } from '@/app/(app)/ads/actions';
 
 const NOMES: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee' };
 
-export function EditarOrcamento({ canais, vigencias, hoje, sugestaoData }: {
+export function EditarOrcamento({ canais, vigencias, hoje, sugestaoData, filtros }: {
   canais: string[]; vigencias: VigenciaOrcamento[]; hoje: string; sugestaoData: string;
+  /** canal/período da tela, devolvidos no redirect depois de salvar */
+  filtros: Record<string, string>;
 }) {
   return (
     <details className="mb-4 rounded-xl border border-border bg-surface p-4 text-sm">
       <summary className="cursor-pointer font-medium">Editar orçamento</summary>
       <form action={salvarOrcamento} className="mt-3 flex flex-wrap items-end gap-3">
+        {Object.entries(filtros).map(([k, v]) => <input key={k} type="hidden" name={`f_${k}`} value={v} />)}
         <label className="flex flex-col gap-1">
           <span className="text-xs text-muted">Canal</span>
           <select name="channel" className="rounded-md border border-border bg-bg px-2 py-1.5">

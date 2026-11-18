@@ -127,3 +127,48 @@ test('textoValorDiario: normal e esgotado', () => {
   assert.equal(textoValorDiario(orc({ gasto_mes: 5000, saldo: 0, valor_diario: 0 })), 'Orçamento do mês esgotado.');
   assert.equal(textoValorDiario(orc({ orcamento: null, valor_diario: null })), null);
 });
+
+// ---- Final review: aviso de falha do Ads, retorno do formulario, rotulo da linha sem campanha ----
+import { avisoFalhaAds, urlRetornoOrcamento, ROTULO_SEM_CAMPANHA } from './ads-regras.ts';
+
+test('avisoFalhaAds: nulo sem stats ou sem falha', () => {
+  assert.equal(avisoFalhaAds(null), null);
+  assert.equal(avisoFalhaAds({ ads_campaign_days: 10, ads_items: 5, ads_campanhas: 3 }), null);
+});
+
+test('avisoFalhaAds: investimento ou metricas por anuncio (-1) deixam os dados incompletos', () => {
+  assert.match(avisoFalhaAds({ ads_campaign_days: -1, ads_items: 5 })!, /investimento por campanha/);
+  assert.match(avisoFalhaAds({ ads_campaign_days: 3, ads_items: -1 })!, /métricas por anúncio/);
+  const ambos = avisoFalhaAds({ ads_campaign_days: -1, ads_items: -1 })!;
+  assert.match(ambos, /investimento por campanha e as métricas por anúncio/);
+  assert.match(ambos, /podem estar incompletos/);
+});
+
+test('avisoFalhaAds: cadastro de campanhas e status dos anuncios', () => {
+  assert.match(avisoFalhaAds({ erro_ads_campanhas: 1 })!, /as campanhas/);
+  assert.match(avisoFalhaAds({ erro_ads_anuncios: 1 })!, /o status dos anúncios/);
+  assert.match(avisoFalhaAds({ ads_items: -1, erro_ads_anuncios: 1 })!, /métricas por anúncio e o status dos anúncios/);
+});
+
+test('urlRetornoOrcamento: mantem canal/periodo validos e descarta o resto', () => {
+  const u = urlRetornoOrcamento({ canal: 'mercadolivre', periodo: '7d', de: '2026-11-01', ate: '2026-11-18', aba: 'x', evil: 'y' }, 'ok', 'Orçamento salvo.');
+  const q = new URL(u, 'http://x').searchParams;
+  assert.ok(u.startsWith('/ads?'));
+  assert.equal(q.get('canal'), 'mercadolivre');
+  assert.equal(q.get('periodo'), '7d');
+  assert.equal(q.get('de'), '2026-11-01');
+  assert.equal(q.get('ate'), '2026-11-18');
+  assert.equal(q.get('aba'), 'orcamento');
+  assert.equal(q.get('ok'), 'Orçamento salvo.');
+  assert.equal(q.get('evil'), null);
+});
+
+test('urlRetornoOrcamento: valores invalidos nao entram', () => {
+  const u = urlRetornoOrcamento({ canal: 'brindedobem', periodo: 'a&b=c', de: '01/11/2026', ate: null }, 'erro', 'falhou');
+  const q = new URL(u, 'http://x').searchParams;
+  assert.deepEqual([...q.keys()].sort(), ['aba', 'erro']);
+});
+
+test('rotulo da linha sem campanha', () => {
+  assert.equal(ROTULO_SEM_CAMPANHA, 'não atribuído a campanha');
+});

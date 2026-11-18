@@ -139,6 +139,81 @@ eq('vigencia: entre linhas', await vig('2026-12-15'), 5000);
 eq('vigencia: dia da troca', await vig('2027-01-01'), 8000);
 eq('vigencia: depois da ultima', await vig('2030-01-01'), 8000);
 
+// ---------------- Atribuicao anuncio -> modelo (0019, research R3) ----------------
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','A1','paid','2026-10-10 12:00+00','2026-10-10 12:00+00', 400, '{}'),
+ ('mercadolivre','A2','paid','2026-10-11 12:00+00','2026-10-11 12:00+00', 100, '{}'),
+ ('mercadolivre','A3','paid','2026-09-20 12:00+00','2026-09-20 12:00+00', 900, '{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','A1',1,'MLB10','AAA11-AZU','a',3,100),
+ ('mercadolivre','A2',1,'MLB10','BBB22-AZU','b',1,100),
+ ('mercadolivre','A3',1,'MLB11','ZZZ99-AZU','fora da janela',9,100);
+insert into mkt.items (channel, item_id, sku) values
+ ('mercadolivre','MLB10', null), ('mercadolivre','MLB11','CCC33-AZU-K0010-V1'), ('mercadolivre','MLB12', null),
+ ('mercadolivre','MLB13', null), ('mercadolivre','MLB14','SQM148-AZU'), ('shopee','SH1','SHP01-X');
+insert into mkt.item_variations (channel, item_id, variation_id, sku) values
+ ('mercadolivre','MLB12','v1','DDD44-AZU'), ('mercadolivre','MLB12','v2','EEE55-PRE'), ('mercadolivre','MLB12','v3','DDD44-VER');
+insert into map.modelo_de_para (modelo_anuncio, modelo_erp) values ('SQM148', 'BMS148');
+insert into mkt.ads_metrics_daily (channel, item_id, day, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units) values
+ ('mercadolivre','MLB10','2026-10-05', 1000, 40, 80, 150, 0, 3, 0, 1),
+ ('mercadolivre','MLB10','2026-10-06', 400, 10, 20, 0, 50, 0, 1, 0),
+ ('mercadolivre','MLB10','2026-11-02', 999, 99, 999, 999, 999, 9, 9, 9),
+ ('mercadolivre','MLB11','2026-10-07', 100, 4, 40, 0, 0, 0, 0, 0),
+ ('mercadolivre','MLB12','2026-10-07', 200, 8, 60, 0, 0, 0, 0, 0),
+ ('mercadolivre','MLB13','2026-10-07', 50, 2, 10, 0, 0, 0, 0, 0),
+ ('mercadolivre','MLB14','2026-10-08', 80, 6, 20, 0, 0, 0, 0, 0),
+ ('shopee','SH1','2026-10-09', 10, 1, 5, 0, 0, 0, 0, 0);
+`);
+const MET = `select modelo, investimento::float as inv, impressoes::int as imp, cliques::float as cli, vendas_ads::float as vend,
+  unidades_ads::float as un, unidades_organicas::float as org, dias_com_dados::int as dias
+  from analytics.ads_metricas_modelo($1, '2026-10-01', '2026-10-31') order by modelo nulls last`;
+eq('metricas por modelo (consolidado)', await rows(MET, ['consolidado']), [
+  { modelo: 'AAA11', inv: 75, imp: 1050, cli: 37.5, vend: 150, un: 3, org: 0.75, dias: 2 },
+  { modelo: 'BBB22', inv: 25, imp: 350, cli: 12.5, vend: 50, un: 1, org: 0.25, dias: 2 },
+  { modelo: 'BMS148', inv: 20, imp: 80, cli: 6, vend: 0, un: 0, org: 0, dias: 1 },
+  { modelo: 'CCC33', inv: 40, imp: 100, cli: 4, vend: 0, un: 0, org: 0, dias: 1 },
+  { modelo: 'DDD44', inv: 30, imp: 100, cli: 4, vend: 0, un: 0, org: 0, dias: 1 },
+  { modelo: 'EEE55', inv: 30, imp: 100, cli: 4, vend: 0, un: 0, org: 0, dias: 1 },
+  { modelo: 'SHP01', inv: 5, imp: 10, cli: 1, vend: 0, un: 0, org: 0, dias: 1 },
+  { modelo: null, inv: 10, imp: 50, cli: 2, vend: 0, un: 0, org: 0, dias: 1 },
+]);
+eq('metricas: canal shopee so ve o shopee', (await rows(MET, ['shopee'])).map((r) => r.modelo), ['SHP01']);
+eq('metricas: ml nao traz o shopee', (await rows(MET, ['mercadolivre'])).map((r) => r.modelo).includes('SHP01'), false);
+eq('metricas: soma dos modelos = investimento dos anuncios', await val(
+  `select sum(investimento)::float from analytics.ads_metricas_modelo('consolidado', '2026-10-01', '2026-10-31')`), 235);
+const PESO = `select item_id, modelo, peso::float as peso from analytics.ads_peso_modelo('consolidado', '2026-10-01', '2026-10-31') order by item_id, modelo nulls last`;
+eq('peso: 3:1 por vendas; SKU do anuncio; varios SKUs; sem modelo; de-para', await rows(PESO), [
+  { item_id: 'MLB10', modelo: 'AAA11', peso: 0.75 }, { item_id: 'MLB10', modelo: 'BBB22', peso: 0.25 },
+  { item_id: 'MLB11', modelo: 'CCC33', peso: 1 },
+  { item_id: 'MLB12', modelo: 'DDD44', peso: 0.5 }, { item_id: 'MLB12', modelo: 'EEE55', peso: 0.5 },
+  { item_id: 'MLB13', modelo: null, peso: 1 },
+  { item_id: 'MLB14', modelo: 'BMS148', peso: 1 },
+  { item_id: 'SH1', modelo: 'SHP01', peso: 1 },
+]);
+eq('peso: janela sem metricas = nada', await rows(`select * from analytics.ads_peso_modelo('consolidado', '2026-01-01', '2026-01-31')`), []);
+eq('peso: a venda de setembro conta so na janela dela', await rows(`select modelo, peso::float as peso from analytics.ads_peso_modelo('mercadolivre', '2026-09-01', '2026-11-30') where item_id = 'MLB11'`),
+  [{ modelo: 'ZZZ99', peso: 1 }]);
+
+await perfil('gestor'); await canais('crm');
+eq('RLS: usuario sem o canal nao ve metricas', await comoAuth(() => rows(MET, ['consolidado'])), []);
+eq('RLS: usuario sem o canal nao ve pesos', await comoAuth(() => rows(PESO)), []);
+await canais('shopee');
+eq('RLS: so o canal liberado entra', await comoAuth(async () => (await rows(MET, ['consolidado'])).map((r) => r.modelo)), ['SHP01']);
+await canais('mercadolivre,shopee');
+eq('autenticado calcula metricas', (await comoAuth(() => rows(MET, ['consolidado']))).length, 8);
+await perfil('admin');
+
+// ads_parametros: a linha valida na data
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, teto_fator) values ('mercadolivre', '2027-06-01', 4)`);
+const PAR = (d) => rows(`select vigente_desde::text as d, teto_fator::float as t from analytics.ads_parametros('mercadolivre', '${d}')`);
+eq('parametros: antes da primeira vigencia', await PAR('2026-10-31'), []);
+eq('parametros: primeira vigencia', await PAR('2026-11-01'), [{ d: '2026-11-01', t: 2 }]);
+eq('parametros: ainda a primeira', await PAR('2027-05-31'), [{ d: '2026-11-01', t: 2 }]);
+eq('parametros: segunda vigencia no dia', await PAR('2027-06-01'), [{ d: '2027-06-01', t: 4 }]);
+eq('parametros: depois da ultima', await PAR('2030-01-01'), [{ d: '2027-06-01', t: 4 }]);
+eq('parametros: autenticado le', (await comoAuth(() => rows(`select 1 from analytics.ads_parametros('shopee', '2026-12-01')`))).length, 1);
+
 // ---------------- Reexecucao ----------------
 await db.exec(`update core.orcamento_ads set valor_mensal = 6000 where channel = 'shopee' and vigente_desde = '2026-11-01'`);
 await db.exec(`update core.role_permissions set allowed = true where role = 'comercial' and permission = 'editar_ads'`);

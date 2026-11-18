@@ -9,13 +9,14 @@ export interface AdsResumo {
   pct_vendas_ads: number | null; vendas_brutas_canal: number; nao_atribuido: number; tem_detalhe: boolean;
 }
 export interface AdsSeriePonto { dia: string; investimento: number; vendas_ads: number }
-export type SugestaoAds = string | null;
+import type { SugestaoAds } from './ads-regras';
+export type { SugestaoAds };
 export interface AdsModelo {
   modelo: string | null; produto: string | null; foto: string | null; investimento: number;
   impressoes: number; cliques: number; ctr: number | null; cpc: number | null; conversao: number | null;
   vendas_ads: number; unidades_ads: number; acos: number | null;
   acos_equilibrio: number | null; lucro_pos_ads: number | null; contribuicao_pct: number | null;
-  sugestao: SugestaoAds; motivo: string | null; pausado: boolean | null; campanha_id: string | null; modo: string | null;
+  sugestao: SugestaoAds | null; motivo: string | null; pausado: boolean | null; campanha_id: string | null; modo: string | null;
 }
 export interface AdsCampanha {
   campanha_id: string; nome: string; status: string | null; automatica: boolean | null;

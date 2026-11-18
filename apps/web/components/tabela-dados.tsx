@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { FotoProduto } from '@/components/foto-produto';
 import { exportarXlsx, type Coluna } from '@/lib/exportar';
+import { roas } from '@/lib/ads-regras';
 import { brl, dec1, num, pct } from '@/lib/formato';
 
 export type { Coluna } from '@/lib/exportar';
@@ -24,6 +25,23 @@ interface Props<T extends object> {
 }
 // Convenções das linhas: `href` vira link na primeira coluna; `ruim: true` pinta a linha de vermelho; `destaque: true` deixa em cinza e itálico (linhas de referência).
 
+export interface CelulaSugestao { rotulo: string; tom: 'ruim' | 'alerta' | 'bom' | 'info' | 'neutro'; motivo: string | null; pausado: boolean; valor: number }
+const TOM_CLASSE: Record<CelulaSugestao['tom'], string> = {
+  ruim: 'bg-bad/15 text-bad', alerta: 'bg-amber-500/15 text-amber-700 dark:text-amber-400', bom: 'bg-good/15 text-good',
+  info: 'bg-blue-500/15 text-blue-700 dark:text-blue-400', neutro: 'bg-border text-muted',
+};
+
+function CelulaSugestaoView({ v }: { v: CelulaSugestao | null }) {
+  if (!v) return <>—</>;
+  return (
+    <div className="min-w-48">
+      {v.rotulo === '—' ? <span>—</span> : <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TOM_CLASSE[v.tom]}`}>{v.rotulo}</span>}
+      {v.pausado && <span className="ml-1 inline-block rounded-full bg-border px-2 py-0.5 text-xs text-muted">pausado</span>}
+      {v.motivo && <p className="mt-0.5 text-xs font-normal not-italic text-muted">{v.motivo}</p>}
+    </div>
+  );
+}
+
 function valorOrdenacao(v: unknown): number | string {
   if (v == null) return Number.NEGATIVE_INFINITY;
   if (typeof v === 'object' && 'valor' in (v as object)) {
@@ -40,7 +58,8 @@ function formatar(tipo: Coluna<object>['tipo'], v: unknown): string {
     case 'num': return num(Number(v));
     case 'dec1': return dec1(Number(v));
     case 'pct': return pct(Number(v));
-    case 'variacao': return (v as { rotulo: string }).rotulo;
+    case 'roas': return roas(Number(v));
+    case 'variacao': case 'sugestao': return (v as { rotulo: string }).rotulo;
     default: return String(v);
   }
 }
@@ -119,7 +138,7 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
                     const varCor = c.tipo === 'variacao' && v ? ((v as { valor: number | null }).valor ?? 0) : 0;
                     return (
                       <td key={c.chave} className={`px-3 py-1.5 ${c.tipo === 'texto' ? '' : 'text-right tabular-nums'} ${varCor > 0 ? 'text-good' : varCor < 0 ? 'text-bad' : ''}`}>
-                        {j === 0 && 'foto' in l ? (
+                        {c.tipo === 'sugestao' ? <CelulaSugestaoView v={v as CelulaSugestao | null} /> : j === 0 && 'foto' in l ? (
                           <span className="flex items-center gap-2">
                             <FotoProduto src={(l as { foto?: string | null }).foto} alt={txt} />
                             {href ? <Link href={href} className="font-medium hover:underline">{txt}</Link> : txt}

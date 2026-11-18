@@ -2,9 +2,13 @@ import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoAds } from '@/components/grafico-ads';
-import { TabelaDados, type Coluna } from '@/components/tabela-dados';
+import { queryFiltros } from '@/components/seletor-grao';
+import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
-import { avisoSemDetalhe, ROTULO_NAO_ATRIBUIDO, roas, rotuloModelo } from '@/lib/ads-regras';
+import {
+  avisoSemDetalhe, contarSugestoes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, roas, rotuloModelo, rotuloSugestao,
+  tomSugestao, type SugestaoAds,
+} from '@/lib/ads-regras';
 import * as dash from '@/lib/dash';
 import { brl, pct as pctTxt, variacao, variacaoPp } from '@/lib/formato';
 import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -25,7 +29,7 @@ const STATUS: Record<string, string> = { active: 'Ativa', paused: 'Pausada', idl
 interface LinhaModelo {
   modelo: string; foto: string | null; produto: string | null; situacao: string; investimento: number; impressoes: number; cliques: number;
   ctr: number | null; cpc: number | null; conversao: number | null; vendas_ads: number; acos: number | null;
-  acos_equilibrio: number | null; lucro_pos_ads: number | null; modo: string; destaque?: boolean; href?: string;
+  acos_equilibrio: number | null; lucro_pos_ads: number | null; sugestao: CelulaSugestao | null; modo: string; destaque?: boolean; href?: string;
 }
 interface LinhaCampanha {
   nome: string; status: string; automatica: string; orcamento_diario: number | null; roas_target: number | null; acos_equivalente: number | null;
@@ -46,6 +50,7 @@ const COL_MODELOS: Coluna<LinhaModelo>[] = [
   { chave: 'acos', titulo: 'ACOS', tipo: 'pct' },
   { chave: 'acos_equilibrio', titulo: 'ACOS de equilíbrio', tipo: 'pct' },
   { chave: 'lucro_pos_ads', titulo: 'Lucro após Ads', tipo: 'brl' },
+  { chave: 'sugestao', titulo: 'Sugestão', tipo: 'sugestao' },
   { chave: 'modo', titulo: 'Modo', tipo: 'texto' },
 ];
 const COL_CAMPANHAS: Coluna<LinhaCampanha>[] = [
@@ -53,12 +58,12 @@ const COL_CAMPANHAS: Coluna<LinhaCampanha>[] = [
   { chave: 'status', titulo: 'Status', tipo: 'texto' },
   { chave: 'automatica', titulo: 'Automática', tipo: 'texto' },
   { chave: 'orcamento_diario', titulo: 'Orçamento diário', tipo: 'brl' },
-  { chave: 'roas_target', titulo: 'ROAS objetivo', tipo: 'dec1' },
+  { chave: 'roas_target', titulo: 'ROAS objetivo', tipo: 'roas' },
   { chave: 'acos_equivalente', titulo: 'ACOS equivalente', tipo: 'pct' },
   { chave: 'investimento', titulo: 'Investimento', tipo: 'brl' },
   { chave: 'vendas_ads', titulo: 'Vendas por Ads', tipo: 'brl' },
   { chave: 'acos', titulo: 'ACOS', tipo: 'pct' },
-  { chave: 'roas', titulo: 'ROAS', tipo: 'dec1' },
+  { chave: 'roas', titulo: 'ROAS', tipo: 'roas' },
   { chave: 'modelos', titulo: 'Modelos', tipo: 'num' },
   { chave: 'modo', titulo: 'Modo', tipo: 'texto' },
 ];
@@ -76,12 +81,26 @@ const EXPLICACOES: [string, string][] = [
 ];
 
 export default async function AdsPage({ searchParams }: { searchParams: SP }) {
-  await exigirPermissao('ads');
+  const perms = await exigirPermissao('ads');
+  const verCustos = perms.has('custos');
+  const verVendas = perms.has('vendas');
   const params = await searchParams;
   const { canal, chave, periodo } = lerFiltros(params, hojeBrasilia());
   const abaParam = Array.isArray(params.aba) ? params.aba[0] : params.aba;
   const aba = ABAS.some((a) => a.chave === abaParam) ? abaParam! : 'modelos';
 
+  const sug = lerSugestao(params.sug);
+  const qs = queryFiltros(params);
+  const linkSug = (s: SugestaoAds | null) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (k === 'sug' || v === undefined) continue;
+      q.set(k, Array.isArray(v) ? v[0] : v);
+    }
+    if (s) q.set('sug', s);
+    q.set('aba', 'modelos');
+    return `/ads?${q.toString()}`;
+  };
   const link = (novaAba: string) => {
     const q = new URLSearchParams();
     for (const [k, v] of Object.entries(params)) {
@@ -110,24 +129,27 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
-  const falhaDetalhe = !!(statsMl && (statsMl.erro_ads_campanhas || statsMl.erro_ads_anuncios));
+  const falhaDetalhe = !semShopee && !!(statsMl && (statsMl.erro_ads_campanhas || statsMl.erro_ads_anuncios));
   const semDetalhe = a ? avisoSemDetalhe(a.tem_detalhe) : null;
 
+  const contagem = contarSugestoes(d.modelos);
+  const celulaSugestao = (s: SugestaoAds | null, motivo: string | null, pausado: boolean | null): CelulaSugestao | null =>
+    s || pausado ? { rotulo: rotuloSugestao(s), tom: tomSugestao(s), motivo: motivo ?? null, pausado: !!pausado, valor: ordemSugestao(s) } : null;
   const linhasModelos: LinhaModelo[] = d.modelos
-    .filter((m) => m.modelo != null)
+    .filter((m) => m.modelo != null && (!sug || m.sugestao === sug))
     .sort((x, y) => y.investimento - x.investimento)
     .map((m) => ({
       modelo: rotuloModelo(m.modelo), foto: m.foto, produto: m.produto, situacao: m.pausado ? 'pausado' : '', investimento: m.investimento,
       impressoes: m.impressoes, cliques: m.cliques, ctr: m.ctr, cpc: m.cpc, conversao: m.conversao, vendas_ads: m.vendas_ads, acos: m.acos,
-      acos_equilibrio: m.acos_equilibrio, lucro_pos_ads: m.lucro_pos_ads, modo: rotuloModo(m.modo),
-      href: m.modelo ? `/vendas/${encodeURIComponent(m.modelo)}` : undefined,
+      acos_equilibrio: m.acos_equilibrio, lucro_pos_ads: m.lucro_pos_ads, sugestao: celulaSugestao(m.sugestao, m.motivo, m.pausado), modo: rotuloModo(m.modo),
+      href: verVendas && m.modelo ? `/vendas/${encodeURIComponent(m.modelo)}${qs}` : undefined,
     }));
   const nao = d.modelos.find((m) => m.modelo == null);
-  if (nao) {
+  if (nao && !sug) {
     linhasModelos.push({
       modelo: ROTULO_NAO_ATRIBUIDO, foto: null, produto: null, situacao: '', investimento: nao.investimento, impressoes: nao.impressoes,
       cliques: nao.cliques, ctr: nao.ctr, cpc: nao.cpc, conversao: nao.conversao, vendas_ads: nao.vendas_ads, acos: nao.acos,
-      acos_equilibrio: null, lucro_pos_ads: null, modo: '—', destaque: true,
+      acos_equilibrio: null, lucro_pos_ads: null, sugestao: null, modo: '—', destaque: true,
     });
   }
   const linhasCampanhas: LinhaCampanha[] = d.campanhas
@@ -152,8 +174,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
 
       {semShopee ? (
         <SemDados texto="A Shopee ainda não está conectada ao painel; assim que os dados chegarem, aparecem aqui." />
-      ) : semInvestimento ? <SemDados texto="Sem investimento em Ads no período." /> : (
+      ) : (
         <>
+          {semInvestimento && <div className="mb-4"><SemDados texto="Sem investimento em Ads no período." /></div>}
+          {!semInvestimento && (
+            <>
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <CartaoIndicador titulo="Investimento" valor={brl(a.investimento)} variacao={variacao(a.investimento, p?.investimento)} inverterCores />
             <CartaoIndicador titulo="Vendas por Ads" valor={brl(a.vendas_ads)} variacao={variacao(a.vendas_ads, p?.vendas_ads)}
@@ -176,6 +201,9 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             <GraficoAds serie={d.serie} />
           </section>
 
+            </>
+          )}
+
           <nav className="mt-6 flex gap-1 border-b border-border text-sm" aria-label="Abas">
             {ABAS.map((x) => (
               <Link key={x.chave} href={link(x.chave)}
@@ -191,16 +219,30 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
                 titulo="Campanhas" vazio="Sem campanhas com Ads no período."
                 descricao="ROAS objetivo é a meta configurada no Mercado Livre; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS)." />
             ) : (
+              <>
+              <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs" aria-label="Filtrar por sugestão">
+                <span className="mr-1 text-muted">Sugestão:</span>
+                <Link href={linkSug(null)} className={`rounded-full border px-2.5 py-1 ${!sug ? 'border-accent bg-accent text-white' : 'border-border hover:bg-accent-soft'}`}>
+                  Todas
+                </Link>
+                {ORDEM_SUGESTOES.map((x) => (
+                  <Link key={x} href={linkSug(x)}
+                    className={`rounded-full border px-2.5 py-1 ${sug === x ? 'border-accent bg-accent text-white' : 'border-border hover:bg-accent-soft'}`}>
+                    {rotuloSugestao(x)} ({contagem[x]})
+                  </Link>
+                ))}
+              </div>
               <TabelaDados colunas={COL_MODELOS} linhas={linhasModelos} busca="modelo" nomeArquivo={`ads-modelos_${periodo.de}_${periodo.ate}`}
-                titulo="Resultado do Ads por modelo" vazio="Sem investimento por modelo no período."
-                descricao="Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo. A última linha reúne o que o Mercado Livre não ligou a um anúncio." />
+                titulo="Resultado do Ads por modelo" vazio={sug ? 'Nenhum modelo com essa sugestão no período.' : 'Sem investimento por modelo no período.'}
+                descricao={`${verCustos ? 'Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo. ' : ''}A última linha reúne o que o Mercado Livre não ligou a um anúncio.`} />
+              </>
             )}
           </section>
 
           <details className="mt-6 rounded-xl border border-border bg-surface p-4 text-sm">
             <summary className="cursor-pointer font-semibold">Como os números são calculados</summary>
             <dl className="mt-3 space-y-2">
-              {EXPLICACOES.map(([t, x]) => (
+              {EXPLICACOES.filter(([t]) => verCustos || (t !== 'ACOS de equilíbrio' && t !== 'Lucro após Ads')).map(([t, x]) => (
                 <div key={t}><dt className="font-medium">{t}</dt><dd className="text-muted">{x}</dd></div>
               ))}
             </dl>

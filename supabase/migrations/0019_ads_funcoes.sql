@@ -1,0 +1,6 @@
+-- =====================================================================
+-- 0019 - Ads e Orcamento: funcoes analytics.ads_*
+-- Pode ser reexecutada. Aplicar depois da 0018.
+-- Este arquivo guarda as funcoes analytics.ads_* (parametros, peso por modelo, metricas,
+-- sugestoes, distribuicao e orcamento do mes). Elas sao acrescentadas pelas tarefas seguintes.
+-- =====================================================================

@@ -50,9 +50,9 @@ Seed: (mercadolivre, 2026-11-01, 5000), (shopee, 2026-11-01, 5000).
 | revisar_cliques_min | int | 100 | FR-011 Revisar |
 | revisar_conversao_max_pct | numeric | 1 | FR-011 Revisar |
 | escalar_folga_pp | numeric | 10 | FR-011 Escalar |
-| escalar_vendas_min | int | 3 | FR-011 Escalar |
+| escalar_unidades_min | int | 3 | FR-011 Escalar (unidades por Ads: diretas + indiretas) |
 | testar_margem_min_pct | numeric | 20 | FR-011 Testar |
-| testar_vendas_organicas_min | int | 3 | FR-011 Testar |
+| testar_unidades_min | int | 3 | FR-011 Testar (unidades pagas no canal na janela) |
 | teste_reserva_pct | numeric | 10 | FR-018 passo 1 |
 | teste_max_modelos | int | 5 | FR-018 passo 1 |
 | reduzir_fator | numeric | 0.7 | FR-018 passo 2 |
@@ -79,6 +79,9 @@ PK `(channel, tipo, chave)`. Sem linha = manual. Leitura: quem tem `ads`. Escrit
 - `editar_ads`: admin, gestor = true.
 
 ## 3. Resultados calculados (funções `analytics.ads_*`, security invoker)
+
+### Universo de modelos
+Entram os modelos com dados de Ads no período (ou na janela de 30 dias) **ou** com venda paga no canal na janela de 30 dias (`dash_itens`). Um modelo vendido sem Ads aparece com investimento zero e é candidato a Testar Ads.
 
 ### Sugestão (por modelo)
 Estados: `pausar` \| `reduzir` \| `revisar` \| `escalar` \| `testar` \| `manter` \| null (pausado, sem dados ou sem permissão para a regra). Prioridade e regras: spec FR-011, com os limites de `core.parametros_ads` vigentes em `p_ate`.

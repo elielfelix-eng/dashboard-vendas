@@ -42,8 +42,8 @@ Na mesma tabela, cada modelo traz uma sugestão — **Pausar**, **Reduzir**, **R
 1. **Given** um modelo que gastou R$ 60 em 30 dias sem nenhuma venda por Ads e tem 10 dias com dados, **When** a sugestão é calculada, **Then** é "Pausar" com o motivo "gastou R$ 60 em 30 dias sem venda".
 2. **Given** um modelo com ACOS acima do equilíbrio, **Then** a sugestão é "Reduzir".
 3. **Given** um modelo com 150 cliques e conversão de 0,5%, **Then** a sugestão é "Revisar anúncio" (problema no anúncio, não no Ads).
-4. **Given** um modelo com ACOS 12 pontos abaixo do equilíbrio e 5 vendas por Ads, **Then** a sugestão é "Escalar".
-5. **Given** um modelo sem gasto em Ads, margem de 25% e 4 vendas orgânicas em 30 dias, **Then** a sugestão é "Testar Ads".
+4. **Given** um modelo com ACOS 12 pontos abaixo do equilíbrio e 5 unidades vendidas por Ads, **Then** a sugestão é "Escalar".
+5. **Given** um modelo sem gasto em Ads, margem de 25% e 4 unidades vendidas sem Ads em 30 dias, **Then** ele aparece na tabela com a sugestão "Testar Ads".
 6. **Given** um modelo que se encaixa em Pausar e Revisar, **Then** prevalece Pausar (ordem: Pausar > Reduzir > Revisar > Escalar > Testar > Manter).
 7. **Given** um anúncio pausado ou em campanha pausada, **Then** ele não recebe sugestão e aparece com o selo "pausado".
 
@@ -131,12 +131,12 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 
 **Sugestões**
 
-- **FR-011**: Cada modelo com Ads ativo ou candidato a Ads MUST receber exatamente uma sugestão, calculada sobre os 30 dias até a data final do período escolhido, na ordem de prioridade Pausar > Reduzir > Revisar anúncio > Escalar > Testar Ads > Manter, com as regras:
+- **FR-011**: Cada modelo do universo (modelos com dados de Ads ou com venda paga no canal nos últimos 30 dias) MUST receber exatamente uma sugestão — **exceto** os pausados (FR-014), que ficam sem sugestão, e as sugestões que o FR-009 esconde de quem não vê custos —, calculada sobre os 30 dias até a data final do período escolhido, na ordem de prioridade Pausar > Reduzir > Revisar anúncio > Escalar > Testar Ads > Manter, com as regras:
   - **Pausar**: investimento ≥ R$ 50 ou cliques ≥ 100 em 30 dias, sem venda por Ads, e ao menos 7 dias com dados;
   - **Reduzir**: ACOS > ACOS de equilíbrio;
   - **Revisar anúncio**: cliques ≥ 100 e conversão < 1%;
-  - **Escalar**: ACOS ≤ equilíbrio − 10 pontos e ≥ 3 vendas por Ads;
-  - **Testar Ads**: sem investimento em 30 dias, margem de contribuição ≥ 20% e ≥ 3 vendas orgânicas;
+  - **Escalar**: ACOS ≤ equilíbrio − 10 pontos e ≥ 3 unidades vendidas por Ads (diretas + indiretas);
+  - **Testar Ads**: sem investimento em 30 dias, margem de contribuição ≥ 20% e ≥ 3 unidades vendidas (pedidos pagos) no canal, sem Ads;
   - **Manter**: nenhuma das anteriores.
 - **FR-012**: Cada sugestão MUST vir com um motivo de uma frase, com os números que a justificam.
 - **FR-013**: Os limites do FR-011 MUST ser editáveis por canal, com data de vigência, pelo admin em Parâmetros.
@@ -148,7 +148,7 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 - **FR-016**: O acompanhamento MUST mostrar, para o mês corrente (Brasília) e independentemente do período da tela: investimento até agora, orçamento, % gasto, % do mês decorrido, projeção de fechamento (investimento até ontem ÷ dias completos × dias do mês), saldo e valor diário disponível (saldo ÷ dias restantes, incluindo hoje).
 - **FR-017**: MUST haver alerta quando a projeção passar do orçamento e quando ficar abaixo de 80% dele.
 - **FR-018**: A distribuição sugerida MUST seguir, sobre o valor diário disponível: (1) 10% para até 5 modelos "Testar Ads" (os de maior margem), em partes iguais, sem teto; sem candidatos, os 10% voltam ao restante; (2) Pausar = 0, Reduzir = gasto diário médio de 30 dias × 0,7, Revisar anúncio = gasto diário médio de 30 dias; (3) Escalar e Manter dividem o restante na proporção do lucro depois do Ads positivo de 30 dias; (4) nenhum modelo de (3) recebe mais de 2× o seu gasto diário médio de 30 dias; o excedente é redistribuído e o que não couber fica como "sem destino".
-- **FR-019**: No Mercado Livre a distribuição MUST ser somada por campanha (o modelo pertence à campanha em que mais gastou em 30 dias), com a linha "Nova campanha de teste" para os modelos de teste e a indicação de "mudar de campanha" quando a sugestão do modelo difere da maioria da campanha. Na Shopee, por anúncio.
+- **FR-019**: No Mercado Livre a distribuição MUST ser somada por campanha (o modelo pertence à campanha em que mais gastou em 30 dias), com a linha "Nova campanha de teste" para os modelos de teste e a indicação de "mudar de campanha" quando a sugestão do modelo difere da sugestão predominante da campanha (a do modelo de maior investimento nela em 30 dias). Na Shopee, por anúncio.
 - **FR-020**: Os percentuais e multiplicadores do FR-018 (10%, 5 modelos, 0,7, 2×) MUST ser editáveis junto com os limites do FR-013.
 
 **Manual / Automático**
@@ -159,7 +159,7 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 **Dados**
 
 - **FR-023**: A sincronização MUST passar a trazer, para o Mercado Livre, os dados das campanhas (nome, status, orçamento diário, ACOS alvo) e o status de cada anúncio patrocinado; falha nesses dados não pode interromper a sincronização de vendas.
-- **FR-024**: Antes de as sugestões serem liberadas aos usuários, o investimento, os cliques e as vendas por Ads de outubro/2026 MUST ser conferidos contra o painel do Mercado Ads, com diferença de até 1% no investimento do mês. A conferência MUST acontecer até 31/01/2027 (a fonte guarda 90 dias).
+- **FR-024**: Antes de o ramo ser juntado ao `main`, o investimento, os cliques e as vendas por Ads de outubro/2026 MUST ser conferidos contra o painel do Mercado Ads, com diferença de até 1% no investimento do mês. A conferência MUST acontecer até 31/01/2027 (a fonte guarda 90 dias).
 
 ### Key Entities
 

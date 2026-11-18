@@ -18,6 +18,7 @@
 ## Phase 1: Setup (Shared Infrastructure)
 
 - [ ] T001 Criar `supabase/tests/ads.test.mjs` com o mesmo harness PGlite de `supabase/tests/dashboard-funcoes.test.mjs` (aplica `stubs.sql` + migrations 0001–0013 + 0018–0019, helpers para logar como `authenticated` com perfil/canais) e incluí-lo no script `test:sql` de `package.json`
+- [ ] T001a Dono roda o cenário 1 do `quickstart.md` no Supabase de produção (só leitura, tabelas já existentes) e compara com o painel do Mercado Ads de outubro/2026. Se a diferença passar de 1%, criar a tarefa de correção da coleta (research R8) antes da US2
 
 ---
 
@@ -48,10 +49,10 @@
 
 - [ ] T005 Criar `supabase/migrations/0018_ads_tabelas.sql` (reexecutável), com:
   - `mkt.ads_anuncios` (data-model.md §1 `mkt.ads_anuncios.channel/item_id/campaign_id/status/atualizado_em`);
-  - `mkt.ads_campaigns.atualizado_em`;
-  - `core.orcamento_ads` (data-model.md §2 `core.orcamento_ads.valor_mensal` > 0);
-  - `core.parametros_ads` (todos os campos de data-model.md §2);
-  - `core.ads_modo` (data-model.md §2 `core.ads_modo.tipo` ∈ modelo|campanha|anuncio e `core.ads_modo.modo` ∈ manual|automatico);
+  - coluna nova data-model.md §1 `mkt.ads_campaigns.atualizado_em`;
+  - `core.orcamento_ads` (data-model.md §2 `core.orcamento_ads.channel`, restrito a mercadolivre|shopee; `core.orcamento_ads.vigente_desde`; `core.orcamento_ads.valor_mensal` > 0);
+  - `core.parametros_ads` (data-model.md §2 `core.parametros_ads.channel`, `.vigente_desde`, `.pausar_gasto_min`, `.pausar_cliques_min`, `.min_dias_dados`, `.revisar_cliques_min`, `.revisar_conversao_max_pct`, `.escalar_folga_pp`, `.escalar_unidades_min`, `.testar_margem_min_pct`, `.testar_unidades_min`, `.teste_reserva_pct`, `.teste_max_modelos`, `.reduzir_fator`, `.teto_fator`, `.alerta_sobra_pct`);
+  - `core.ads_modo` (data-model.md §2 `core.ads_modo.channel`, `core.ads_modo.tipo` ∈ modelo|campanha|anuncio, `core.ads_modo.chave`, `core.ads_modo.modo` ∈ manual|automatico, `core.ads_modo.alterado_por`, `core.ads_modo.alterado_em`);
   - seeds;
   - permissões `ads`/`editar_ads` com `on conflict do nothing`;
   - RLS com `(select core.fn())`;
@@ -107,7 +108,7 @@
 
 ### Implementação da US1
 
-- [ ] T014 [US1] Implementar `analytics.ads_resumo`, `analytics.ads_serie`, `analytics.ads_modelos` (ainda sem sugestão: `sugestao`/`motivo` nulos) e `analytics.ads_campanhas` em `supabase/migrations/0019_ads_funcoes.sql`, seguindo contracts/painel-rpc.md e o padrão de desempenho (CTEs materializadas, período filtrado primeiro). Fazer T009–T012 passar.
+- [ ] T014 [US1] Implementar `analytics.ads_resumo`, `analytics.ads_serie`, `analytics.ads_modelos` (ainda sem sugestão: `sugestao`/`motivo` nulos) e `analytics.ads_campanhas` em `supabase/migrations/0019_ads_funcoes.sql`, seguindo contracts/painel-rpc.md e o padrão de desempenho (CTEs materializadas, período filtrado primeiro). O universo de modelos segue data-model.md §3 "Universo de modelos". Fazer T009–T012 passar.
 - [ ] T015 [P] [US1] Implementar `apps/web/lib/ads-regras.ts`. Fazer T013 passar.
 - [ ] T016 [P] [US1] Criar `apps/web/lib/ads.ts`: chamadas tipadas a `ads_resumo/serie/modelos/campanhas`, no padrão de `apps/web/lib/dash.ts` (conversão de numeric, mensagem de erro amigável).
 - [ ] T017 [US1] Em `apps/web/lib/permissoes.ts`:
@@ -121,6 +122,7 @@
   - gráfico diário (investimento × vendas por Ads);
   - abas `?aba=modelos|campanhas` com `TabelaDados`;
   - aviso para Shopee sem dados e para período sem detalhe por anúncio;
+  - `AvisoSincronizacao` quando a última sincronização do ML falhou ou registrou `stats.erro_ads_*` (caso de borda da spec);
   - `ComoCalculamos` explicando ACOS, ROAS, TACOS e ACOS de equilíbrio.
 
 **Checkpoint**: US1 utilizável e testável sozinha (quickstart cenários 3, 4 e 8, parte de leitura).
@@ -142,6 +144,8 @@
   - modelo sem custo só Pausar/Revisar/Manter;
   - sem `custos` só Pausar/Revisar/null (data-model.md §3 "Sugestão");
   - anúncio/campanha pausados → `pausado = true` e sugestão nula (FR-014);
+  - modelo sem nenhum dado de Ads, com vendas na janela, aparece na tabela com a sugestão Testar (data-model.md §3 "Universo de modelos");
+  - Escalar conta unidades por Ads (data-model.md §2 `core.parametros_ads.escalar_unidades_min`) e Testar conta unidades pagas sem Ads (`core.parametros_ads.testar_unidades_min`);
   - motivo com os números.
 - [ ] T020 [P] [US2] Testes em `apps/web/lib/ads-regras.test.ts` para rótulo, cor e ordem das sugestões e para a contagem dos filtros rápidos.
 
@@ -152,7 +156,7 @@
 - [ ] T023 [US2] Em `apps/web/app/(app)/ads/page.tsx`:
   - coluna Sugestão com motivo e selo "pausado";
   - filtros rápidos por sugestão (`?sug=`), com contagem.
-- [ ] T024 [US2] Em `apps/web/app/(app)/configuracoes/parametros/page.tsx` e `actions.ts`: bloco "Limites de Ads" por canal, com nova vigência, só admin, gravando `core.parametros_ads` (FR-013/FR-020; data-model.md §2 `core.parametros_ads`).
+- [ ] T024 [US2] Em `apps/web/app/(app)/configuracoes/parametros/page.tsx` e `actions.ts`: bloco "Limites de Ads" por canal, com nova vigência, só admin, gravando `core.parametros_ads` (FR-013/FR-020). Campos editáveis: data-model.md §2 `core.parametros_ads.pausar_gasto_min`, `.pausar_cliques_min`, `.min_dias_dados`, `.revisar_cliques_min`, `.revisar_conversao_max_pct`, `.escalar_folga_pp`, `.escalar_unidades_min`, `.testar_margem_min_pct`, `.testar_unidades_min`, `.teste_reserva_pct`, `.teste_max_modelos`, `.reduzir_fator`, `.teto_fator`, `.alerta_sobra_pct`; a chave é `channel` + `vigente_desde`.
 
 **Checkpoint**: US1 + US2 funcionando.
 
@@ -184,7 +188,8 @@
   - % do mês;
   - projeção;
   - saldo e valor diário;
-  - alerta.
+  - alerta;
+  - estados especiais: sem projeção (1º dia) e orçamento esgotado.
 - [ ] T028 [US3] Em `apps/web/app/(app)/ads/page.tsx`, criar a aba `?aba=orcamento` com o cartão por conta (sempre do mês corrente, com a nota "independe do período escolhido").
 - [ ] T029 [US3] Em `apps/web/app/(app)/configuracoes/parametros/`, criar o bloco "Orçamento de Ads" por canal, com nova vigência, só admin (data-model.md §2 `core.orcamento_ads.valor_mensal`).
 
@@ -214,7 +219,7 @@
 ### Implementação da US4
 
 - [ ] T031 [US4] Implementar `analytics.ads_distribuicao` em `supabase/migrations/0019_ads_funcoes.sql` (plpgsql para o laço do teto). Fazer T030 passar.
-- [ ] T032 [P] [US4] Adicionar `ads_distribuicao` em `apps/web/lib/ads.ts` e criar `apps/web/components/ads/tabela-distribuicao.tsx`: por campanha, expansível por modelo, com "Nova campanha de teste", "sem destino" e "mudar de campanha".
+- [ ] T032 [P] [US4] Adicionar `ads_distribuicao` em `apps/web/lib/ads.ts` e criar `apps/web/components/ads/tabela-distribuicao.tsx`: por campanha, expansível por modelo, com "Nova campanha de teste", "sem destino" e "mudar de campanha". Com o orçamento esgotado, mostra tudo em zero com o aviso.
 - [ ] T033 [US4] Exibir a distribuição na aba Orçamento de `apps/web/app/(app)/ads/page.tsx`, só quando houver linhas (o usuário sem custos não vê).
 
 **Checkpoint**: US1–US4 funcionando.
@@ -258,7 +263,7 @@
 - [ ] T038 Rodar `npm run typecheck`, `npm run test:sql`, `npm run test:web`, `npm run build` (com as variáveis públicas de exemplo) e `npm audit`; corrigir o que falhar.
 - [ ] T039 Medir as funções `ads_*` com o papel `authenticated` num banco com 90 dias de dados de teste (ou explicar a medição no Supabase para o dono); ajustar índices se alguma passar de 8 s (SC-007).
 - [ ] T040 Revisão geral do ramo (requisito + qualidade + segurança), antes de pedir ao dono autorização para juntar ao `main`.
-- [ ] T041 Guia do dono (passos em português simples): aplicar 0018 e 0019, rodar a sincronização e executar os cenários 1, 2 e 3 do quickstart. **As sugestões só são liberadas aos usuários depois do cenário 1 conferido (FR-024).**
+- [ ] T041 Guia do dono (passos em português simples): aplicar 0018 e 0019, rodar a sincronização e executar os cenários 1, 2 e 3 do quickstart. **O ramo só é juntado ao `main` com o cenário 1 conferido (T001a, FR-024).**
 
 ---
 
@@ -276,7 +281,7 @@
 
 ### Within Each Story
 
-Testes (falhando) → funções SQL → `lib/` → tela. Todas as funções ficam em `0019_ads_funcoes.sql`, portanto as tarefas de SQL são sequenciais entre si.
+Testes (falhando) → funções SQL → `lib/` → tela. Todas as funções ficam em `0019_ads_funcoes.sql`, portanto as tarefas de SQL são sequenciais entre si. Cada tarefa passa por revisão independente (requisito + qualidade) antes da próxima (constituição).
 
 ### Parallel Opportunities
 

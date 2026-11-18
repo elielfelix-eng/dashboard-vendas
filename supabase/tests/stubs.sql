@@ -2,7 +2,7 @@
 create role authenticated; create role anon; create role service_role;
 create schema auth; create function auth.uid() returns uuid language sql as 'select null::uuid';
 create schema core; create schema mkt; create schema erp; create schema analytics; create schema config; create schema map; create schema crm;
-create table core.accounts (id uuid primary key default gen_random_uuid());
+create table core.accounts (id uuid primary key default gen_random_uuid(), channel text, external_id text, active boolean not null default true);
 create type core.app_role as enum ('admin','gestor','comercial','visualizador','vendedor');
 create function core.can_see_channel(ch text) returns boolean language sql as 'select true';
 create function core.can_see_costs() returns boolean language sql as 'select true';

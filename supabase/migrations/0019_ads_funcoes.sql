@@ -825,6 +825,91 @@ begin
    order by coalesce(ci.inv, 0) desc, coalesce(nullif(c.name, ''), k.campaign_id), k.campaign_id;
 end $$;
 
+-- ---------------------------------------------------------------------
+-- Orcamento do mes corrente (US3, FR-015/015a/016/017; data-model §3 "Orcamento do mes").
+-- EXCECAO DOCUMENTADA (security definer), como analytics.ads_serie / dash_ads_periodo: Seguidores vem da
+-- fatura do ML (analytics.ml_fatura), legivel so por quem ve custos, mas o orcamento aparece para todos que
+-- tem 'ads'. Roda com os direitos do dono e devolve so agregados por canal; exige core.has_perm('ads') e
+-- aplica core.can_see_channel explicitamente (a RLS nao vale aqui). Execucao revogada de public e anon.
+--  Uma linha por canal conectado (conta ativa em core.accounts) e visivel; p_canal = 'consolidado' traz
+--  tambem a linha 'consolidado' com a soma (nenhuma linha se nenhum canal entrar).
+--  p_hoje nulo = hoje em Brasilia. Mes = mes de p_hoje.
+--  gasto_product_ads = dash_ads_periodo(canal, 1o dia, p_hoje); gasto_seguidores = fatura 'seguidores' pela
+--  data_ref (so ML); gasto_mes = soma; gasto_ate_ontem = o mesmo ate p_hoje - 1.
+--  dias_completos = dia(p_hoje) - 1; dias_restantes = dias_mes - dias_completos (inclui hoje).
+--  pct_mes = dias_completos / dias_mes; projecao = gasto_ate_ontem / dias_completos * dias_mes (nula no 1o dia).
+--  orcamento = linha de core.orcamento_ads vigente em p_hoje (nula se nao houver: %, saldo, diario e alerta nulos).
+--  saldo = max(orcamento - gasto_mes, 0); valor_diario = saldo / dias_restantes.
+--  alerta: 'estouro' se projecao > orcamento; 'sobra' se projecao < orcamento * alerta_sobra_pct / 100
+--  (limite de core.parametros_ads vigente em p_hoje; no consolidado, a soma dos limites em reais dos canais).
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_orcamento(p_canal text, p_hoje date default null)
+returns table (canal text, orcamento numeric, gasto_mes numeric, gasto_product_ads numeric, gasto_seguidores numeric,
+               gasto_ate_ontem numeric, dias_mes int, dias_completos int, dias_restantes int, pct_gasto numeric,
+               pct_mes numeric, projecao numeric, saldo numeric, valor_diario numeric, alerta text)
+language sql stable security definer set search_path = '' as $$
+  with d as materialized (
+    select x.h as hoje, date_trunc('month', x.h)::date as ini,
+           extract(day from date_trunc('month', x.h) + interval '1 month - 1 day')::int as dias_mes,
+           extract(day from x.h)::int - 1 as dias_completos
+      from (select coalesce(p_hoje, (now() at time zone 'America/Sao_Paulo')::date) as h) x
+  ),
+  c as materialized (
+    select ch.canal, ch.ordem
+      from (values ('mercadolivre', 1), ('shopee', 2)) ch(canal, ordem)
+     where core.has_perm('ads')
+       and coalesce(p_canal, '') in ('consolidado', ch.canal)
+       and core.can_see_channel(ch.canal)
+       and exists (select 1 from core.accounts a where a.channel = ch.canal and a.active)
+  ),
+  g as materialized (
+    select c.canal, c.ordem,
+           (select o.valor_mensal from core.orcamento_ads o
+             where o.channel = c.canal and o.vigente_desde <= d.hoje
+             order by o.vigente_desde desc limit 1) as orc,
+           (select p.alerta_sobra_pct from analytics.ads_parametros(c.canal, d.hoje) p) as sobra_pct,
+           coalesce(analytics.dash_ads_periodo(c.canal, d.ini, d.hoje), 0) as pa,
+           coalesce(analytics.dash_ads_periodo(c.canal, d.ini, d.hoje - 1), 0) as pa_ontem,
+           coalesce((select sum(f.valor) from analytics.ml_fatura f
+                      where c.canal = 'mercadolivre' and f.categoria = 'seguidores'
+                        and f.data_ref between d.ini and d.hoje), 0) as seg,
+           coalesce((select sum(f.valor) from analytics.ml_fatura f
+                      where c.canal = 'mercadolivre' and f.categoria = 'seguidores'
+                        and f.data_ref between d.ini and d.hoje - 1), 0) as seg_ontem
+      from c cross join d
+  ),
+  t as (
+    select g.canal, g.ordem, g.orc, g.orc * g.sobra_pct / 100 as lim_sobra, g.pa, g.seg, g.pa_ontem + g.seg_ontem as ontem
+      from g
+    union all
+    select 'consolidado', 3, sum(g.orc), sum(g.orc * g.sobra_pct / 100), sum(g.pa), sum(g.seg), sum(g.pa_ontem + g.seg_ontem)
+      from g
+     where p_canal = 'consolidado'
+    having count(*) > 0
+  ),
+  r as (
+    select t.*, t.pa + t.seg as gasto,
+           case when d.dias_completos > 0 then t.ontem / d.dias_completos * d.dias_mes end as proj,
+           case when t.orc is not null then greatest(t.orc - (t.pa + t.seg), 0) end as sld  -- greatest ignora nulo
+      from t cross join d
+  )
+  select r.canal, round(r.orc, 2), round(r.gasto, 2), round(r.pa, 2), round(r.seg, 2), round(r.ontem, 2),
+         d.dias_mes, d.dias_completos, d.dias_mes - d.dias_completos,
+         case when r.orc > 0 then round(r.gasto / r.orc * 100, 2) end,
+         round(d.dias_completos::numeric / d.dias_mes * 100, 2),
+         round(r.proj, 2),
+         round(r.sld, 2),
+         round(r.sld / (d.dias_mes - d.dias_completos), 2),
+         case when r.orc is null or r.proj is null then null
+              when r.proj > r.orc then 'estouro'
+              when r.proj < r.lim_sobra then 'sobra' end
+    from r cross join d
+   order by r.ordem
+$$;
+
+revoke execute on function analytics.ads_orcamento(text, date) from public, anon;
+grant execute on function analytics.ads_orcamento(text, date) to authenticated;
+
 grant execute on function analytics.ads_parametros(text, date),
                           analytics.ads_peso_sem_venda(text, date, date, text[]),
                           analytics.ads_peso_modelo(text, date, date),

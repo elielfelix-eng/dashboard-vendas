@@ -704,5 +704,91 @@ eq('ads_sugestoes: invoker', await val(`select prosecdef from pg_proc where pron
 await db.exec(mig('0019_ads_funcoes.sql'));
 eq('0019 reexecutavel com as sugestoes', (await sug('mercadolivre')).ESC04, 'escalar');
 
+// =====================================================================
+// US3 (T025): ads_orcamento - orcamento do mes corrente (novembro/2026, 30 dias; dezembro, 31 dias)
+//   ML conectado; Shopee com conta inativa (nao conectada). Orcamento ML: nov 5.000 (semente), dez 6.000.
+//   Product Ads (API, mesmo criterio de dash_ads_periodo): 01/11 1.000, 10/11 1.500, 30/11 200, 01/12 7.000.
+//   Seguidores (fatura CDLIT, data_ref = cobranca - 1 dia): 500 em 15/11 (cobrado 16/11), 50 em 30/11 (cobrado 01/12).
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee');
+await db.exec(`
+insert into core.accounts (channel, external_id, active) values ('mercadolivre', 'ml1', true), ('shopee', 'sh1', false);
+insert into core.orcamento_ads (channel, vigente_desde, valor_mensal) values ('mercadolivre', '2026-12-01', 6000);
+insert into mkt.ads_campaign_daily (channel, campaign_id, day, cost) values
+ ('mercadolivre','c1','2026-11-01',1000), ('mercadolivre','c1','2026-11-10',1500), ('mercadolivre','c1','2026-11-30',200),
+ ('mercadolivre','c1','2026-12-01',7000);
+insert into mkt.billing_details (period_key, detail_id, created_at, detail_type, code, amount, order_id) values
+ ('2026-11','s1','2026-11-16 06:00+00','CHARGE','CDLIT',500,null),
+ ('2026-12','s2','2026-12-01 06:00+00','CHARGE','CDLIT',50,null);
+`);
+const ORC = `select canal, orcamento::float as orc, gasto_mes::float as gasto, gasto_product_ads::float as pa, gasto_seguidores::float as seg,
+  gasto_ate_ontem::float as ontem, dias_mes, dias_completos, dias_restantes, pct_gasto::float as pg, pct_mes::float as pm,
+  projecao::float as proj, saldo::float, valor_diario::float as vd, alerta from analytics.ads_orcamento($1, $2::date)`;
+const orc = (c, d) => rows(ORC, [c, d]);
+const ML18 = {
+  canal: 'mercadolivre', orc: 5000, gasto: 3000, pa: 2500, seg: 500, ontem: 3000, dias_mes: 30, dias_completos: 17, dias_restantes: 13,
+  pg: 60, pm: 56.67, proj: 5294.12, saldo: 2000, vd: 153.85, alerta: 'estouro',
+};
+eq('teste independente: dia 18/30, 3.000 ate o dia 17, orcamento 5.000 -> projecao 5.294,12, estouro, diario 153,85',
+  await orc('mercadolivre', '2026-11-18'), [ML18]);
+eq('sobra (< 80%) e gasto de hoje fora da projecao (dia 10)', await orc('mercadolivre', '2026-11-10'), [{
+  canal: 'mercadolivre', orc: 5000, gasto: 2500, pa: 2500, seg: 0, ontem: 1000, dias_mes: 30, dias_completos: 9, dias_restantes: 21,
+  pg: 50, pm: 30, proj: 3333.33, saldo: 2500, vd: 119.05, alerta: 'sobra',
+}]);
+eq('dentro da faixa (80% a 100%): sem alerta', (await orc('mercadolivre', '2026-11-20')).map((r) => [r.proj, r.alerta]), [[4736.84, null]]);
+eq('1o dia: sem projecao nem alerta', await orc('mercadolivre', '2026-11-01'), [{
+  canal: 'mercadolivre', orc: 5000, gasto: 1000, pa: 1000, seg: 0, ontem: 0, dias_mes: 30, dias_completos: 0, dias_restantes: 30,
+  pg: 20, pm: 0, proj: null, saldo: 4000, vd: 133.33, alerta: null,
+}]);
+eq('ultimo dia: 1 dia restante; Seguidores cobrado em 01/12 conta em 30/11', await orc('mercadolivre', '2026-11-30'), [{
+  canal: 'mercadolivre', orc: 5000, gasto: 3250, pa: 2700, seg: 550, ontem: 3000, dias_mes: 30, dias_completos: 29, dias_restantes: 1,
+  pg: 65, pm: 96.67, proj: 3103.45, saldo: 1750, vd: 1750, alerta: 'sobra',
+}]);
+eq('orcamento esgotado (dezembro, vigencia 6.000): saldo e diario zero, estouro', await orc('mercadolivre', '2026-12-05'), [{
+  canal: 'mercadolivre', orc: 6000, gasto: 7000, pa: 7000, seg: 0, ontem: 7000, dias_mes: 31, dias_completos: 4, dias_restantes: 27,
+  pg: 116.67, pm: 12.9, proj: 54250, saldo: 0, vd: 0, alerta: 'estouro',
+}]);
+eq('vigencia: novembro 5.000, dezembro 6.000', [(await orc('mercadolivre', '2026-11-30'))[0].orc, (await orc('mercadolivre', '2026-12-01'))[0].orc], [5000, 6000]);
+eq('sem orcamento vigente: orcamento, %, saldo, diario e alerta nulos', (await orc('mercadolivre', '2026-05-15')).map((r) =>
+  [r.orc, r.gasto, r.pg, r.saldo, r.vd, r.alerta, r.proj]), [[null, 0, null, null, null, null, 0]]);
+// Limite de sobra vem de core.parametros_ads (vigente em p_hoje)
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, alerta_sobra_pct) values ('mercadolivre', '2026-11-20', 95)`);
+eq('alerta_sobra_pct vigente (95%): 4.736,84 < 4.750 -> sobra', (await orc('mercadolivre', '2026-11-20')).map((r) => r.alerta), ['sobra']);
+eq('alerta_sobra_pct anterior (80%) ainda vale antes da vigencia', (await orc('mercadolivre', '2026-11-10')).map((r) => r.alerta), ['sobra']);
+await db.exec(`delete from core.parametros_ads where channel = 'mercadolivre' and vigente_desde = '2026-11-20'`);
+
+// Consolidado: so contas conectadas (core.accounts ativa)
+eq('consolidado: so o ML conectado (Shopee inativa fica fora)', await orc('consolidado', '2026-11-18'), [ML18, { ...ML18, canal: 'consolidado' }]);
+eq('canal Shopee nao conectado: nada', await orc('shopee', '2026-11-18'), []);
+await db.exec(`update core.accounts set active = true where channel = 'shopee'`);
+eq('consolidado com a Shopee conectada: soma os dois orcamentos', (await orc('consolidado', '2026-11-18')).map((r) => [r.canal, r.orc, r.gasto, r.seg, r.proj, r.saldo, r.vd, r.alerta]), [
+  ['mercadolivre', 5000, 3000, 500, 5294.12, 2000, 153.85, 'estouro'],
+  ['shopee', 6000, 0, 0, 0, 6000, 461.54, 'sobra'],
+  ['consolidado', 11000, 3000, 500, 5294.12, 8000, 615.38, 'sobra'],
+]);
+await db.exec(`update core.accounts set active = false where channel = 'shopee'`);
+eq('canal invalido: nada', await orc('brindedobem', '2026-11-18'), []);
+
+// Permissoes (como authenticated): comercial (ads sem custos) ve; sem ads nada; canal nao liberado nada
+await perfil('comercial');
+eq('comercial (sem custos, authenticated): mesmos numeros, com Seguidores da fatura', await comoAuth(() => orc('consolidado', '2026-11-18')),
+  [ML18, { ...ML18, canal: 'consolidado' }]);
+await perfil('visualizador');
+eq('sem a permissao ads: nada', await comoAuth(() => orc('consolidado', '2026-11-18')), []);
+await perfil('gestor'); await canais('shopee');
+eq('ML nao liberado: nada (Shopee nao conectada)', await comoAuth(() => orc('consolidado', '2026-11-18')), []);
+await canais('crm');
+eq('nenhum canal liberado: nada', await comoAuth(() => orc('mercadolivre', '2026-11-18')), []);
+await perfil('admin'); await canais('mercadolivre,shopee');
+eq('p_hoje nulo = hoje em Brasilia', await rows(`select dias_completos = extract(day from (now() at time zone 'America/Sao_Paulo'))::int - 1 as ok,
+  dias_mes = extract(day from date_trunc('month', (now() at time zone 'America/Sao_Paulo')) + interval '1 month - 1 day')::int as ok2
+  from analytics.ads_orcamento('mercadolivre')`), [{ ok: true, ok2: true }]);
+eq('ads_orcamento: security definer, execucao so para authenticated', await rows(`select prosecdef,
+  has_function_privilege('anon', 'analytics.ads_orcamento(text, date)', 'execute') as anon,
+  has_function_privilege('authenticated', 'analytics.ads_orcamento(text, date)', 'execute') as auth
+  from pg_proc where proname = 'ads_orcamento'`), [{ prosecdef: true, anon: false, auth: true }]);
+await db.exec(mig('0019_ads_funcoes.sql'));
+eq('0019 reexecutavel com o orcamento', await orc('mercadolivre', '2026-11-18'), [ML18]);
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

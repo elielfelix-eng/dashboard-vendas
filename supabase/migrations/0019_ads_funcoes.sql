@@ -24,6 +24,7 @@ $$;
 --  2. Sem venda: modelo(s) do SKU do anuncio (mkt.items e mkt.item_variations), via ref_erp; varios = divisao igual.
 --  3. Sem nada: uma linha com modelo nulo ("sem modelo"), peso 1.
 -- O peso de cada (canal, anuncio) soma 1. Vendas so existem para o Mercado Livre (dash_itens).
+-- dash_itens (caro) so roda quando ha anuncio do Mercado Livre na janela (nunca para p_canal = 'shopee').
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_peso_modelo(p_canal text, p_de date, p_ate date)
 returns table (channel text, item_id text, modelo text, peso numeric)
@@ -37,7 +38,9 @@ language sql stable security invoker set search_path = '' as $$
   vendas as materialized (
     select 'mercadolivre'::text as channel, i.item_id, i.modelo, sum(i.qtd)::numeric as unid
       from analytics.dash_itens('mercadolivre', p_de, p_ate) i
-     where i.classe in ('pago', 'cancelado', 'devolvido') and i.modelo is not null
+     where p_canal in ('consolidado', 'mercadolivre')
+       and exists (select 1 from ads a0 where a0.channel = 'mercadolivre')
+       and i.classe in ('pago', 'cancelado', 'devolvido') and i.modelo is not null
        and exists (select 1 from ads a where a.channel = 'mercadolivre' and a.item_id = i.item_id)
      group by i.item_id, i.modelo
     having sum(i.qtd) > 0
@@ -147,12 +150,20 @@ begin
    where m.day between p_de and p_ate
      and (p_canal = 'consolidado' and m.channel in ('mercadolivre', 'shopee') or m.channel = p_canal);
 
-  select coalesce(sum(b.valor_venda) filter (where b.classe in ('pago', 'cancelado', 'devolvido')), 0)
+  -- Consulta leve (sem o custo por item de dash_pedidos_base), mesma classificacao:
+  -- pago, ou cancelado que nao seja carrinho dividido (cancelado + devolvido); data da venda em Brasilia.
+  select coalesce(sum(oi.unit_price * oi.quantity), 0)
     into v_vb
-    from analytics.dash_pedidos_base(p_de, p_ate) b
-   where b.channel in ('mercadolivre', 'shopee')
-     and (p_canal = 'consolidado' or b.channel = p_canal)
-     and b.data_venda between p_de and p_ate;
+    from mkt.orders o
+    join mkt.order_items oi on oi.channel = o.channel and oi.order_id = o.order_id
+   where o.channel in ('mercadolivre', 'shopee')
+     and (p_canal = 'consolidado' or o.channel = p_canal)
+     and o.channel = any ((select core.my_channels())::text[])
+     and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between p_de and p_ate
+     and (o.status = 'paid'
+          or (o.status = 'cancelled'
+              and coalesce(o.cancel_detail_code, '') <> 'pack_splitted'
+              and coalesce(o.shipment_substatus, '') <> 'pack_splitted'));
 
   if v_det then
     select coalesce(sum(a.investimento), 0) into v_atr
@@ -244,7 +255,8 @@ $$;
 -- (parte product_ads de dash_custos_periodo x receita do modelo / receita total, mesmo rateio) +
 -- Product Ads da fatura ligada a pedido (repartido pelo valor do item, mesmo peso de dash_itens).
 -- Lucro pos-Ads = contribuicao antes do Ads - investimento atribuido. Nulos sem 'custos' (FR-009)
--- e para modelo sem custo (sem_custo > 0). Modelo sem venda no periodo: contribuicao 0.
+-- e para modelo sem custo (sem_custo > 0). Modelo sem venda no periodo: contribuicao 0
+-- (lucro = -investimento); sem venda e sem Ads no periodo (so venda na janela de 30 dias): nulos.
 -- pausado: todos os anuncios do modelo pausados (anuncio ou campanha). modo: core.ads_modo (padrao manual).
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_modelos(p_canal text, p_de date, p_ate date)
@@ -334,7 +346,8 @@ begin
        and r.modelo is not null
   ),
   dm as materialized (
-    select * from analytics.dash_modelos(p_canal, p_de, p_ate)
+    -- vendas por modelo so existem no Mercado Livre: na Shopee nao roda (dash_itens e caro)
+    select * from analytics.dash_modelos(p_canal, p_de, p_ate) where p_canal <> 'shopee'
   ),
   rt as materialized (
     select coalesce((select sum(dm.receita) from dm), 0) as receita,
@@ -376,6 +389,7 @@ begin
            coalesce(a.vend, 0) as vend, coalesce(a.un, 0) as un,
            coalesce(d.receita, 0) as receita,
            case when not v_ve then null
+                when d.modelo is null and a.modelo is null then null   -- sem venda e sem Ads no periodo
                 when d.modelo is null then 0
                 when d.contribuicao is null or coalesce(d.sem_custo, 0) > 0 then null
                 else d.contribuicao

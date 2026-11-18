@@ -398,12 +398,22 @@ eq('consolidado: shopee entra, brindedobem nao (FR-010)', cons.map((m) => [m.mod
 eq('consolidado: reconciliacao', cons.reduce((s, m) => s + m.inv, 0), (await resumo('consolidado'))[0].investimento);
 eq('universo: venda so fora da janela de 30 dias nao entra', (await modelos('mercadolivre', '2026-10-01', '2026-10-31')).some((m) => m.modelo === 'EEE55'), false);
 eq('universo: venda paga na janela de 30 dias ate p_ate entra', (await modelos('mercadolivre', '2026-10-01', '2026-10-10')).map((m) => m.modelo).includes('EEE55'), true);
+eq('universo: so venda na janela (sem venda nem Ads no periodo) -> lucro/equilibrio nulos',
+  (await modelos('mercadolivre', '2026-10-01', '2026-10-10')).filter((m) => m.modelo === 'EEE55').map((m) => [m.inv, m.eqb, m.lucro, m.cpct]),
+  [[0, null, null, null]]);
+eq('modelos shopee: sem venda por modelo (curto-circuito), so o anuncio da Shopee',
+  (await modelos('shopee')).map((m) => [m.modelo, m.inv, m.lucro]), [['SHP01', 5, -5], [null, -5, null]]);
 await db.exec(`update mkt.ads_campaigns set status = 'paused' where campaign_id = 'c1'`);
 eq('pausado: campanha pausada pausa os modelos dela', (await modelos('mercadolivre')).filter((m) => m.pausado).map((m) => m.modelo), ['AAA11', 'CCC33', 'BBB22']);
 await db.exec(`update mkt.ads_campaigns set status = 'active' where campaign_id = 'c1'`);
 
+await perfil('gestor');
+const pega = (lst) => lst.filter((m) => ['AAA11', 'BBB22', 'DDD44'].includes(m.modelo)).map((m) => [m.modelo, m.eqb, m.lucro, m.cpct]);
+eq('gestor com custos (authenticated, RLS valendo): mesmo equilibrio/lucro do calculo',
+  pega(await comoAuth(() => modelos('mercadolivre'))),
+  [['AAA11', 78.66, 114.53, 22.53], ['BBB22', 85.39, 14.16, 26.18], ['DDD44', 94.56, 28.37, 45.35]]);
 await perfil('comercial');
-const moCom = await comoAuth(() => modelos('mercadolivre'));
+const moCom =await comoAuth(() => modelos('mercadolivre'));
 eq('FR-009: comercial (authenticated) sem equilibrio/lucro/margem', moCom.map((m) => [m.modelo, m.eqb, m.lucro, m.cpct]),
   [['AAA11', null, null, null], ['CCC33', null, null, null], ['BBB22', null, null, null], ['DDD44', null, null, null], [null, null, null, null]]);
 eq('FR-009: comercial ve investimento e metricas iguais', moCom.map((m) => [m.modelo, m.inv, m.acos]), mo.map((m) => [m.modelo, m.inv, m.acos]));

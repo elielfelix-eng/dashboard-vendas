@@ -17,7 +17,7 @@
 
 ## Phase 1: Setup (Shared Infrastructure)
 
-- [ ] T001 Criar `supabase/tests/ads.test.mjs` com o mesmo harness PGlite de `supabase/tests/dashboard-funcoes.test.mjs` (aplica `stubs.sql` + migrations 0001–0013 + 0018–0019, helpers para logar como `authenticated` com perfil/canais) e incluí-lo no script `test:sql` de `package.json`
+- [X] T001 Criar `supabase/tests/ads.test.mjs` com o mesmo harness PGlite de `supabase/tests/dashboard-funcoes.test.mjs` (aplica `stubs.sql` + migrations 0001–0013 + 0018–0019, helpers para logar como `authenticated` com perfil/canais) e incluí-lo no script `test:sql` de `package.json`
 - [ ] T001a Dono roda o cenário 1 do `quickstart.md` no Supabase de produção (só leitura, tabelas já existentes) e compara com o painel do Mercado Ads de outubro/2026. Se a diferença passar de 1%, criar a tarefa de correção da coleta (research R8) antes da US2
 
 ---
@@ -28,18 +28,18 @@
 
 ### Testes da fundação (escrever primeiro, devem falhar)
 
-- [ ] T002 Testes em `supabase/tests/ads.test.mjs`:
+- [X] T002 Testes em `supabase/tests/ads.test.mjs`:
   - tabelas e seeds: `core.orcamento_ads` e `core.parametros_ads` com os valores iniciais de data-model.md §2;
   - permissões `ads`/`editar_ads` por perfil (data-model.md §2 `core.role_permissions`);
   - RLS como `authenticated`: leitura de `mkt.ads_anuncios` por canal; escrita de `orcamento_ads` só com `editar_ads` (gestor sim, comercial não); escrita de `parametros_ads` só pelo admin;
   - resolução por vigência (data-model.md §2 "Resolução");
   - reaplicar 0018 duas vezes sem erro.
-- [ ] T003 Testes em `supabase/tests/ads.test.mjs` para a atribuição anúncio→modelo (research R3):
+- [X] T003 Testes em `supabase/tests/ads.test.mjs` para a atribuição anúncio→modelo (research R3):
   - anúncio com 2 modelos vendidos 3:1 divide investimento/cliques/vendas 75/25;
   - anúncio sem venda usa o modelo do SKU do anúncio;
   - com vários SKUs, divide igualmente;
   - sem SKU, fica "sem modelo".
-- [ ] T004 [P] Testes em `packages/connectors/src/mercadolivre/connector.test.ts` (fetch falso) — contract `contracts/sync-ml-ads.md`:
+- [X] T004 [P] Testes em `packages/connectors/src/mercadolivre/connector.test.ts` (fetch falso) — contract `contracts/sync-ml-ads.md`:
   - `listAdsCampaigns()` pagina e mapeia `name/status/budget/roas_target/automatica` (ROAS objetivo; campanha automática);
   - `listAdsMetrics` devolve `status` (null se ausente);
   - 429 repete;
@@ -47,7 +47,7 @@
 
 ### Implementação da fundação
 
-- [ ] T005 Criar `supabase/migrations/0018_ads_tabelas.sql` (reexecutável), com:
+- [X] T005 Criar `supabase/migrations/0018_ads_tabelas.sql` (reexecutável), com:
   - `mkt.ads_anuncios` (data-model.md §1 `mkt.ads_anuncios.channel/item_id/campaign_id/status/atualizado_em`);
   - colunas novas data-model.md §1 `mkt.ads_campaigns.roas_target`, `mkt.ads_campaigns.automatica`, `mkt.ads_campaigns.atualizado_em`;
   - `core.orcamento_ads` (data-model.md §2 `core.orcamento_ads.channel`, restrito a mercadolivre|shopee; `core.orcamento_ads.vigente_desde`; `core.orcamento_ads.valor_mensal` > 0);
@@ -59,14 +59,14 @@
   - grants para o papel do job gravar `mkt.ads_anuncios`/`ads_campaigns`.
 
   Fazer T002 passar.
-- [ ] T006 Criar `supabase/migrations/0019_ads_funcoes.sql` com:
+- [X] T006 Criar `supabase/migrations/0019_ads_funcoes.sql` com:
   - `analytics.ads_parametros(p_channel, p_data)`;
   - `analytics.ads_peso_modelo(p_canal, p_de, p_ate)` (research R3, CTE materializada a partir de `analytics.dash_itens` e `mkt.items`);
   - `analytics.ads_metricas_modelo(p_canal, p_de, p_ate)`: investimento, impressões, cliques, vendas e unidades por Ads e dias com dados, por modelo, + linha "sem modelo".
 
   Fazer T003 passar.
-- [ ] T007 [P] Implementar `listAdsCampaigns()` e o campo `status` em `listAdsMetrics` em `packages/connectors/src/mercadolivre/connector.ts` (+ tipos em `packages/connectors/src/types.ts` se necessário). Fazer T004 passar.
-- [ ] T008 Em `jobs/src/sync-mercadolivre.ts`:
+- [X] T007 [P] Implementar `listAdsCampaigns()` e o campo `status` em `listAdsMetrics` em `packages/connectors/src/mercadolivre/connector.ts` (+ tipos em `packages/connectors/src/types.ts` se necessário). Fazer T004 passar.
+- [X] T008 Em `jobs/src/sync-mercadolivre.ts`:
   - `syncAdsCampanhas` grava `mkt.ads_campaigns`;
   - `syncAds` grava também `mkt.ads_anuncios`;
   - as duas são não fatais, com `stats.erro_ads_campanhas` / `stats.erro_ads_anuncios` e erros só com rótulo `ml:<caminho>` (contracts/sync-ml-ads.md).
@@ -83,16 +83,16 @@
 
 ### Testes da US1
 
-- [ ] T009 [US1] Testes em `supabase/tests/ads.test.mjs` para `analytics.ads_resumo`:
+- [X] T009 [US1] Testes em `supabase/tests/ads.test.mjs` para `analytics.ads_resumo`:
   - investimento = `analytics.dash_ads_periodo` (inclusive período antes da API);
   - ROAS, ACOS, TACOS e % vendas via Ads;
   - `nao_atribuido`, `tem_detalhe`;
   - Consolidado sem o canal brindedobem (FR-010);
   - sem `ads` → linha zerada (contracts/painel-rpc.md).
-- [ ] T010 [US1] Testes para `analytics.ads_serie`:
+- [X] T010 [US1] Testes para `analytics.ads_serie`:
   - soma diária = investimento do resumo;
   - vendas por Ads por dia.
-- [ ] T011 [US1] Testes para `analytics.ads_modelos`:
+- [X] T011 [US1] Testes para `analytics.ads_modelos`:
   - CTR, CPC, conversão;
   - ACOS de equilíbrio sem dupla contagem (research R2, comparando com `dash_modelos`: contribuição + Ads rateado + Ads de fatura ligada a pedido);
   - lucro depois do Ads;
@@ -100,7 +100,7 @@
   - modelo sem custo → equilíbrio/lucro nulos;
   - sem `custos` → `acos_equilibrio`/`lucro_pos_ads`/`contribuicao_pct` nulos (FR-009);
   - canal não liberado → nada.
-- [ ] T012 [US1] Testes para `analytics.ads_campanhas`:
+- [X] T012 [US1] Testes para `analytics.ads_campanhas`:
   - agregação por campanha com nome/status/orçamento/ROAS objetivo (e ACOS equivalente)/automática de `mkt.ads_campaigns`;
   - número de modelos;
   - campanha sem nome mostra o id.
@@ -108,7 +108,7 @@
 
 ### Implementação da US1
 
-- [ ] T014 [US1] Implementar `analytics.ads_resumo`, `analytics.ads_serie`, `analytics.ads_modelos` (ainda sem sugestão: `sugestao`/`motivo` nulos) e `analytics.ads_campanhas` em `supabase/migrations/0019_ads_funcoes.sql`, seguindo contracts/painel-rpc.md e o padrão de desempenho (CTEs materializadas, período filtrado primeiro). O universo de modelos segue data-model.md §3 "Universo de modelos". Fazer T009–T012 passar.
+- [X] T014 [US1] Implementar `analytics.ads_resumo`, `analytics.ads_serie`, `analytics.ads_modelos` (ainda sem sugestão: `sugestao`/`motivo` nulos) e `analytics.ads_campanhas` em `supabase/migrations/0019_ads_funcoes.sql`, seguindo contracts/painel-rpc.md e o padrão de desempenho (CTEs materializadas, período filtrado primeiro). O universo de modelos segue data-model.md §3 "Universo de modelos". Fazer T009–T012 passar.
 - [ ] T015 [P] [US1] Implementar `apps/web/lib/ads-regras.ts`. Fazer T013 passar.
 - [ ] T016 [P] [US1] Criar `apps/web/lib/ads.ts`: chamadas tipadas a `ads_resumo/serie/modelos/campanhas`, no padrão de `apps/web/lib/dash.ts` (conversão de numeric, mensagem de erro amigável).
 - [ ] T017 [US1] Em `apps/web/lib/permissoes.ts`:

@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
+import { validarLimites } from '@/lib/ads-limites';
 import { createClient } from '@/lib/supabase/server';
 
 const CANAIS = ['mercadolivre', 'shopee'];
@@ -54,4 +55,39 @@ export async function excluirParametro(form: FormData): Promise<void> {
   const { error } = await supabase.schema('core').from('parametros_custo').delete().eq('id', id);
   if (error) voltar('Não foi possível excluir agora.', 'erro');
   voltar('Vigência excluída.', 'ok');
+}
+
+export async function salvarLimitesAds(form: FormData): Promise<void> {
+  const { profile } = await requireUser();
+  if (profile?.role !== 'admin') voltar('Só o administrador altera os parâmetros.', 'erro');
+  const channel = String(form.get('channel') ?? '');
+  const vigente = String(form.get('vigente_desde') ?? '');
+  if (!CANAIS.includes(channel)) voltar('Escolha o canal.', 'erro');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vigente)) voltar('Informe a data a partir da qual vale.', 'erro');
+  const r = validarLimites(Object.fromEntries(form.entries()));
+  if (!r.ok) voltar(r.erro, 'erro');
+  const valores = r.ok ? r.valores : {};
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('parametros_ads').upsert(
+    { channel, vigente_desde: vigente, ...valores },
+    { onConflict: 'channel,vigente_desde' },
+  );
+  if (error) voltar('Não foi possível salvar os limites de Ads agora.', 'erro');
+  voltar('Limites de Ads salvos.', 'ok');
+}
+
+export async function excluirLimitesAds(form: FormData): Promise<void> {
+  const { profile } = await requireUser();
+  if (profile?.role !== 'admin') voltar('Só o administrador altera os parâmetros.', 'erro');
+  const channel = String(form.get('channel') ?? '');
+  const vigente = String(form.get('vigente_desde') ?? '');
+  if (!CANAIS.includes(channel)) voltar('Canal inválido.', 'erro');
+  const supabase = await createClient();
+  const { count } = await supabase.schema('core').from('parametros_ads')
+    .select('channel', { count: 'exact', head: true }).eq('channel', channel);
+  if ((count ?? 0) <= 1) voltar('O canal precisa de pelo menos uma vigência de limites.', 'erro');
+  const { error } = await supabase.schema('core').from('parametros_ads').delete().eq('channel', channel).eq('vigente_desde', vigente);
+  if (error) voltar('Não foi possível excluir agora.', 'erro');
+  voltar('Vigência de limites excluída.', 'ok');
 }

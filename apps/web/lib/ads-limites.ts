@@ -54,3 +54,12 @@ export function validarLimites(entrada: Record<string, unknown>): ResultadoLimit
   }
   return { ok: true, valores };
 }
+
+export type SituacaoVigencia = 'em vigor' | 'futura' | 'anterior';
+
+// Recebe as datas (YYYY-MM-DD) de UM canal e devolve a situacao de cada uma, na mesma ordem.
+// "em vigor" e a mais recente com data <= hoje; as posteriores a hoje sao "futura".
+export function situacaoVigencias(datas: string[], hoje: string): SituacaoVigencia[] {
+  const emVigor = datas.filter((d) => d <= hoje).sort().pop();
+  return datas.map((d) => (d > hoje ? 'futura' : d === emVigor ? 'em vigor' : 'anterior'));
+}

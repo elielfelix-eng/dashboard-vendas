@@ -34,3 +34,13 @@ test('fatores de reducao ficam entre 0 e 1 e teto fator ao menos 1', () => {
   assert.equal(validarLimites({ ...valido, reduzir_fator: '1,5' }).ok, false);
   assert.equal(validarLimites({ ...valido, teto_fator: '0,5' }).ok, false);
 });
+
+test('situacaoVigencias marca a vigente e as futuras', async () => {
+  const { situacaoVigencias } = await import('./ads-limites.ts');
+  assert.deepEqual(
+    situacaoVigencias(['2027-01-01', '2026-06-01', '2025-01-01'], '2026-11-18'),
+    ['futura', 'em vigor', 'anterior'],
+  );
+  assert.deepEqual(situacaoVigencias(['2026-11-18', '2025-01-01'], '2026-11-18'), ['em vigor', 'anterior']);
+  assert.deepEqual(situacaoVigencias(['2027-01-01'], '2026-11-18'), ['futura']);
+});

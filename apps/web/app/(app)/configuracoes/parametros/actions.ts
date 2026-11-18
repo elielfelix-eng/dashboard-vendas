@@ -83,11 +83,13 @@ export async function excluirLimitesAds(form: FormData): Promise<void> {
   const channel = String(form.get('channel') ?? '');
   const vigente = String(form.get('vigente_desde') ?? '');
   if (!CANAIS.includes(channel)) voltar('Canal inválido.', 'erro');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vigente)) voltar('Data da vigência inválida.', 'erro');
   const supabase = await createClient();
   const { count } = await supabase.schema('core').from('parametros_ads')
     .select('channel', { count: 'exact', head: true }).eq('channel', channel);
   if ((count ?? 0) <= 1) voltar('O canal precisa de pelo menos uma vigência de limites.', 'erro');
-  const { error } = await supabase.schema('core').from('parametros_ads').delete().eq('channel', channel).eq('vigente_desde', vigente);
+  const { error, data: apagadas } = await supabase.schema('core').from('parametros_ads').delete().eq('channel', channel).eq('vigente_desde', vigente).select('channel');
   if (error) voltar('Não foi possível excluir agora.', 'erro');
+  if (!apagadas || apagadas.length === 0) voltar('Nada excluído: a vigência não foi encontrada.', 'erro');
   voltar('Vigência de limites excluída.', 'ok');
 }

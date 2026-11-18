@@ -2,7 +2,8 @@ import { requireUser } from '@/lib/auth';
 import { brl, dataBr } from '@/lib/formato';
 import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
-import { CAMPOS_LIMITES } from '@/lib/ads-limites';
+import { CAMPOS_LIMITES, situacaoVigencias } from '@/lib/ads-limites';
+import { hojeBrasilia } from '@/lib/periodo';
 import { excluirLimitesAds, excluirParametro, salvarLimitesAds, salvarParametro } from './actions';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -21,7 +22,11 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
   const { data: ads } = await supabase.schema('core').from('parametros_ads').select('*')
     .order('channel').order('vigente_desde', { ascending: false });
   const limites = (ads ?? []) as Array<Record<string, string | number>>;
-  const atualML = limites.find((l) => l.channel === 'mercadolivre');
+  const hoje = hojeBrasilia();
+  const situacao = (lista: Array<Record<string, unknown>>, d: unknown) =>
+    situacaoVigencias(lista.map((x) => String(x.vigente_desde)), hoje)[lista.findIndex((x) => x.vigente_desde === d)];
+  const rotuloSit = (v?: string) => (v === 'em vigor' ? ' (em vigor)' : v === 'futura' ? ' (futura)' : '');
+  const linhasCanal = (c: string) => linhas.filter((x) => x.channel === c);
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -50,7 +55,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
             {linhas.map((l) => (
               <tr key={l.id} className="border-b border-border last:border-0">
                 <td className="px-3 py-1.5">{CANAL[l.channel] ?? l.channel}</td>
-                <td className="px-3 py-1.5">{dataBr(l.vigente_desde)}</td>
+                <td className="whitespace-nowrap px-3 py-1.5">{dataBr(l.vigente_desde)}{rotuloSit(situacao(linhasCanal(l.channel), l.vigente_desde))}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{Number(l.imposto_pct).toLocaleString('pt-BR')}%</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{brl(Number(l.embalagem_pedido))}</td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{brl(Number(l.embalagem_peca))}</td>
@@ -115,9 +120,9 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
                 </tr>
               </thead>
               <tbody>
-                {hist.map((l, i) => (
+                {hist.map((l) => (
                   <tr key={String(l.vigente_desde)} className="border-b border-border last:border-0">
-                    <td className="whitespace-nowrap px-3 py-1.5">{dataBr(String(l.vigente_desde))}{i === 0 && ' (atual)'}</td>
+                    <td className="whitespace-nowrap px-3 py-1.5">{dataBr(String(l.vigente_desde))}{rotuloSit(situacao(hist, l.vigente_desde))}</td>
                     {CAMPOS_LIMITES.map((c) => (
                       <td key={c.chave} className="px-3 py-1.5 text-right tabular-nums">{Number(l[c.chave]).toLocaleString('pt-BR')}</td>
                     ))}
@@ -138,32 +143,30 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
         );
       })}
 
-      {ehAdmin && (
-        <form action={salvarLimitesAds} className="mt-6 grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">
-          <h2 className="font-semibold sm:col-span-3">+ Nova vigência de limites de Ads</h2>
-          <label className="flex flex-col gap-1">Canal
-            <select name="channel" defaultValue="mercadolivre" className="rounded border border-border bg-surface px-2 py-1">
-              <option value="mercadolivre">Mercado Livre</option>
-              <option value="shopee">Shopee</option>
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">Vale a partir de
-            <input type="date" name="vigente_desde" required className="rounded border border-border bg-surface px-2 py-1" />
-          </label>
-          <span />
-          {CAMPOS_LIMITES.map((c) => (
-            <label key={c.chave} className="flex flex-col gap-1">{c.rotulo}
-              <input name={c.chave} inputMode="decimal" required
-                defaultValue={String(atualML?.[c.chave] ?? c.padrao).replace('.', ',')}
-                className="rounded border border-border bg-surface px-2 py-1" />
+      {ehAdmin && ['mercadolivre', 'shopee'].map((canal) => {
+        const base = limites.find((l) => l.channel === canal && String(l.vigente_desde) <= hoje);
+        return (
+          <form key={canal} action={salvarLimitesAds} className="mt-6 grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">
+            <h2 className="font-semibold sm:col-span-3">+ Nova vigência de limites de Ads — {CANAL[canal]}</h2>
+            <input type="hidden" name="channel" value={canal} />
+            <label className="flex flex-col gap-1">Vale a partir de
+              <input type="date" name="vigente_desde" required className="rounded border border-border bg-surface px-2 py-1" />
             </label>
-          ))}
-          <div className="flex items-end">
-            <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limites</button>
-          </div>
-          <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores do Mercado Livre em vigor. Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
-        </form>
-      )}
+            <span className="sm:col-span-2" />
+            {CAMPOS_LIMITES.map((c) => (
+              <label key={c.chave} className="flex flex-col gap-1">{c.rotulo}
+                <input name={c.chave} inputMode="decimal" required
+                  defaultValue={String(base?.[c.chave] ?? c.padrao).replace('.', ',')}
+                  className="rounded border border-border bg-surface px-2 py-1" />
+              </label>
+            ))}
+            <div className="flex items-end">
+              <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limites</button>
+            </div>
+            <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores em vigor deste canal. Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
+          </form>
+        );
+      })}
     </div>
   );
 }

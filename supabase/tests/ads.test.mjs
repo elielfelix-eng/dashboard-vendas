@@ -413,7 +413,7 @@ eq('gestor com custos (authenticated, RLS valendo): mesmo equilibrio/lucro do ca
   pega(await comoAuth(() => modelos('mercadolivre'))),
   [['AAA11', 78.66, 114.53, 22.53], ['BBB22', 85.39, 14.16, 26.18], ['DDD44', 94.56, 28.37, 45.35]]);
 await perfil('comercial');
-const moCom =await comoAuth(() => modelos('mercadolivre'));
+const moCom = await comoAuth(() => modelos('mercadolivre'));
 eq('FR-009: comercial (authenticated) sem equilibrio/lucro/margem', moCom.map((m) => [m.modelo, m.eqb, m.lucro, m.cpct]),
   [['AAA11', null, null, null], ['CCC33', null, null, null], ['BBB22', null, null, null], ['DDD44', null, null, null], [null, null, null, null]]);
 eq('FR-009: comercial ve investimento e metricas iguais', moCom.map((m) => [m.modelo, m.inv, m.acos]), mo.map((m) => [m.modelo, m.inv, m.acos]));
@@ -445,6 +445,33 @@ eq('campanhas sem ads: nada', await comoAuth(() => rows(CAMP, ['mercadolivre', .
 await perfil('gestor'); await canais('crm');
 eq('campanhas: canal nao liberado -> nada', await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT])), []);
 await perfil('admin'); await canais('mercadolivre,shopee');
+
+// Vendas brutas do resumo: todas as classes e o escopo de dash_resumo (dezembro, cenario a parte)
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw, shipment_status, shipment_substatus) values
+ ('mercadolivre','X1','paid','2026-12-05 12:00+00','2026-12-05 12:00+00',100,'{}',null,null),
+ ('mercadolivre','X2','cancelled','2026-12-06 12:00+00','2026-12-06 12:00+00',50,'{}','cancelled',null),
+ ('mercadolivre','X3','cancelled','2026-12-07 12:00+00','2026-12-07 12:00+00',70,'{"cancel_detail":{"code":"pack_splitted"}}',null,null),
+ ('mercadolivre','X4','cancelled','2026-12-08 12:00+00','2026-12-08 12:00+00',30,'{}','delivered',null),
+ ('mercadolivre','X5','cancelled','2026-12-09 12:00+00','2026-12-09 12:00+00',20,'{}','not_delivered','returned'),
+ ('mercadolivre','X6','cancelled','2026-12-10 12:00+00','2026-12-10 12:00+00',40,'{}',null,'pack_splitted'),
+ ('shopee','XS1','paid','2026-12-05 12:00+00','2026-12-05 12:00+00',999,'{}',null,null);
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','X1',1,'MLB1','AAA11-AZU','a',1,100), ('mercadolivre','X2',1,'MLB1','AAA11-AZU','a',1,50),
+ ('mercadolivre','X3',1,'MLB1','AAA11-AZU','a',1,70), ('mercadolivre','X4',1,'MLB1','AAA11-AZU','a',1,30),
+ ('mercadolivre','X5',1,'MLB1','AAA11-AZU','a',1,20), ('mercadolivre','X6',1,'MLB1','AAA11-AZU','a',1,40),
+ ('shopee','XS1',1,'SH1','SHP01-X','s',1,999);
+`);
+const DEZ = ['2026-12-01', '2026-12-31'];
+const vbResumo = (c) => val(`select vendas_brutas::float from analytics.dash_resumo('${c}', '${DEZ[0]}', '${DEZ[1]}')`);
+eq('classes: pago + cancelado + devolvido (2 formas); sem os dois carrinhos divididos; sem a Shopee',
+  (await resumo('mercadolivre', ...DEZ))[0].vendas_brutas_canal, 200);
+eq('classes: ML = dash_resumo', (await resumo('mercadolivre', ...DEZ))[0].vendas_brutas_canal, await vbResumo('mercadolivre'));
+eq('classes: consolidado = dash_resumo (pedido da Shopee fora)', (await resumo('consolidado', ...DEZ))[0].vendas_brutas_canal, await vbResumo('consolidado'));
+eq('classes: shopee = dash_resumo (0 por enquanto)', [(await resumo('shopee', ...DEZ))[0].vendas_brutas_canal, await vbResumo('shopee')], [0, 0]);
+await perfil('comercial');
+eq('classes: authenticated (RLS) = dash_resumo', await comoAuth(async () => [(await resumo('mercadolivre', ...DEZ))[0].vendas_brutas_canal, await vbResumo('mercadolivre')]), [200, 200]);
+await perfil('admin');
 
 eq('funcoes da tela: invoker (exceto ads_serie)', await rows(`select proname, prosecdef from pg_proc where proname in ('ads_resumo','ads_modelos','ads_campanhas') order by proname`),
   [{ proname: 'ads_campanhas', prosecdef: false }, { proname: 'ads_modelos', prosecdef: false }, { proname: 'ads_resumo', prosecdef: false }]);

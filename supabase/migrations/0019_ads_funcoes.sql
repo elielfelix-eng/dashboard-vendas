@@ -152,12 +152,14 @@ begin
 
   -- Consulta leve (sem o custo por item de dash_pedidos_base), mesma classificacao:
   -- pago, ou cancelado que nao seja carrinho dividido (cancelado + devolvido); data da venda em Brasilia.
+  -- Mesmo escopo de dash_resumo/dash_pedidos_base: so o Mercado Livre (Shopee = 0). O projeto
+  -- "Shopee completa" deve estender dash_pedidos_base e esta consulta juntos.
   select coalesce(sum(oi.unit_price * oi.quantity), 0)
     into v_vb
     from mkt.orders o
     join mkt.order_items oi on oi.channel = o.channel and oi.order_id = o.order_id
-   where o.channel in ('mercadolivre', 'shopee')
-     and (p_canal = 'consolidado' or o.channel = p_canal)
+   where o.channel = 'mercadolivre'
+     and p_canal in ('consolidado', 'mercadolivre')
      and o.channel = any ((select core.my_channels())::text[])
      and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between p_de and p_ate
      and (o.status = 'paid'

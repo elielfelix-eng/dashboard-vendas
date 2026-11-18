@@ -61,7 +61,7 @@ Na seção **Orçamento**, o dono vê, para cada conta, o gasto do mês até ago
 
 1. **Given** orçamento de R$ 5.000 e gasto projetado acima dele, **Then** aparece o alerta de estouro com o valor excedente.
 2. **Given** gasto projetado abaixo de 80% do orçamento, **Then** aparece o alerta de verba sobrando.
-3. **Given** o admin altera o orçamento do ML para R$ 6.000 a partir de 01/12, **Then** novembro continua com R$ 5.000 e dezembro usa R$ 6.000.
+3. **Given** um usuário com "Editar Ads" altera, na aba Orçamento, o orçamento do ML para R$ 6.000 a partir de 01/12, **Then** novembro continua com R$ 5.000 e dezembro usa R$ 6.000; um usuário sem essa permissão não vê o botão e não consegue gravar acessando os dados diretamente.
 4. **Given** o Consolidado, **Then** o orçamento somado considera só as contas conectadas.
 5. **Given** qualquer período escolhido na tela, **Then** o acompanhamento do orçamento é sempre do mês corrente.
 
@@ -144,7 +144,7 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 
 **Orçamento**
 
-- **FR-015**: O orçamento mensal de Ads MUST ser cadastrado por conta (canal), com vigência, editável pelo admin em Parâmetros; valor inicial R$ 5.000 para Mercado Livre e para Shopee a partir de 01/11/2026. É uma **meta de redução** (em out/2026 o ML gastou R$ 8.763) e, no Mercado Livre, cobre **Product Ads + campanha de Seguidores**.
+- **FR-015**: O orçamento mensal de Ads MUST ser cadastrado por conta (canal), com vigência ("vale a partir de", com histórico visível), editável **na própria tela Ads (aba Orçamento)** por quem tem a permissão `editar_ads`; valor inicial R$ 5.000 para Mercado Livre e para Shopee a partir de 01/11/2026. É uma **meta de redução** (em out/2026 o ML gastou R$ 8.763) e, no Mercado Livre, cobre **Product Ads + campanha de Seguidores**.
 - **FR-015a**: No Mercado Livre, o gasto do orçamento MUST somar Product Ads (fonte conferida) e Seguidores (fatura do ML, com a regra de data já usada no painel: cobrança na madrugada seguinte ao consumo). Seguidores aparece como linha própria no acompanhamento e na distribuição; os indicadores de desempenho (ROAS, ACOS, TACOS) continuam só com Product Ads.
 - **FR-016**: O acompanhamento MUST mostrar, para o mês corrente (Brasília) e independentemente do período da tela: investimento até agora, orçamento, % gasto, % do mês decorrido, projeção de fechamento (investimento até ontem ÷ dias completos × dias do mês), saldo e valor diário disponível (saldo ÷ dias restantes, incluindo hoje).
 - **FR-017**: MUST haver alerta quando a projeção passar do orçamento e quando ficar abaixo de 80% dele.

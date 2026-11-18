@@ -31,7 +31,7 @@
 - [ ] T002 Testes em `supabase/tests/ads.test.mjs`:
   - tabelas e seeds: `core.orcamento_ads` e `core.parametros_ads` com os valores iniciais de data-model.md §2;
   - permissões `ads`/`editar_ads` por perfil (data-model.md §2 `core.role_permissions`);
-  - RLS como `authenticated`: leitura de `mkt.ads_anuncios` por canal; escrita de `orcamento_ads`/`parametros_ads` só pelo admin;
+  - RLS como `authenticated`: leitura de `mkt.ads_anuncios` por canal; escrita de `orcamento_ads` só com `editar_ads` (gestor sim, comercial não); escrita de `parametros_ads` só pelo admin;
   - resolução por vigência (data-model.md §2 "Resolução");
   - reaplicar 0018 duas vezes sem erro.
 - [ ] T003 Testes em `supabase/tests/ads.test.mjs` para a atribuição anúncio→modelo (research R3):
@@ -192,7 +192,7 @@
   - alerta;
   - estados especiais: sem projeção (1º dia) e orçamento esgotado.
 - [ ] T028 [US3] Em `apps/web/app/(app)/ads/page.tsx`, criar a aba `?aba=orcamento` com o cartão por conta (sempre do mês corrente, com a nota "independe do período escolhido").
-- [ ] T029 [US3] Em `apps/web/app/(app)/configuracoes/parametros/`, criar o bloco "Orçamento de Ads" por canal, com nova vigência, só admin (data-model.md §2 `core.orcamento_ads.valor_mensal`).
+- [ ] T029 [US3] Na aba Orçamento de `apps/web/app/(app)/ads/page.tsx`, criar o botão "Editar orçamento" (só com `editar_ads`) com o formulário `apps/web/components/ads/editar-orcamento.tsx` (valor mensal + "vale a partir de" + histórico) e a server action em `apps/web/app/(app)/ads/actions.ts`, gravando data-model.md §2 `core.orcamento_ads.channel`, `core.orcamento_ads.vigente_desde` e `core.orcamento_ads.valor_mensal` (> 0); mensagem simples se a gravação for recusada.
 
 **Checkpoint**: US1–US3 funcionando.
 

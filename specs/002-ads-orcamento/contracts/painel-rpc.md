@@ -18,7 +18,8 @@ Todas ficam no schema `analytics` (exposto na Data API), são `security invoker`
 | Função | Schema | Regras |
 |---|---|---|
 | `ads_definir_modo(p_channel, p_tipo, p_chave, p_modo)` | `core` (definer) | exige `editar_ads` e canal visível; `modo='manual'` apaga a linha; registra `alterado_por/em`; erro com mensagem simples se não tiver permissão |
-| `orcamento_ads`, `parametros_ads` | `core` (tabelas) | insert/update pelo admin via RLS (tela Parâmetros) |
+| `orcamento_ads` | `core` (tabela) | insert/update por quem tem `editar_ads`, via RLS (tela Ads, aba Orçamento, botão "Editar orçamento") |
+| `parametros_ads` | `core` (tabela) | insert/update pelo admin via RLS (tela Parâmetros) |
 
 ## Erros
 Mensagens ao usuário nunca expõem SQL nem segredos. As chamadas tipadas em `apps/web/lib/ads.ts` repetem o padrão de `lib/dash.ts`: registram o erro no log e mostram "Não foi possível carregar os dados agora".

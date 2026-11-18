@@ -104,19 +104,19 @@
   - agregação por campanha com nome/status/orçamento/ROAS objetivo (e ACOS equivalente)/automática de `mkt.ads_campaigns`;
   - número de modelos;
   - campanha sem nome mostra o id.
-- [ ] T013 [P] [US1] Testes em `apps/web/lib/ads-regras.test.ts` para formatação de ROAS/ACOS/TACOS, rótulo "não atribuído a anúncio" e aviso "sem detalhe por anúncio".
+- [X] T013 [P] [US1] Testes em `apps/web/lib/ads-regras.test.ts` para formatação de ROAS/ACOS/TACOS, rótulo "não atribuído a anúncio" e aviso "sem detalhe por anúncio".
 
 ### Implementação da US1
 
 - [X] T014 [US1] Implementar `analytics.ads_resumo`, `analytics.ads_serie`, `analytics.ads_modelos` (ainda sem sugestão: `sugestao`/`motivo` nulos) e `analytics.ads_campanhas` em `supabase/migrations/0019_ads_funcoes.sql`, seguindo contracts/painel-rpc.md e o padrão de desempenho (CTEs materializadas, período filtrado primeiro). O universo de modelos segue data-model.md §3 "Universo de modelos". Fazer T009–T012 passar.
-- [ ] T015 [P] [US1] Implementar `apps/web/lib/ads-regras.ts`. Fazer T013 passar.
-- [ ] T016 [P] [US1] Criar `apps/web/lib/ads.ts`: chamadas tipadas a `ads_resumo/serie/modelos/campanhas`, no padrão de `apps/web/lib/dash.ts` (conversão de numeric, mensagem de erro amigável).
-- [ ] T017 [US1] Em `apps/web/lib/permissoes.ts`:
+- [X] T015 [P] [US1] Implementar `apps/web/lib/ads-regras.ts`. Fazer T013 passar.
+- [X] T016 [P] [US1] Criar `apps/web/lib/ads.ts`: chamadas tipadas a `ads_resumo/serie/modelos/campanhas`, no padrão de `apps/web/lib/dash.ts` (conversão de numeric, mensagem de erro amigável).
+- [X] T017 [US1] Em `apps/web/lib/permissoes.ts`:
   - adicionar `ads` e `editar_ads` (rótulos "Ads" e "Editar Ads (modo automático)");
   - incluir `/ads` em `ORDEM_TELAS` depois de rentabilidade.
 
   Em `apps/web/components/sidebar.tsx`, adicionar o item "Ads".
-- [ ] T018 [US1] Criar `apps/web/app/(app)/ads/page.tsx`:
+- [X] T018 [US1] Criar `apps/web/app/(app)/ads/page.tsx`:
   - `exigirPermissao('ads')`, `FiltroTopo` (Consolidado/ML/Shopee);
   - cartões com variação contra o período anterior;
   - gráfico diário (investimento × vendas por Ads);
@@ -137,7 +137,7 @@
 
 ### Testes da US2
 
-- [ ] T019 [US2] Testes em `supabase/tests/ads.test.mjs` para a sugestão em `analytics.ads_modelos`, cobrindo os cenários 1–7 da US2 na spec:
+- [X] T019 [US2] Testes em `supabase/tests/ads.test.mjs` para a sugestão em `analytics.ads_modelos`, cobrindo os cenários 1–7 da US2 na spec:
   - prioridade entre as sugestões;
   - janela de 30 dias até `p_ate` (research R4);
   - limites lidos de `core.parametros_ads` vigentes em `p_ate` (data-model.md §2 `core.parametros_ads.*`);
@@ -147,16 +147,16 @@
   - modelo sem nenhum dado de Ads, com vendas na janela, aparece na tabela com a sugestão Testar (data-model.md §3 "Universo de modelos");
   - Escalar conta unidades por Ads (data-model.md §2 `core.parametros_ads.escalar_unidades_min`) e Testar conta unidades pagas sem Ads (`core.parametros_ads.testar_unidades_min`);
   - motivo com os números.
-- [ ] T020 [P] [US2] Testes em `apps/web/lib/ads-regras.test.ts` para rótulo, cor e ordem das sugestões e para a contagem dos filtros rápidos.
+- [X] T020 [P] [US2] Testes em `apps/web/lib/ads-regras.test.ts` para rótulo, cor e ordem das sugestões e para a contagem dos filtros rápidos.
 
 ### Implementação da US2
 
-- [ ] T021 [US2] Implementar a sugestão (função auxiliar `analytics.ads_sugestoes(p_canal, p_ate)` + colunas `sugestao/motivo/pausado` em `analytics.ads_modelos`) em `supabase/migrations/0019_ads_funcoes.sql`. Fazer T019 passar.
-- [ ] T022 [P] [US2] Completar `apps/web/lib/ads-regras.ts` (rótulos, selos, ordem). Fazer T020 passar.
-- [ ] T023 [US2] Em `apps/web/app/(app)/ads/page.tsx`:
+- [X] T021 [US2] Implementar a sugestão (função auxiliar `analytics.ads_sugestoes(p_canal, p_ate)` + colunas `sugestao/motivo/pausado` em `analytics.ads_modelos`) em `supabase/migrations/0019_ads_funcoes.sql`. Fazer T019 passar.
+- [X] T022 [P] [US2] Completar `apps/web/lib/ads-regras.ts` (rótulos, selos, ordem). Fazer T020 passar.
+- [X] T023 [US2] Em `apps/web/app/(app)/ads/page.tsx`:
   - coluna Sugestão com motivo e selo "pausado";
   - filtros rápidos por sugestão (`?sug=`), com contagem.
-- [ ] T024 [US2] Em `apps/web/app/(app)/configuracoes/parametros/page.tsx` e `actions.ts`: bloco "Limites de Ads" por canal, com nova vigência, só admin, gravando `core.parametros_ads` (FR-013/FR-020). Campos editáveis: data-model.md §2 `core.parametros_ads.pausar_gasto_min`, `.pausar_cliques_min`, `.min_dias_dados`, `.revisar_cliques_min`, `.revisar_conversao_max_pct`, `.escalar_folga_pp`, `.escalar_unidades_min`, `.testar_margem_min_pct`, `.testar_unidades_min`, `.teste_reserva_pct`, `.teste_max_modelos`, `.reduzir_fator`, `.teto_fator`, `.alerta_sobra_pct`; a chave é `channel` + `vigente_desde`.
+- [X] T024 [US2] Em `apps/web/app/(app)/configuracoes/parametros/page.tsx` e `actions.ts`: bloco "Limites de Ads" por canal, com nova vigência, só admin, gravando `core.parametros_ads` (FR-013/FR-020). Campos editáveis: data-model.md §2 `core.parametros_ads.pausar_gasto_min`, `.pausar_cliques_min`, `.min_dias_dados`, `.revisar_cliques_min`, `.revisar_conversao_max_pct`, `.escalar_folga_pp`, `.escalar_unidades_min`, `.testar_margem_min_pct`, `.testar_unidades_min`, `.teste_reserva_pct`, `.teste_max_modelos`, `.reduzir_fator`, `.teto_fator`, `.alerta_sobra_pct`; a chave é `channel` + `vigente_desde`.
 
 **Checkpoint**: US1 + US2 funcionando.
 
@@ -170,7 +170,7 @@
 
 ### Testes da US3
 
-- [ ] T025 [US3] Testes em `supabase/tests/ads.test.mjs` para `analytics.ads_orcamento(p_canal, p_hoje)`:
+- [X] T025 [US3] Testes em `supabase/tests/ads.test.mjs` para `analytics.ads_orcamento(p_canal, p_hoje)`:
   - o exemplo do teste independente;
   - alerta de sobra (< 80%);
   - 1º dia sem projeção;
@@ -183,16 +183,16 @@
 
 ### Implementação da US3
 
-- [ ] T026 [US3] Implementar `analytics.ads_orcamento` em `supabase/migrations/0019_ads_funcoes.sql`. Fazer T025 passar.
-- [ ] T027 [P] [US3] Adicionar `ads_orcamento` em `apps/web/lib/ads.ts` e criar `apps/web/components/ads/cartao-orcamento.tsx`:
+- [X] T026 [US3] Implementar `analytics.ads_orcamento` em `supabase/migrations/0019_ads_funcoes.sql`. Fazer T025 passar.
+- [X] T027 [P] [US3] Adicionar `ads_orcamento` em `apps/web/lib/ads.ts` e criar `apps/web/components/ads/cartao-orcamento.tsx`:
   - barra gasto × orçamento;
   - % do mês;
   - projeção;
   - saldo e valor diário;
   - alerta;
   - estados especiais: sem projeção (1º dia) e orçamento esgotado.
-- [ ] T028 [US3] Em `apps/web/app/(app)/ads/page.tsx`, criar a aba `?aba=orcamento` com o cartão por conta (sempre do mês corrente, com a nota "independe do período escolhido").
-- [ ] T029 [US3] Na aba Orçamento de `apps/web/app/(app)/ads/page.tsx`, criar o botão "Editar orçamento" (só com `editar_ads`) com o formulário `apps/web/components/ads/editar-orcamento.tsx` (valor mensal + "vale a partir de" + histórico) e a server action em `apps/web/app/(app)/ads/actions.ts`, gravando data-model.md §2 `core.orcamento_ads.channel`, `core.orcamento_ads.vigente_desde` e `core.orcamento_ads.valor_mensal` (> 0); mensagem simples se a gravação for recusada.
+- [X] T028 [US3] Em `apps/web/app/(app)/ads/page.tsx`, criar a aba `?aba=orcamento` com o cartão por conta (sempre do mês corrente, com a nota "independe do período escolhido").
+- [X] T029 [US3] Na aba Orçamento de `apps/web/app/(app)/ads/page.tsx`, criar o botão "Editar orçamento" (só com `editar_ads`) com o formulário `apps/web/components/ads/editar-orcamento.tsx` (valor mensal + "vale a partir de" + histórico) e a server action em `apps/web/app/(app)/ads/actions.ts`, gravando data-model.md §2 `core.orcamento_ads.channel`, `core.orcamento_ads.vigente_desde` e `core.orcamento_ads.valor_mensal` (> 0); mensagem simples se a gravação for recusada.
 
 **Checkpoint**: US1–US3 funcionando.
 

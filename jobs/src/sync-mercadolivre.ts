@@ -58,6 +58,13 @@ export async function syncMercadoLivre(sql: Sql) {
         select count(distinct day)::int as n from mkt.ads_campaign_daily where channel = 'mercadolivre'`;
       stats.ads_campaign_days = await syncAdsCampaigns(sql, ml, adsDays === 0 ? 89 : 3);
       stats.ads_items = await syncAds(sql, ml, isFirstRun ? 89 : 3);
+      // Cadastro das campanhas e status dos anúncios: não fatais (erros só com rótulo, sem token)
+      const camp = await syncAdsCampanhas(sql, ml);
+      stats.ads_campanhas = camp.total;
+      if (camp.erro) stats.erro_ads_campanhas = 1;
+      const anun = await syncAdsAnuncios(sql, ml);
+      stats.ads_anuncios = anun.total;
+      if (anun.erro) stats.erro_ads_anuncios = 1;
 
       await sql`update core.sync_runs set status = 'success', finished_at = now(), stats = ${sql.json(stats)} where id = ${run.id}`;
       console.log(`[ML ${acc.nickname}] OK`, stats);
@@ -264,4 +271,39 @@ async function syncAds(sql: Sql, ml: MercadoLivreConnector, days: number) {
     return -1;
   }
   return total;
+}
+
+/** Cadastro das campanhas de Product Ads (nome, status, orçamento, ROAS objetivo, automática). Não fatal. */
+async function syncAdsCampanhas(sql: Sql, ml: MercadoLivreConnector) {
+  let total = 0;
+  try {
+    for await (const batch of ml.listAdsCampaigns()) {
+      total += await upsert(sql, 'mkt.ads_campaigns', batch.filter((c) => c.campaignId).map((c) => ({
+        channel: 'mercadolivre', campaign_id: c.campaignId, name: c.name, status: c.status, budget: c.budget,
+        roas_target: c.roasTarget, automatica: c.automatica, raw: sql.json(c.raw as never), atualizado_em: new Date(),
+      })), ['channel', 'campaign_id']);
+    }
+  } catch {
+    console.warn('[ML] Falha ao buscar as campanhas de Ads: ml:product_ads/campaigns/search');
+    return { total, erro: true };
+  }
+  return { total, erro: false };
+}
+
+/** Status de todos os anúncios de Product Ads (mesma busca das métricas). Não fatal. */
+async function syncAdsAnuncios(sql: Sql, ml: MercadoLivreConnector) {
+  let total = 0;
+  try {
+    for await (const batch of ml.listAdsStatus(new Date())) {
+      // Mesmo anúncio repetido na busca: fica com o último
+      const porItem = new Map(batch.map((a) => [a.itemId, a]));
+      total += await upsert(sql, 'mkt.ads_anuncios', [...porItem.values()].map((a) => ({
+        channel: 'mercadolivre', item_id: a.itemId, campaign_id: a.campaignId, status: a.status, atualizado_em: new Date(),
+      })), ['channel', 'item_id']);
+    }
+  } catch {
+    console.warn('[ML] Falha ao buscar o status dos anúncios de Ads: ml:product_ads/ads/search');
+    return { total, erro: true };
+  }
+  return { total, erro: false };
 }

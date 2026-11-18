@@ -1,4 +1,6 @@
 import { afterEach, test } from 'node:test';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { MercadoLivreConnector } from './connector.ts';
 
@@ -58,4 +60,134 @@ test('anúncios: um anúncio que falha sozinho não derruba os outros', async ()
   const lotes = [];
   for await (const lote of ml.listItems()) lotes.push(lote);
   assert.deepEqual(lotes.flat().map((i) => i.itemId), ['MLB2']);
+});
+
+/* ---------------- Ads: campanhas e status do anúncio (002) ---------------- */
+interface Chamada { path: string; params: URLSearchParams; headers: Record<string, string> }
+
+// fetch falso que registra caminho, parâmetros e cabeçalhos; `ads` responde por caminho
+function fakeAds(rotas: Record<string, (c: Chamada) => Response>) {
+  const chamadas: Chamada[] = [];
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const u = new URL(String(input));
+    const h = Object.fromEntries(Object.entries((init?.headers ?? {}) as Record<string, string>).map(([k, v]) => [k.toLowerCase(), v]));
+    const c = { path: u.pathname, params: u.searchParams, headers: h };
+    chamadas.push(c);
+    const r = rotas[u.pathname];
+    return r ? r(c) : new Response('{}', { status: 404 });
+  }) as typeof fetch;
+  return chamadas;
+}
+const ADV = '/advertising/advertisers';
+const CAMP = '/advertising/MLB/advertisers/9/product_ads/campaigns/search';
+const ADS = '/advertising/MLB/advertisers/9/product_ads/ads/search';
+const advertiser = json({ advertisers: [{ advertiser_id: 9, site_id: 'MLB' }] });
+
+test('campanhas: pagina de 50 em 50, sem aggregation_type, com api-version 2, e mapeia os campos', async () => {
+  const chamadas = fakeAds({
+    [ADV]: advertiser,
+    [CAMP]: (c) => {
+      const off = Number(c.params.get('offset'));
+      const paging = { total: 51 };
+      if (off === 0) return json({ paging, results: Array.from({ length: 50 }, (_, i) => ({ id: i + 1, name: `C${i + 1}`, status: 'active', budget: 100, roas_target: 5, strategy: 'manual' })) })();
+      return json({ paging, results: [{ id: 51, name: 'Auto', status: 'paused', budget: { amount: 30 }, target_roas: 3.5, strategy: 'AUTOMATIC' }] })();
+    },
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const todas = [];
+  for await (const lote of ml.listAdsCampaigns()) todas.push(...lote);
+  const camp = chamadas.filter((c) => c.path === CAMP);
+  assert.equal(camp.length, 2);
+  assert.deepEqual(camp.map((c) => c.params.get('offset')), ['0', '50']);
+  for (const c of camp) {
+    assert.equal(c.params.get('limit'), '50');
+    assert.ok(!c.params.has('aggregation_type'));
+    assert.equal(c.headers['api-version'], '2');
+  }
+  assert.equal(todas.length, 51);
+  assert.deepEqual({ ...todas[0], raw: undefined }, { campaignId: '1', name: 'C1', status: 'active', budget: 100, roasTarget: 5, automatica: false, raw: undefined });
+  assert.deepEqual({ ...todas[50], raw: undefined }, { campaignId: '51', name: 'Auto', status: 'paused', budget: 30, roasTarget: 3.5, automatica: true, raw: undefined });
+  assert.equal((todas[50].raw as { id: number }).id, 51);
+});
+
+test('campanhas: campos ausentes viram null (nunca inventa)', async () => {
+  fakeAds({ [ADV]: advertiser, [CAMP]: json({ paging: { total: 1 }, results: [{ id: 7 }] }) });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const todas = [];
+  for await (const lote of ml.listAdsCampaigns()) todas.push(...lote);
+  assert.deepEqual({ ...todas[0], raw: undefined }, { campaignId: '7', name: null, status: null, budget: null, roasTarget: null, automatica: null, raw: undefined });
+});
+
+test('campanhas: 429 e depois 200 funciona', async () => {
+  const realSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = ((fn: () => void) => realSetTimeout(fn, 0)) as unknown as typeof setTimeout;
+  try {
+    let n = 0;
+    fakeAds({
+      [ADV]: advertiser,
+      [CAMP]: () => (++n === 1 ? new Response('{"message":"local_rate_limited"}', { status: 429 }) : json({ paging: { total: 1 }, results: [{ id: 1, name: 'A' }] })()),
+    });
+    const ml = new MercadoLivreConnector('1', async () => 'token');
+    const todas = [];
+    for await (const lote of ml.listAdsCampaigns()) todas.push(...lote);
+    assert.equal(n, 2);
+    assert.deepEqual(todas.map((c) => c.campaignId), ['1']);
+  } finally {
+    globalThis.setTimeout = realSetTimeout;
+  }
+});
+
+test('métricas por anúncio: devolve status (null se ausente)', async () => {
+  fakeAds({
+    [ADV]: advertiser,
+    [ADS]: json({ paging: { total: 2 }, results: [
+      { item_id: 'MLB1', campaign_id: 5, status: 'active', metrics: { prints: 10, cost: 1 } },
+      { item_id: 'MLB2', metrics: { prints: 3 } },
+    ] }),
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const d = new Date('2026-11-10T12:00:00Z');
+  const rows = [];
+  for await (const lote of ml.listAdsMetrics(d, d)) rows.push(...lote);
+  assert.deepEqual(rows.map((r) => [r.itemId, r.status]), [['MLB1', 'active'], ['MLB2', null]]);
+});
+
+test('status dos anúncios: traz todos, mesmo sem impressões e custo, numa única passada', async () => {
+  const chamadas = fakeAds({
+    [ADV]: advertiser,
+    [ADS]: json({ paging: { total: 2 }, results: [
+      { item_id: 'MLB1', campaign_id: 5, status: 'paused', metrics: { prints: 0, cost: 0 } },
+      { item_id: 'MLB2', status: 'active' },
+    ] }),
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const rows = [];
+  for await (const lote of ml.listAdsStatus(new Date('2026-11-10T12:00:00Z'))) rows.push(...lote);
+  assert.deepEqual(rows, [
+    { itemId: 'MLB1', campaignId: '5', status: 'paused' },
+    { itemId: 'MLB2', campaignId: null, status: 'active' },
+  ]);
+  assert.equal(chamadas.filter((c) => c.path === ADS).length, 1);
+});
+
+test('somente leitura: o conector do Mercado Livre não tem POST/PUT/PATCH/DELETE', () => {
+  const dir = fileURLToPath(new URL('.', import.meta.url));
+  // Exceção única: auth.ts troca/renova o token OAuth (POST em /oauth/token). Isso não altera a conta de anúncios.
+  const permitido = new Set(['auth.ts']);
+  const proibido = /method:\s*['"`](POST|PUT|PATCH|DELETE)['"`]|\.(post|put|patch|delete)\(/i;
+  const achados: string[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith('.ts') || f.endsWith('.test.ts')) continue;
+    const src = readFileSync(dir + f, 'utf8');
+    if (proibido.test(src)) {
+      if (permitido.has(f)) {
+        // em auth.ts só vale o POST do token: nenhum outro método de escrita
+        const outros = src.match(/method:\s*['"`](PUT|PATCH|DELETE)['"`]|\.(post|put|patch|delete)\(/gi);
+        assert.equal(outros, null, 'auth.ts: só o POST do /oauth/token é permitido');
+        assert.equal((src.match(/method:\s*['"`]POST['"`]/g) ?? []).length, 1, 'auth.ts: exatamente um POST');
+        assert.ok(src.includes('/oauth/token'));
+      } else achados.push(f);
+    }
+  }
+  assert.deepEqual(achados, []);
 });

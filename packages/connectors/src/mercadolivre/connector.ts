@@ -259,7 +259,7 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       for (let offset = 0; ; offset += 50) {
         const r = await this.api.get<{
           paging: Paging;
-          results: { item_id: string; campaign_id?: number; metrics?: Record<string, number> }[];
+          results: { item_id: string; campaign_id?: number; status?: string | null; metrics?: Record<string, number> }[];
         }>(
           `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/ads/search`,
           { date_from: day, date_to: day, metrics, limit: 50, offset },
@@ -272,6 +272,7 @@ export class MercadoLivreConnector implements MarketplaceConnector {
             itemId: x.item_id,
             day,
             campaignId: x.campaign_id ? String(x.campaign_id) : null,
+            status: x.status ?? null,
             impressions: m.prints ?? 0,
             clicks: m.clicks ?? 0,
             cost: m.cost ?? 0,
@@ -284,6 +285,50 @@ export class MercadoLivreConnector implements MarketplaceConnector {
         if (rows.length) yield rows;
         if (offset + 50 >= (r.paging?.total ?? 0)) break;
       }
+    }
+  }
+
+  /**
+   * Status de TODOS os anúncios da busca de Product Ads, numa única passada (dia `day`).
+   * Separado de listAdsMetrics, que descarta anúncios sem impressões e custo.
+   */
+  async *listAdsStatus(day: Date): AsyncIterable<MlAdStatus[]> {
+    const adv = await this.getAdvertiser();
+    if (!adv) return;
+    const d = ymd(day);
+    for (let offset = 0; ; offset += 50) {
+      const r = await this.api.get<{
+        paging?: Paging;
+        results?: { item_id?: string; campaign_id?: number | string; status?: string | null }[];
+      }>(
+        `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/ads/search`,
+        { date_from: d, date_to: d, metrics: 'prints', limit: 50, offset },
+        { 'api-version': '2' },
+      );
+      const rows = (r.results ?? [])
+        .filter((x) => x.item_id)
+        .map((x) => ({ itemId: x.item_id!, campaignId: x.campaign_id ? String(x.campaign_id) : null, status: x.status ?? null }));
+      if (rows.length) yield rows;
+      if (offset + 50 >= (r.paging?.total ?? 0)) break;
+    }
+  }
+
+  /**
+   * Campanhas de Product Ads (cadastro: nome, status, orçamento, ROAS objetivo, automática).
+   * Os nomes dos campos não foram confirmados na API: lê com tolerância e guarda `raw`.
+   */
+  async *listAdsCampaigns(): AsyncIterable<MlAdsCampaign[]> {
+    const adv = await this.getAdvertiser();
+    if (!adv) return;
+    for (let offset = 0; ; offset += 50) {
+      const r = await this.api.get<{ paging?: Paging; results?: Record<string, unknown>[] }>(
+        `/advertising/${adv.siteId}/advertisers/${adv.id}/product_ads/campaigns/search`,
+        { limit: 50, offset },
+        { 'api-version': '2' },
+      );
+      const rows = (r.results ?? []).map(toAdsCampaign);
+      if (rows.length) yield rows;
+      if (offset + 50 >= (r.paging?.total ?? 0)) break;
     }
   }
 
@@ -376,6 +421,32 @@ export class MercadoLivreConnector implements MarketplaceConnector {
   }
 }
 
+export interface MlAdStatus { itemId: string; campaignId: string | null; status: string | null }
+export interface MlAdsCampaign {
+  campaignId: string;
+  name: string | null;
+  status: string | null;
+  budget: number | null;
+  roasTarget: number | null;
+  automatica: boolean | null;
+  raw: unknown;
+}
+const num = (v: unknown): number | null => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+function toAdsCampaign(x: Record<string, unknown>): MlAdsCampaign {
+  const b = x.budget;
+  const budget = b && typeof b === 'object' ? num((b as { amount?: unknown }).amount) : num(b);
+  const modo = x.strategy ?? x.type;
+  const automatica = typeof modo === 'string' && modo ? /^auto/i.test(modo.trim()) : null;
+  return {
+    campaignId: String(x.id ?? x.campaign_id ?? ''),
+    name: typeof x.name === 'string' ? x.name : null,
+    status: typeof x.status === 'string' ? x.status : null,
+    budget,
+    roasTarget: num(x.roas_target ?? x.roas ?? x.target_roas),
+    automatica,
+    raw: x,
+  };
+}
 export interface MlAdsCampaignDay { campaignId: string; day: string; cost: number; raw: unknown }
 export interface MlBillingPeriod { key: string; dateFrom: string | null; dateTo: string | null; raw: unknown }
 export interface MlBillingDetail {

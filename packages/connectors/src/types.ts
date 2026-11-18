@@ -86,6 +86,8 @@ export interface AdsDailyMetric {
   itemId: string;
   day: string; // YYYY-MM-DD
   campaignId: string | null;
+  /** Status do anúncio em Product Ads (null se a API não informar). */
+  status?: string | null;
   impressions: number;
   clicks: number;
   cost: number;

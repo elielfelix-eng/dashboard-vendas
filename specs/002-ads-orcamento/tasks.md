@@ -40,7 +40,7 @@
   - com vários SKUs, divide igualmente;
   - sem SKU, fica "sem modelo".
 - [ ] T004 [P] Testes em `packages/connectors/src/mercadolivre/connector.test.ts` (fetch falso) — contract `contracts/sync-ml-ads.md`:
-  - `listAdsCampaigns()` pagina e mapeia `name/status/budget/acos_target`;
+  - `listAdsCampaigns()` pagina e mapeia `name/status/budget/roas_target/automatica` (ROAS objetivo; campanha automática);
   - `listAdsMetrics` devolve `status` (null se ausente);
   - 429 repete;
   - **guarda só leitura**: nenhum método do conector ML usa POST/PUT/PATCH/DELETE.
@@ -49,7 +49,7 @@
 
 - [ ] T005 Criar `supabase/migrations/0018_ads_tabelas.sql` (reexecutável), com:
   - `mkt.ads_anuncios` (data-model.md §1 `mkt.ads_anuncios.channel/item_id/campaign_id/status/atualizado_em`);
-  - coluna nova data-model.md §1 `mkt.ads_campaigns.atualizado_em`;
+  - colunas novas data-model.md §1 `mkt.ads_campaigns.roas_target`, `mkt.ads_campaigns.automatica`, `mkt.ads_campaigns.atualizado_em`;
   - `core.orcamento_ads` (data-model.md §2 `core.orcamento_ads.channel`, restrito a mercadolivre|shopee; `core.orcamento_ads.vigente_desde`; `core.orcamento_ads.valor_mensal` > 0);
   - `core.parametros_ads` (data-model.md §2 `core.parametros_ads.channel`, `.vigente_desde`, `.pausar_gasto_min`, `.pausar_cliques_min`, `.min_dias_dados`, `.revisar_cliques_min`, `.revisar_conversao_max_pct`, `.escalar_folga_pp`, `.escalar_unidades_min`, `.testar_margem_min_pct`, `.testar_unidades_min`, `.teste_reserva_pct`, `.teste_max_modelos`, `.reduzir_fator`, `.teto_fator`, `.alerta_sobra_pct`);
   - `core.ads_modo` (data-model.md §2 `core.ads_modo.channel`, `core.ads_modo.tipo` ∈ modelo|campanha|anuncio, `core.ads_modo.chave`, `core.ads_modo.modo` ∈ manual|automatico, `core.ads_modo.alterado_por`, `core.ads_modo.alterado_em`);
@@ -101,7 +101,7 @@
   - sem `custos` → `acos_equilibrio`/`lucro_pos_ads`/`contribuicao_pct` nulos (FR-009);
   - canal não liberado → nada.
 - [ ] T012 [US1] Testes para `analytics.ads_campanhas`:
-  - agregação por campanha com nome/status/orçamento de `mkt.ads_campaigns`;
+  - agregação por campanha com nome/status/orçamento/ROAS objetivo (e ACOS equivalente)/automática de `mkt.ads_campaigns`;
   - número de modelos;
   - campanha sem nome mostra o id.
 - [ ] T013 [P] [US1] Testes em `apps/web/lib/ads-regras.test.ts` para formatação de ROAS/ACOS/TACOS, rótulo "não atribuído a anúncio" e aviso "sem detalhe por anúncio".
@@ -178,6 +178,7 @@
   - orçamento esgotado (saldo 0);
   - vigência (nov 5.000 / dez 6.000);
   - consolidado só com contas conectadas (`core.accounts`);
+  - ML soma Product Ads + Seguidores da fatura (FR-015a), com as duas parcelas expostas;
   - campos de data-model.md §3 "Orçamento do mês".
 
 ### Implementação da US3
@@ -207,6 +208,8 @@
 
 - [ ] T030 [US4] Testes em `supabase/tests/ads.test.mjs` para `analytics.ads_distribuicao(p_canal, p_hoje)`:
   - cenários 1–5 da US4;
+  - passo 0: linha `seguidores` com o gasto médio de 30 dias, limitado a V (data-model.md §3 "Distribuição");
+  - campanha automática recebe só valor de orçamento, sem marca `mudar_campanha`;
   - passo 3 com R < 0 (reduções escaladas);
   - teto com redistribuição iterativa;
   - nenhum lucrativo → tudo em sem destino;

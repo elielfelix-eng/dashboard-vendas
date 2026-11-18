@@ -17,6 +17,8 @@ select 'anuncio', sum(cost) from mkt.ads_metrics_daily
  where channel='mercadolivre' and day between '2026-10-01' and '2026-10-31';
 ```
 **Esperado:** as duas linhas ficam a até 1% uma da outra e do total de outubro no painel do Mercado Ads (Publicidade → Product Ads → período 01–31/10).
+
+Referência anotada em 18/11 (prints do dono): investimento **R$ 8.224**, receita **R$ 40.531**, vendas atribuídas **75**, outras vendas **19**, cliques **2.955**, ACOS **20,29%**. Seguidores: **R$ 539** (fora desta consulta; entra no orçamento, FR-015a).
 - Conferir também cliques e vendas no painel.
 - Se não bater, seguir research R8 antes de liberar as sugestões.
 

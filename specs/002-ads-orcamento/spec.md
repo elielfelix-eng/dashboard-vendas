@@ -125,7 +125,7 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 - **FR-005**: A tela MUST ter uma tabela por modelo com: investimento, impressões, cliques, CTR, CPC, conversão (unidades por Ads ÷ cliques), vendas por Ads, ACOS, ACOS de equilíbrio, lucro depois do Ads, sugestão com motivo, selo "pausado" quando for o caso, e a chave Manual/Automático.
 - **FR-006**: ACOS de equilíbrio de um modelo MUST ser a contribuição antes do Ads ÷ receita; contribuição antes do Ads = contribuição do modelo (como na Rentabilidade) somada de volta à parte do Ads rateada a ele. Lucro depois do Ads MUST ser a contribuição antes do Ads menos o gasto em Ads atribuído ao próprio modelo.
 - **FR-007**: Gasto e vendas por Ads de um anúncio MUST ser atribuídos aos modelos conforme o caso de borda "anúncio com mais de um modelo".
-- **FR-008**: A tela MUST ter a aba **Por campanha**: nome, status, orçamento diário atual (quando disponível), investimento, vendas por Ads, ACOS, ROAS, número de modelos e chave Manual/Automático.
+- **FR-008**: A tela MUST ter a aba **Por campanha**: nome, status, se é automática (gerida pelo ML), orçamento diário atual e ROAS objetivo (quando disponíveis, com o ACOS equivalente = 1 ÷ ROAS objetivo), investimento, vendas por Ads, ACOS, ROAS, número de modelos e chave Manual/Automático.
 - **FR-009**: Sem a permissão `custos`, ACOS de equilíbrio, lucro depois do Ads, as sugestões Escalar/Reduzir/Testar Ads e a distribuição do orçamento MUST vir vazios dos próprios dados (não só escondidos na tela); Pausar e Revisar anúncio continuam disponíveis.
 - **FR-010**: O Consolidado MUST somar só os canais de marketplace (Mercado Livre e Shopee); o TACOS consolidado não inclui o canal Brinde do Bem.
 
@@ -144,10 +144,11 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 
 **Orçamento**
 
-- **FR-015**: O orçamento mensal de Ads MUST ser cadastrado por conta (canal), com vigência, editável pelo admin em Parâmetros; valor inicial R$ 5.000 para Mercado Livre e para Shopee a partir de 01/11/2026.
+- **FR-015**: O orçamento mensal de Ads MUST ser cadastrado por conta (canal), com vigência, editável pelo admin em Parâmetros; valor inicial R$ 5.000 para Mercado Livre e para Shopee a partir de 01/11/2026. É uma **meta de redução** (em out/2026 o ML gastou R$ 8.763) e, no Mercado Livre, cobre **Product Ads + campanha de Seguidores**.
+- **FR-015a**: No Mercado Livre, o gasto do orçamento MUST somar Product Ads (fonte conferida) e Seguidores (fatura do ML, com a regra de data já usada no painel: cobrança na madrugada seguinte ao consumo). Seguidores aparece como linha própria no acompanhamento e na distribuição; os indicadores de desempenho (ROAS, ACOS, TACOS) continuam só com Product Ads.
 - **FR-016**: O acompanhamento MUST mostrar, para o mês corrente (Brasília) e independentemente do período da tela: investimento até agora, orçamento, % gasto, % do mês decorrido, projeção de fechamento (investimento até ontem ÷ dias completos × dias do mês), saldo e valor diário disponível (saldo ÷ dias restantes, incluindo hoje).
 - **FR-017**: MUST haver alerta quando a projeção passar do orçamento e quando ficar abaixo de 80% dele.
-- **FR-018**: A distribuição sugerida MUST seguir, sobre o valor diário disponível: (1) 10% para até 5 modelos "Testar Ads" (os de maior margem), em partes iguais, sem teto; sem candidatos, os 10% voltam ao restante; (2) Pausar = 0, Reduzir = gasto diário médio de 30 dias × 0,7, Revisar anúncio = gasto diário médio de 30 dias; (3) Escalar e Manter dividem o restante na proporção do lucro depois do Ads positivo de 30 dias; (4) nenhum modelo de (3) recebe mais de 2× o seu gasto diário médio de 30 dias; o excedente é redistribuído e o que não couber fica como "sem destino".
+- **FR-018**: A distribuição sugerida MUST seguir, sobre o valor diário disponível: (0) a campanha de Seguidores recebe o seu gasto diário médio de 30 dias, limitado ao valor diário disponível, e o restante segue os passos abaixo; (1) 10% para até 5 modelos "Testar Ads" (os de maior margem), em partes iguais, sem teto; sem candidatos, os 10% voltam ao restante; (2) Pausar = 0, Reduzir = gasto diário médio de 30 dias × 0,7, Revisar anúncio = gasto diário médio de 30 dias; (3) Escalar e Manter dividem o restante na proporção do lucro depois do Ads positivo de 30 dias; (4) nenhum modelo de (3) recebe mais de 2× o seu gasto diário médio de 30 dias; o excedente é redistribuído e o que não couber fica como "sem destino".
 - **FR-019**: No Mercado Livre a distribuição MUST ser somada por campanha (o modelo pertence à campanha em que mais gastou em 30 dias), com a linha "Nova campanha de teste" para os modelos de teste e a indicação de "mudar de campanha" quando a sugestão do modelo difere da sugestão predominante da campanha (a do modelo de maior investimento nela em 30 dias). Na Shopee, por anúncio.
 - **FR-020**: Os percentuais e multiplicadores do FR-018 (10%, 5 modelos, 0,7, 2×) MUST ser editáveis junto com os limites do FR-013.
 
@@ -158,7 +159,7 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 
 **Dados**
 
-- **FR-023**: A sincronização MUST passar a trazer, para o Mercado Livre, os dados das campanhas (nome, status, orçamento diário, ACOS alvo) e o status de cada anúncio patrocinado; falha nesses dados não pode interromper a sincronização de vendas.
+- **FR-023**: A sincronização MUST passar a trazer, para o Mercado Livre, os dados das campanhas (nome, status, orçamento diário, ROAS objetivo, se é automática) e o status de cada anúncio patrocinado; falha nesses dados não pode interromper a sincronização de vendas.
 - **FR-024**: Antes de o ramo ser juntado ao `main`, o investimento, os cliques e as vendas por Ads de outubro/2026 MUST ser conferidos contra o painel do Mercado Ads, com diferença de até 1% no investimento do mês. A conferência MUST acontecer até 31/01/2027 (a fonte guarda 90 dias).
 
 ### Key Entities
@@ -186,6 +187,8 @@ Cada modelo e cada campanha (e, na Shopee, cada anúncio) tem uma chave **Manual
 
 - A sincronização atual de Ads do Mercado Livre por anúncio funciona; se a conferência (FR-024) falhar, a correção da coleta entra neste projeto antes das sugestões.
 - O Product Ads está incluído nos custos rateados da Rentabilidade; por isso o ACOS de equilíbrio soma de volta essa parte (FR-006).
+- Referência de outubro/2026 no Mercado Ads (prints do dono, 18/11): Product Ads investimento R$ 8.224, receita R$ 40.531, 75 vendas atribuídas, 19 outras vendas, 2.955 cliques, ACOS 20,29%, TACOS 16,97%; Seguidores R$ 539; 9 campanhas, orçamento diário configurado R$ 251 + R$ 17.
+- Em campanhas **automáticas** o ML distribui a verba entre os anúncios; para elas a sugestão é só de orçamento da campanha, sem mover modelos.
 - A Shopee só terá dados depois do projeto "Shopee completa"; até lá aparece sem dados, e o orçamento consolidado considera só o Mercado Livre.
 - Os valores iniciais das regras (FR-011, FR-018) são propostas aceitas pelo dono e serão ajustados com o uso.
 - O "dia" é o dia de Brasília, como no resto do painel.

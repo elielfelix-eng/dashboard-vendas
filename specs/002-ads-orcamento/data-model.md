@@ -15,7 +15,7 @@ Convenções: o "dia" é o dia de Brasília; valores em R$ com 2 casas; percentu
 | direct_units, indirect_units, organic_units | int | unidades por Ads = direct + indirect |
 
 ### mkt.ads_campaigns (já existe; passa a ser preenchida)
-`channel, campaign_id` PK; `name`, `status` (`active`|`paused`|outros), `budget` (orçamento diário), `acos_target`, `raw`, **novo** `atualizado_em timestamptz`.
+`channel, campaign_id` PK; `name`, `status` (`active`|`paused`|outros), `budget` (orçamento diário), `acos_target` (legado, não usado), `raw`, **novos** `roas_target numeric` (ROAS objetivo; ACOS equivalente = 100 ÷ roas_target), `automatica boolean` (campanha gerida pelo ML), `atualizado_em timestamptz`.
 
 ### mkt.ads_anuncios (nova) — situação atual de cada anúncio patrocinado
 | Campo | Tipo | Regra |
@@ -90,6 +90,7 @@ Estados: `pausar` \| `reduzir` \| `revisar` \| `escalar` \| `testar` \| `manter`
 - `motivo` é um texto com os números, por exemplo "gastou R$ 60,00 em 30 dias sem venda" ou "ACOS 35% acima do equilíbrio 30%".
 
 ### Distribuição (por modelo, depois por campanha)
+Passo 0 (ML): a linha `seguidores` recebe `S = min(gasto diário médio de Seguidores em 30 dias, V)`; os passos abaixo usam `V − S` no lugar de `V`. Na invariante, `S` entra na soma.
 Entrada: valor diário disponível `V`, sugestão de cada modelo na janela de hoje, gasto diário médio de 30 dias `g`, lucro depois do Ads de 30 dias `L`.
 1. `T = V × teste_reserva_pct/100` dividido igualmente entre até `teste_max_modelos` modelos `testar`, escolhidos pela maior margem %. Sem candidatos, `T = 0`.
 2. `pausar` = 0; `reduzir` = g × reduzir_fator; `revisar` = g.
@@ -101,6 +102,7 @@ Invariante: Σ valores + sem_destino = V (±0,01).
 - Shopee: por anúncio (no projeto Shopee).
 
 ### Orçamento do mês (por canal)
+No ML, todo gasto = Product Ads (mesmo critério de `dash_ads_periodo`) + Seguidores (`analytics.ml_fatura`, categoria `seguidores`, pela `data_ref`), com as duas parcelas também expostas (`gasto_product_ads`, `gasto_seguidores`).
 `orcamento`, `gasto_mes` (até agora), `gasto_ate_ontem`, `dias_mes`, `dias_completos = dia(p_hoje) − 1`, `dias_restantes = dias_mes − dias_completos`, `projecao` (null se `dias_completos = 0`), `saldo = max(orcamento − gasto_mes, 0)`, `valor_diario = saldo ÷ dias_restantes`, `alerta` (`estouro` \| `sobra` \| null). O consolidado soma os canais **conectados**, ou seja, com conta em `core.accounts`.
 
 ## Relações

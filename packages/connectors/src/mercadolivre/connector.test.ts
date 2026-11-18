@@ -179,8 +179,8 @@ test('somente leitura: nenhuma escrita HTTP no conector do ML nem no cliente HTT
   const arquivos = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts')).map((f) => dir + f);
   arquivos.push(dir + '../http.ts'); // fetchJson, usado por client.ts e auth.ts
   // Qualquer propriedade `method` (também a forma abreviada `{ method }` ou `method: variavel`) é suspeita.
-  const metodo = /method\s*[:,}]/g;
-  const escrita = /(api|client|http|ml|axios)\.(post|put|patch|delete)\s*\(/gi;
+  const metodo = /\bmethod\s*[:,}]/g;
+  const escrita = /\b(api|client|http|ml|axios)\.(post|put|patch|delete)\s*\(/i;
   const achados: string[] = [];
   for (const f of arquivos) {
     const src = readFileSync(f, 'utf8');

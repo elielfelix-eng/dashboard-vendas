@@ -256,16 +256,16 @@
 
 ## Phase 8: Polish & Cross-Cutting Concerns
 
-- [ ] T037 [P] Atualizar `.claude/skills/dashboard-mercado-livre-brinde-do-bem/SKILL.md` (e `regras-de-negocio.md` se couber) com a seção "Ads e Orçamento", contendo:
+- [X] T037 [P] Atualizar `.claude/skills/dashboard-mercado-livre-brinde-do-bem/SKILL.md` (e `regras-de-negocio.md` se couber) com a seção "Ads e Orçamento", contendo:
   - fontes do gasto;
   - regra do equilíbrio;
   - sugestões e distribuição;
   - ordem das migrations 0018 → 0019;
   - permissões;
   - prazo de conferência de 31/01/2027.
-- [ ] T038 Rodar `npm run typecheck`, `npm run test:sql`, `npm run test:web`, `npm run build` (com as variáveis públicas de exemplo) e `npm audit`; corrigir o que falhar.
+- [X] T038 Rodar `npm run typecheck`, `npm run test:sql`, `npm run test:web`, `npm run build` (com as variáveis públicas de exemplo) e `npm audit`; corrigir o que falhar.
 - [ ] T039 Medir as funções `ads_*` com o papel `authenticated` num banco com 90 dias de dados de teste (ou explicar a medição no Supabase para o dono); ajustar índices se alguma passar de 8 s (SC-007).
-- [ ] T040 Revisão geral do ramo (requisito + qualidade + segurança), antes de pedir ao dono autorização para juntar ao `main`.
+- [X] T040 Revisão geral do ramo (requisito + qualidade + segurança), antes de pedir ao dono autorização para juntar ao `main`.
 - [ ] T041 Guia do dono (passos em português simples): aplicar 0018 e 0019, rodar a sincronização e executar os cenários 1, 2 e 3 do quickstart. **O ramo só é juntado ao `main` com o cenário 1 conferido (T001a, FR-024).**
 
 ---

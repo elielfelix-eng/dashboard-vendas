@@ -19,7 +19,8 @@ export interface AdsModelo {
   sugestao: SugestaoAds | null; motivo: string | null; pausado: boolean | null; campanha_id: string | null; modo: string | null;
 }
 export interface AdsCampanha {
-  campanha_id: string; nome: string; status: string | null; automatica: boolean | null;
+  // campanha_id/nome nulos = linha final "não atribuído a campanha"
+  campanha_id: string | null; nome: string | null; status: string | null; automatica: boolean | null;
   orcamento_diario: number | null; roas_target: number | null; acos_equivalente: number | null;
   investimento: number; vendas_ads: number; acos: number | null; roas: number | null;
   modelos: number | null; modo: string | null;

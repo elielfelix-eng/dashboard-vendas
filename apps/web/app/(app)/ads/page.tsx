@@ -173,7 +173,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
     .filter((c) => c.campanha_id != null)
     .sort((x, y) => y.investimento - x.investimento)
     .map((c) => ({
-      nome: c.nome, status: c.status ? (STATUS[c.status] ?? c.status) : '—', automatica: c.automatica == null ? '—' : c.automatica ? 'Sim' : 'Não',
+      nome: c.nome ?? c.campanha_id ?? '—', status: c.status ? (STATUS[c.status] ?? c.status) : '—', automatica: c.automatica == null ? '—' : c.automatica ? 'Sim' : 'Não',
       orcamento_diario: c.orcamento_diario, roas_target: c.roas_target, acos_equivalente: c.acos_equivalente, investimento: c.investimento,
       vendas_ads: c.vendas_ads, acos: c.acos, roas: c.roas, modelos: c.modelos, modo: rotuloModo(c.modo),
     }));

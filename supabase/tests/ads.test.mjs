@@ -226,6 +226,220 @@ eq('reexecucao nao duplica sementes', await rows(`select (select count(*)::int f
   (select count(*)::int from core.role_permissions where permission in ('ads','editar_ads')) as r,
   (select count(*)::int from pg_policies where schemaname in ('core','mkt') and tablename in ('ads_anuncios','orcamento_ads','parametros_ads','ads_modo')) as pol`),
   [{ p: 2, r: 10, pol: 6 }]);
+await db.exec(`update core.role_permissions set allowed = false where role = 'comercial' and permission = 'editar_ads'`);
+
+// =====================================================================
+// US1 (T009-T012): ads_resumo, ads_serie, ads_modelos, ads_campanhas
+// Cenario novo (outubro/2026, ML). Primeiro dia da API de campanhas: 05/10.
+//   Investimento (dash_ads_periodo) = fatura ligada a pedido (12 + 10) + fatura sem pedido antes da API (7) + API (180) = 209
+//   Por anuncio (ads_metrics_daily): AAA11 90, BBB22 20, CCC33 25 (sem custo, pausado), sem modelo 5 -> nao atribuido = 209 - 135 = 74
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee');
+await db.exec(`
+delete from mkt.order_items; delete from mkt.orders; delete from mkt.item_variations; delete from mkt.items;
+delete from mkt.ads_metrics_daily; delete from mkt.ads_campaigns; delete from mkt.ads_anuncios; delete from mkt.ads_campaign_daily;
+delete from mkt.billing_details; delete from map.modelo_de_para; delete from core.ads_modo; delete from erp.cost_tiers;
+insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, source) values
+ ('AAA11',1,49,10,'2026-01-01','erp'), ('BBB22',1,49,5,'2026-01-01','erp'), ('DDD44',1,49,1,'2026-01-01','erp');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','P1','paid','2026-10-10 12:00+00','2026-10-10 12:00+00',200,'{}'),
+ ('mercadolivre','P2','paid','2026-10-12 12:00+00','2026-10-12 12:00+00',100,'{}'),
+ ('mercadolivre','P3','paid','2026-10-15 12:00+00','2026-10-15 12:00+00',50,'{}'),
+ ('mercadolivre','P4','paid','2026-10-20 12:00+00','2026-10-20 12:00+00',30,'{}'),
+ ('mercadolivre','P5','paid','2026-09-20 12:00+00','2026-09-20 12:00+00',70,'{}'),
+ ('brindedobem','B1','paid','2026-10-10 12:00+00','2026-10-10 12:00+00',5000,'{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','P1',1,'MLB1','AAA11-AZU','Produto A',2,100),
+ ('mercadolivre','P2',1,'MLB1','AAA11-AZU','Produto A',1,60),
+ ('mercadolivre','P2',2,'MLB2','BBB22-AZU','Produto B',1,40),
+ ('mercadolivre','P3',1,'MLB3','CCC33-AZU','Produto C',1,50),
+ ('mercadolivre','P4',1,'MLB4','DDD44-AZU','Produto D',1,30),
+ ('mercadolivre','P5',1,'MLB5','EEE55-AZU','Produto E',1,70),
+ ('brindedobem','B1',1,'BDB1','BDB01-AZU','Brinde',1,5000);
+insert into mkt.items (channel, item_id, title, sku) values
+ ('mercadolivre','MLB1','Anuncio A',null), ('mercadolivre','MLB2','Anuncio B',null), ('mercadolivre','MLB3','Anuncio C',null),
+ ('mercadolivre','MLB9','Anuncio sem SKU',null), ('shopee','SH1','Anuncio Shopee','SHP01-X'), ('brindedobem','BDB1','Brinde','BDB01-AZU');
+insert into mkt.billing_details (period_key, detail_id, created_at, detail_type, code, amount, order_id) values
+ ('2026-10','f1','2026-10-11 10:00+00','CHARGE','CVVML',20,'P1'),
+ ('2026-10','f2','2026-10-11 10:00+00','CHARGE','PADS',12,'P1'),
+ ('2026-10','f3','2026-10-13 10:00+00','CHARGE','PADS',10,'P2'),
+ ('2026-10','f4','2026-10-04 06:00+00','CHARGE','PADS',7,null),
+ ('2026-10','f5','2026-10-22 06:00+00','CHARGE','PADS',99,null),
+ ('2026-10','f6','2026-10-08 06:00+00','CHARGE','CDLIT',8,null),
+ ('2026-09','f7','2026-09-16 06:00+00','CHARGE','PADS',15,null);
+insert into mkt.ads_campaign_daily (channel, campaign_id, day, cost) values
+ ('mercadolivre','c1','2026-10-05',100), ('mercadolivre','c1','2026-10-20',50), ('mercadolivre','c2','2026-10-10',30);
+insert into mkt.ads_campaigns (channel, campaign_id, name, status, budget, roas_target, automatica) values
+ ('mercadolivre','c1','Campanha 1','active',40,4,false),
+ ('mercadolivre','c3','Campanha 3','active',10,null,true),
+ ('mercadolivre','c8','Antiga','paused',10,null,false);
+insert into mkt.ads_metrics_daily (channel, item_id, day, campaign_id, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units) values
+ ('mercadolivre','MLB1','2026-10-05','c1',1000,50,60,300,0,3,0,0),
+ ('mercadolivre','MLB1','2026-10-20','c1',500,20,30,0,100,0,1,0),
+ ('mercadolivre','MLB2','2026-10-06','c1',400,10,20,40,0,1,0,0),
+ ('mercadolivre','MLB3','2026-10-10','c2',200,8,25,0,0,0,0,0),
+ ('mercadolivre','MLB9','2026-10-10','c2',100,2,5,0,0,0,0,0),
+ ('brindedobem','BDB1','2026-10-10',null,9,9,1000,900,0,9,0,0),
+ ('shopee','SH1','2026-10-09',null,10,1,5,0,0,0,0,0);
+insert into mkt.ads_anuncios (channel, item_id, campaign_id, status) values
+ ('mercadolivre','MLB1','c1','active'), ('mercadolivre','MLB2','c1','active'), ('mercadolivre','MLB3','c2','paused');
+insert into core.ads_modo (channel, tipo, chave, modo) values
+ ('mercadolivre','modelo','AAA11','automatico'), ('mercadolivre','campanha','c1','automatico');
+`);
+const OUT = ['2026-10-01', '2026-10-31'];
+const RES = `select investimento::float, vendas_ads::float, roas::float, acos::float, tacos::float, pct_vendas_ads::float,
+  vendas_brutas_canal::float, nao_atribuido::float, tem_detalhe from analytics.ads_resumo($1, $2::date, $3::date)`;
+const resumo = (c, de = OUT[0], ate = OUT[1]) => rows(RES, [c, de, ate]);
+const adsPer = (c, de = OUT[0], ate = OUT[1]) => val(`select analytics.dash_ads_periodo('${c}', '${de}', '${ate}')::float`);
+
+// ---------------- T009: ads_resumo ----------------
+eq('pre: dash_ads_periodo de outubro', await adsPer('mercadolivre'), 209);
+eq('resumo ML outubro', await resumo('mercadolivre'), [{
+  investimento: 209, vendas_ads: 440, roas: 2.11, acos: 47.5, tacos: 55, pct_vendas_ads: 115.79,
+  vendas_brutas_canal: 380, nao_atribuido: 74, tem_detalhe: true,
+}]);
+eq('resumo: investimento = dash_ads_periodo', (await resumo('mercadolivre'))[0].investimento, await adsPer('mercadolivre'));
+eq('resumo: vendas brutas = dash_resumo', (await resumo('mercadolivre'))[0].vendas_brutas_canal,
+  await val(`select vendas_brutas::float from analytics.dash_resumo('mercadolivre', '2026-10-01', '2026-10-31')`));
+eq('resumo: periodo antes da API (so fatura) = dash_ads_periodo, sem detalhe', await resumo('mercadolivre', '2026-09-01', '2026-09-30'), [{
+  investimento: 15, vendas_ads: 0, roas: 0, acos: null, tacos: 21.43, pct_vendas_ads: 0,
+  vendas_brutas_canal: 70, nao_atribuido: 15, tem_detalhe: false,
+}]);
+eq('resumo: periodo vazio', await resumo('mercadolivre', '2020-01-01', '2020-01-31'), [{
+  investimento: 0, vendas_ads: 0, roas: null, acos: null, tacos: null, pct_vendas_ads: null,
+  vendas_brutas_canal: 0, nao_atribuido: 0, tem_detalhe: false,
+}]);
+eq('resumo consolidado: sem o canal brindedobem (FR-010)', await resumo('consolidado'), [{
+  investimento: 209, vendas_ads: 440, roas: 2.11, acos: 47.5, tacos: 55, pct_vendas_ads: 115.79,
+  vendas_brutas_canal: 380, nao_atribuido: 69, tem_detalhe: true,
+}]);
+eq('resumo shopee: so o shopee (sem fonte conferida ainda)', (await resumo('shopee')).map((r) => [r.investimento, r.vendas_ads, r.vendas_brutas_canal, r.tem_detalhe]),
+  [[0, 0, 0, true]]);
+await perfil('comercial');
+eq('resumo comercial (sem custos, como authenticated): mesmo investimento', await comoAuth(() => resumo('mercadolivre')), [{
+  investimento: 209, vendas_ads: 440, roas: 2.11, acos: 47.5, tacos: 55, pct_vendas_ads: 115.79,
+  vendas_brutas_canal: 380, nao_atribuido: 74, tem_detalhe: true,
+}]);
+await perfil('visualizador');
+eq('resumo sem a permissao ads: uma linha zerada', await comoAuth(() => resumo('mercadolivre')), [{
+  investimento: 0, vendas_ads: 0, roas: null, acos: null, tacos: null, pct_vendas_ads: null,
+  vendas_brutas_canal: 0, nao_atribuido: 0, tem_detalhe: false,
+}]);
+await perfil('gestor'); await canais('crm');
+eq('resumo sem o canal: zerado', (await comoAuth(() => resumo('mercadolivre'))).map((r) => [r.investimento, r.vendas_ads, r.vendas_brutas_canal, r.tem_detalhe]),
+  [[0, 0, 0, false]]);
+await perfil('admin'); await canais('mercadolivre,shopee');
+
+// ---------------- T010: ads_serie ----------------
+const SER = `select dia::text, investimento::float, vendas_ads::float from analytics.ads_serie($1, $2::date, $3::date) order by dia`;
+const serie = await rows(SER, ['mercadolivre', ...OUT]);
+eq('serie: um dia por linha', serie.length, 31);
+eq('serie: soma diaria = investimento do resumo', serie.reduce((s, d) => s + d.investimento, 0), 209);
+eq('serie: dias com investimento (fatura sem pedido 03/10, API, fatura ligada a pedido pela data da venda)',
+  serie.filter((d) => d.investimento).map((d) => [d.dia, d.investimento]),
+  [['2026-10-03', 7], ['2026-10-05', 100], ['2026-10-10', 42], ['2026-10-12', 10], ['2026-10-20', 50]]);
+eq('serie: vendas por Ads por dia', serie.filter((d) => d.vendas_ads).map((d) => [d.dia, d.vendas_ads]),
+  [['2026-10-05', 300], ['2026-10-06', 40], ['2026-10-20', 100]]);
+const sub = await rows(SER, ['mercadolivre', '2026-10-08', '2026-10-15']);
+eq('serie: soma de um trecho = dash_ads_periodo do trecho', sub.reduce((s, d) => s + d.investimento, 0), await adsPer('mercadolivre', '2026-10-08', '2026-10-15'));
+eq('serie consolidada: sem brindedobem', (await rows(SER, ['consolidado', ...OUT])).reduce((s, d) => s + d.vendas_ads, 0), 440);
+await perfil('comercial');
+eq('serie comercial (sem custos): mesma soma', (await comoAuth(() => rows(SER, ['mercadolivre', ...OUT]))).reduce((s, d) => s + d.investimento, 0), 209);
+await perfil('visualizador');
+eq('serie sem ads: nada', await comoAuth(() => rows(SER, ['mercadolivre', ...OUT])), []);
+await perfil('gestor'); await canais('shopee');
+eq('serie: canal ML nao liberado nao mostra investimento nem vendas', (await comoAuth(() => rows(SER, ['consolidado', ...OUT])))
+  .reduce((s, d) => s + d.investimento + d.vendas_ads, 0), 0);
+await perfil('admin'); await canais('mercadolivre,shopee');
+eq('serie e definer so com agregados (excecao documentada)', await val(`select prosecdef from pg_proc where proname = 'ads_serie'`), true);
+
+// ---------------- T011: ads_modelos ----------------
+const MOD = `select modelo, produto, investimento::float as inv, impressoes::float as imp, cliques::float as cli, ctr::float, cpc::float,
+  conversao::float as conv, vendas_ads::float as vend, unidades_ads::float as un, acos::float, acos_equilibrio::float as eqb,
+  lucro_pos_ads::float as lucro, contribuicao_pct::float as cpct, sugestao, motivo, pausado, campanha_id, modo
+  from analytics.ads_modelos($1, $2::date, $3::date)`;
+const modelos = (c, de = OUT[0], ate = OUT[1]) => rows(MOD, [c, de, ate]);
+const mo = await modelos('mercadolivre');
+eq('modelos: universo (Ads no periodo ou venda paga em 30 dias), ordem por investimento, nao atribuido por ultimo',
+  mo.map((m) => m.modelo), ['AAA11', 'CCC33', 'BBB22', 'DDD44', null]);
+const A = mo.find((m) => m.modelo === 'AAA11');
+eq('AAA11: metricas, CTR, CPC, conversao, ACOS', { inv: A.inv, imp: A.imp, cli: A.cli, ctr: A.ctr, cpc: A.cpc, conv: A.conv, vend: A.vend, un: A.un, acos: A.acos },
+  { inv: 90, imp: 1500, cli: 70, ctr: 4.67, cpc: 1.29, conv: 5.71, vend: 400, un: 4, acos: 22.5 });
+// Contribuicao antes do Ads sem nenhum Ads: 260 - 30 (custo) - 20 (comissao) - 8 x 260/380 (Seguidores rateado) = 204,53
+eq('AAA11: ACOS de equilibrio e lucro (contribuicao antes do Ads)', { eqb: A.eqb, lucro: A.lucro, cpct: A.cpct }, { eqb: 78.66, lucro: 114.53, cpct: 22.53 });
+const dm = await rows(`select modelo, receita::float, contribuicao::float from analytics.dash_modelos('mercadolivre', '2026-10-01', '2026-10-31')`);
+const adsCp = await val(`select sum(valor)::float from analytics.dash_custos_periodo('mercadolivre', '2026-10-01', '2026-10-31') where categoria = 'product_ads'`);
+const recTot = dm.reduce((s, m) => s + m.receita, 0);
+const r2 = (mod, fat) => { const d = dm.find((m) => m.modelo === mod); return Math.round((d.contribuicao + adsCp * d.receita / recTot + fat) / d.receita * 10000) / 100; };
+eq('R2 sem dupla contagem: = (contribuicao de dash_modelos + Ads rateado + Ads de fatura ligada a pedido) / receita',
+  [A.eqb, mo.find((m) => m.modelo === 'BBB22').eqb], [r2('AAA11', 12 + 6), r2('BBB22', 4)]);
+eq('BBB22: pedido com 2 modelos (Ads da fatura repartido pelo valor do item)', (({ inv, ctr, cpc, conv, acos, eqb, lucro, cpct, pausado, campanha_id, modo }) =>
+  ({ inv, ctr, cpc, conv, acos, eqb, lucro, cpct, pausado, campanha_id, modo }))(mo.find((m) => m.modelo === 'BBB22')),
+  { inv: 20, ctr: 2.5, cpc: 2, conv: 10, acos: 50, eqb: 85.39, lucro: 14.16, cpct: 26.18, pausado: false, campanha_id: 'c1', modo: 'manual' });
+eq('CCC33: modelo sem custo -> equilibrio/lucro/margem nulos; pausado; ACOS sem venda nulo', (({ inv, cpc, conv, vend, acos, eqb, lucro, cpct, pausado, campanha_id }) =>
+  ({ inv, cpc, conv, vend, acos, eqb, lucro, cpct, pausado, campanha_id }))(mo.find((m) => m.modelo === 'CCC33')),
+  { inv: 25, cpc: 3.13, conv: 0, vend: 0, acos: null, eqb: null, lucro: null, cpct: null, pausado: true, campanha_id: 'c2' });
+eq('DDD44: vendido sem Ads aparece zerado', (({ inv, imp, cli, ctr, cpc, conv, vend, un, acos, eqb, lucro, pausado, campanha_id }) =>
+  ({ inv, imp, cli, ctr, cpc, conv, vend, un, acos, eqb, lucro, pausado, campanha_id }))(mo.find((m) => m.modelo === 'DDD44')),
+  { inv: 0, imp: 0, cli: 0, ctr: null, cpc: null, conv: null, vend: 0, un: 0, acos: null, eqb: 94.56, lucro: 28.37, pausado: false, campanha_id: null });
+eq('AAA11: modo automatico, campanha c1, produto', [A.modo, A.campanha_id, A.produto, A.pausado], ['automatico', 'c1', 'Produto A', false]);
+eq('sugestao e motivo ainda nulos', mo.every((m) => m.sugestao === null && m.motivo === null), true);
+const nulo = mo.find((m) => m.modelo === null);
+eq('linha nao atribuido = investimento do resumo - modelos (inclui o anuncio sem modelo)', nulo.inv, 74);
+eq('reconciliacao: soma da tabela = cartao', mo.reduce((s, m) => s + m.inv, 0), (await resumo('mercadolivre'))[0].investimento);
+eq('linha nao atribuido = nao_atribuido do resumo', nulo.inv, (await resumo('mercadolivre'))[0].nao_atribuido);
+eq('linha nao atribuido sem equilibrio/lucro', [nulo.eqb, nulo.lucro, nulo.cpct, nulo.pausado], [null, null, null, false]);
+eq('metricas = ads_metricas_modelo', mo.filter((m) => m.modelo && m.inv).map((m) => [m.modelo, m.inv, m.imp, m.vend]),
+  (await rows(`select modelo, investimento::float as i, impressoes::float as p, vendas_ads::float as v from analytics.ads_metricas_modelo('mercadolivre', '2026-10-01', '2026-10-31')
+     where modelo is not null order by investimento desc, modelo`)).map((m) => [m.modelo, m.i, m.p, m.v]));
+const cons = await modelos('consolidado');
+eq('consolidado: shopee entra, brindedobem nao (FR-010)', cons.map((m) => [m.modelo, m.inv]),
+  [['AAA11', 90], ['CCC33', 25], ['BBB22', 20], ['SHP01', 5], ['DDD44', 0], [null, 69]]);
+eq('consolidado: reconciliacao', cons.reduce((s, m) => s + m.inv, 0), (await resumo('consolidado'))[0].investimento);
+eq('universo: venda so fora da janela de 30 dias nao entra', (await modelos('mercadolivre', '2026-10-01', '2026-10-31')).some((m) => m.modelo === 'EEE55'), false);
+eq('universo: venda paga na janela de 30 dias ate p_ate entra', (await modelos('mercadolivre', '2026-10-01', '2026-10-10')).map((m) => m.modelo).includes('EEE55'), true);
+await db.exec(`update mkt.ads_campaigns set status = 'paused' where campaign_id = 'c1'`);
+eq('pausado: campanha pausada pausa os modelos dela', (await modelos('mercadolivre')).filter((m) => m.pausado).map((m) => m.modelo), ['AAA11', 'CCC33', 'BBB22']);
+await db.exec(`update mkt.ads_campaigns set status = 'active' where campaign_id = 'c1'`);
+
+await perfil('comercial');
+const moCom = await comoAuth(() => modelos('mercadolivre'));
+eq('FR-009: comercial (authenticated) sem equilibrio/lucro/margem', moCom.map((m) => [m.modelo, m.eqb, m.lucro, m.cpct]),
+  [['AAA11', null, null, null], ['CCC33', null, null, null], ['BBB22', null, null, null], ['DDD44', null, null, null], [null, null, null, null]]);
+eq('FR-009: comercial ve investimento e metricas iguais', moCom.map((m) => [m.modelo, m.inv, m.acos]), mo.map((m) => [m.modelo, m.inv, m.acos]));
+await perfil('visualizador');
+eq('modelos sem ads: nada', await comoAuth(() => modelos('mercadolivre')), []);
+await perfil('gestor'); await canais('crm');
+eq('modelos: canal nao liberado -> nada', await comoAuth(() => modelos('mercadolivre')), []);
+eq('modelos: consolidado sem canais -> nada', await comoAuth(() => modelos('consolidado')), []);
+await canais('shopee');
+eq('modelos: ML nao liberado -> nada no ML', (await comoAuth(() => modelos('mercadolivre'))), []);
+eq('modelos: consolidado so com o canal liberado (shopee; cartao 0 -> linha nula negativa reconcilia)',
+  (await comoAuth(() => modelos('consolidado'))).map((m) => [m.modelo, m.inv]), [['SHP01', 5], [null, -5]]);
+await perfil('admin'); await canais('mercadolivre,shopee');
+
+// ---------------- T012: ads_campanhas ----------------
+const CAMP = `select campanha_id, nome, status, automatica, orcamento_diario::float as orc, roas_target::float as roas_obj,
+  acos_equivalente::float as acos_eq, investimento::float as inv, vendas_ads::float as vend, acos::float, roas::float, modelos, modo
+  from analytics.ads_campanhas($1, $2::date, $3::date)`;
+eq('campanhas: agregacao, atributos, ACOS equivalente, nome = id quando sem cadastro, numero de modelos', await rows(CAMP, ['mercadolivre', ...OUT]), [
+  { campanha_id: 'c1', nome: 'Campanha 1', status: 'active', automatica: false, orc: 40, roas_obj: 4, acos_eq: 25, inv: 150, vend: 440, acos: 34.09, roas: 2.93, modelos: 2, modo: 'automatico' },
+  { campanha_id: 'c2', nome: 'c2', status: null, automatica: null, orc: null, roas_obj: null, acos_eq: null, inv: 30, vend: 0, acos: null, roas: 0, modelos: 1, modo: 'manual' },
+  { campanha_id: 'c3', nome: 'Campanha 3', status: 'active', automatica: true, orc: 10, roas_obj: null, acos_eq: null, inv: 0, vend: 0, acos: null, roas: null, modelos: 0, modo: 'manual' },
+]);
+eq('campanhas consolidado: sem brindedobem', (await rows(CAMP, ['consolidado', ...OUT])).map((c) => c.campanha_id), ['c1', 'c2', 'c3']);
+await perfil('comercial');
+eq('campanhas: comercial ve', (await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT]))).map((c) => [c.campanha_id, c.inv]), [['c1', 150], ['c2', 30], ['c3', 0]]);
+await perfil('visualizador');
+eq('campanhas sem ads: nada', await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT])), []);
+await perfil('gestor'); await canais('crm');
+eq('campanhas: canal nao liberado -> nada', await comoAuth(() => rows(CAMP, ['mercadolivre', ...OUT])), []);
+await perfil('admin'); await canais('mercadolivre,shopee');
+
+eq('funcoes da tela: invoker (exceto ads_serie)', await rows(`select proname, prosecdef from pg_proc where proname in ('ads_resumo','ads_modelos','ads_campanhas') order by proname`),
+  [{ proname: 'ads_campanhas', prosecdef: false }, { proname: 'ads_modelos', prosecdef: false }, { proname: 'ads_resumo', prosecdef: false }]);
+await db.exec(mig('0019_ads_funcoes.sql'));
+eq('0019 reexecutavel com as funcoes da tela', (await resumo('mercadolivre'))[0].investimento, 209);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

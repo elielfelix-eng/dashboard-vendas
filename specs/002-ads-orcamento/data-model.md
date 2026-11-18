@@ -59,6 +59,7 @@ Seed: (mercadolivre, 2026-11-01, 5000), (shopee, 2026-11-01, 5000).
 | teto_fator | numeric | 2 | FR-018 passo 4 |
 | alerta_sobra_pct | numeric | 80 | FR-017 |
 
+Seed dos limites: vigentes desde 2025-01-01 (um por canal, com os valores iniciais acima).
 Resolução: o parâmetro válido em uma data `d` é a linha com o maior `vigente_desde <= d`.
 RLS: leitura `authenticated` nas duas. Escrita de `core.orcamento_ads`: quem tem `(select core.has_perm('editar_ads'))` (tela Ads, aba Orçamento). Escrita de `core.parametros_ads`: só `core.my_role() = 'admin'` (Configurações → Parâmetros).
 

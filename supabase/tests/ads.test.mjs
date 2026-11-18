@@ -48,7 +48,7 @@ eq('parametros iniciais (ml)', (await rows(`select vigente_desde::text as d, pau
     teste_reserva_pct::float, teste_max_modelos, reduzir_fator::float, teto_fator::float, alerta_sobra_pct::float
   from core.parametros_ads where channel = 'mercadolivre'`)),
   [{
-    d: '2026-11-01', pausar_gasto_min: 50, pausar_cliques_min: 100, min_dias_dados: 7, revisar_cliques_min: 100,
+    d: '2025-01-01', pausar_gasto_min: 50, pausar_cliques_min: 100, min_dias_dados: 7, revisar_cliques_min: 100,
     revisar_conversao_max_pct: 1, escalar_folga_pp: 10, escalar_unidades_min: 3, testar_margem_min_pct: 20, testar_unidades_min: 3,
     teste_reserva_pct: 10, teste_max_modelos: 5, reduzir_fator: 0.7, teto_fator: 2, alerta_sobra_pct: 80,
   }]);
@@ -207,9 +207,10 @@ await perfil('admin');
 // ads_parametros: a linha valida na data
 await db.exec(`insert into core.parametros_ads (channel, vigente_desde, teto_fator) values ('mercadolivre', '2027-06-01', 4)`);
 const PAR = (d) => rows(`select vigente_desde::text as d, teto_fator::float as t from analytics.ads_parametros('mercadolivre', '${d}')`);
-eq('parametros: antes da primeira vigencia', await PAR('2026-10-31'), []);
-eq('parametros: primeira vigencia', await PAR('2026-11-01'), [{ d: '2026-11-01', t: 2 }]);
-eq('parametros: ainda a primeira', await PAR('2027-05-31'), [{ d: '2026-11-01', t: 2 }]);
+eq('parametros: antes da primeira vigencia', await PAR('2024-12-31'), []);
+eq('parametros: primeira vigencia (semente desde 2025-01-01)', await PAR('2025-01-01'), [{ d: '2025-01-01', t: 2 }]);
+eq('parametros: periodo historico (out/2026) tem limites', await PAR('2026-10-31'), [{ d: '2025-01-01', t: 2 }]);
+eq('parametros: ainda a primeira', await PAR('2027-05-31'), [{ d: '2025-01-01', t: 2 }]);
 eq('parametros: segunda vigencia no dia', await PAR('2027-06-01'), [{ d: '2027-06-01', t: 4 }]);
 eq('parametros: depois da ultima', await PAR('2030-01-01'), [{ d: '2027-06-01', t: 4 }]);
 eq('parametros: autenticado le', (await comoAuth(() => rows(`select 1 from analytics.ads_parametros('shopee', '2026-12-01')`))).length, 1);
@@ -222,7 +223,7 @@ await db.exec(mig('0018_ads_tabelas.sql'));
 await db.exec(mig('0019_ads_funcoes.sql'));
 eq('reexecucao preserva orcamento alterado', await val(`select valor_mensal::float from core.orcamento_ads where channel = 'shopee' and vigente_desde = '2026-11-01'`), 6000);
 eq('reexecucao preserva permissao alterada', await val(`select allowed from core.role_permissions where role = 'comercial' and permission = 'editar_ads'`), true);
-eq('reexecucao nao duplica sementes', await rows(`select (select count(*)::int from core.parametros_ads where vigente_desde = '2026-11-01') as p,
+eq('reexecucao nao duplica sementes', await rows(`select (select count(*)::int from core.parametros_ads where vigente_desde = '2025-01-01') as p,
   (select count(*)::int from core.role_permissions where permission in ('ads','editar_ads')) as r,
   (select count(*)::int from pg_policies where schemaname in ('core','mkt') and tablename in ('ads_anuncios','orcamento_ads','parametros_ads','ads_modo')) as pol`),
   [{ p: 2, r: 10, pol: 6 }]);
@@ -383,8 +384,8 @@ eq('DDD44: vendido sem Ads aparece zerado', (({ inv, imp, cli, ctr, cpc, conv, v
   ({ inv, imp, cli, ctr, cpc, conv, vend, un, acos, eqb, lucro, pausado, campanha_id }))(mo.find((m) => m.modelo === 'DDD44')),
   { inv: 0, imp: 0, cli: 0, ctr: null, cpc: null, conv: null, vend: 0, un: 0, acos: null, eqb: 94.56, lucro: 28.37, pausado: false, campanha_id: null });
 eq('AAA11: modo automatico, campanha c1, produto', [A.modo, A.campanha_id, A.produto, A.pausado], ['automatico', 'c1', 'Produto A', false]);
-// Outubro e antes da primeira vigencia (01/11/2026): vale a primeira linha de core.parametros_ads
-eq('sugestao antes da primeira vigencia usa a primeira linha de parametros; pausado e nao atribuido sem sugestao',
+// Outubro/2026: limites da semente (vigentes desde 2025-01-01)
+eq('sugestao em outubro com os limites da semente; pausado e nao atribuido sem sugestao',
   mo.map((m) => [m.modelo, m.sugestao]), [['AAA11', 'escalar'], ['CCC33', null], ['BBB22', 'manter'], ['DDD44', 'manter'], [null, null]]);
 eq('linha nao atribuido sem motivo', mo.find((m) => m.modelo === null).motivo, null);
 const nulo = mo.find((m) => m.modelo === null);
@@ -483,7 +484,7 @@ eq('0019 reexecutavel com as funcoes da tela', (await resumo('mercadolivre'))[0]
 
 // =====================================================================
 // US2 (T019): sugestoes em ads_modelos (janela de 30 dias ate p_ate, research R4)
-// Cenario novo (fevereiro/2027, ML; limites da vigencia de 01/11/2026: 50 / 100 / 7 / 100 / 1% / 10 pp / 3 / 20% / 3).
+// Cenario novo (fevereiro/2027, ML; limites da semente, vigentes desde 2025-01-01: 50 / 100 / 7 / 100 / 1% / 10 pp / 3 / 20% / 3).
 //   Equilibrio (contribuicao antes do Ads / receita): RED02 30%, REV03 50%, ESC04 30%, MAN08 30%, TES05 25%; SCU09 sem custo.
 //   Product Ads da API (c9, 100) e rateado em dash_modelos e devolvido no equilibrio (R2): nao muda os numeros acima.
 // =====================================================================
@@ -564,8 +565,9 @@ eq('cenario 7: campanha pausada -> pausado e sem sugestao', (await modelos('merc
   [[true, null, null]]);
 await db.exec(`update mkt.ads_campaigns set status = 'active' where campaign_id = 'c9'`);
 eq('poucos dias com dados: nao pausa (R$ 60 em 3 dias) -> Manter', [mf.find((m) => m.modelo === 'POU10').sugestao, motivo('POU10')],
-  ['manter', 'investiu R$ 60,00 em 30 dias e vendeu 0 unidades por Ads']);
-eq('Manter: motivo com os numeros', motivo('MAN08'), 'ACOS 25,00% dentro do equilíbrio 30,00%');
+  ['manter', 'gastou R$ 60,00 em 30 dias sem venda, mas só 3 dias com dados; mínimo 7']);
+eq('Manter: motivo diz por que (sem folga para escalar)', motivo('MAN08'), 'ACOS 25,00% dentro do equilíbrio 30,00%, sem folga de 10,00 pontos para escalar');
+eq('Manter sem custo: motivo', motivo('SCU09'), 'sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ 40,00 em 30 dias e vendeu 1 unidades por Ads');
 eq('modelo sem custo: so Pausar/Revisar/Manter (ACOS 40 nao vira Reduzir)', [mf.find((m) => m.modelo === 'SCU09').sugestao, /sem custo/.test(motivo('SCU09'))], ['manter', true]);
 eq('linha nao atribuido sem sugestao', mf.filter((m) => m.modelo === null).map((m) => [m.sugestao, m.motivo]), [[null, null]]);
 
@@ -601,11 +603,15 @@ eq('limites: nova vigencia muda o resultado (gasto minimo 70, unidades para esca
   PAU01: 'manter', RED02: 'reduzir', REV03: 'revisar', ESC04: 'manter', TES05: 'testar', PRI06: 'pausar',
   PSD07: null, MAN08: 'manter', SCU09: 'manter', POU10: 'manter',
 }));
+eq('Manter: Escalar barrado pelas unidades diz o minimo', (await modelos('mercadolivre', ...FEV)).filter((m) => m.modelo === 'ESC04').map((m) => [m.sugestao, m.motivo]),
+  [['manter', 'ACOS 18,00% bem abaixo do equilíbrio 30,00%, mas só 5 unidades vendidas por Ads; mínimo 6']]);
 eq('limites: p_ate antes da nova vigencia usa a anterior', (await rows(SUG, ['mercadolivre', '2027-02-19'])).filter((s) => ['PAU01', 'ESC04'].includes(s.modelo)).map((s) => [s.modelo, s.sugestao]),
   [['ESC04', 'escalar'], ['PAU01', 'pausar']]);
 await db.exec(`delete from core.parametros_ads where channel = 'mercadolivre' and vigente_desde = '2027-02-20'`);
 await db.exec(`insert into core.parametros_ads (channel, vigente_desde, revisar_conversao_max_pct, testar_unidades_min) values ('mercadolivre', '2027-02-20', 0.4, 5)`);
 eq('limites: conversao maxima 0,4% e 5 unidades para testar', [(await sug('mercadolivre')).REV03, (await sug('mercadolivre')).TES05], ['manter', 'manter']);
+eq('Manter: Testar barrado pelas unidades diz o minimo', (await modelos('mercadolivre', ...FEV)).filter((m) => m.modelo === 'TES05').map((m) => m.motivo),
+  ['sem Ads em 30 dias: margem 25,00%, mas só 4 unidades vendidas; mínimo 5 para testar']);
 await db.exec(`delete from core.parametros_ads where channel = 'mercadolivre' and vigente_desde = '2027-02-20'`);
 
 // Consolidado: limites do canal de cada linha
@@ -633,6 +639,67 @@ eq('gestor (authenticated, com custos): mesmas sugestoes do admin', await comoAu
 await perfil('visualizador');
 eq('ads_sugestoes sem a permissao ads: nada', await comoAuth(() => rows(SUG, ['mercadolivre', FEV[1]])), []);
 await perfil('admin');
+// Sem linha de limites vigente em p_ate (uma so regra de resolucao: ads_parametros): sugestao nula
+await db.exec(`update core.parametros_ads set vigente_desde = '2027-03-15' where channel = 'mercadolivre' and vigente_desde = '2025-01-01'`);
+eq('sem limites vigentes em p_ate: sugestao e motivo nulos', (await modelos('mercadolivre', ...FEV)).every((m) => m.sugestao === null && m.motivo === null), true);
+await db.exec(`update core.parametros_ads set vigente_desde = '2025-01-01' where channel = 'mercadolivre' and vigente_desde = '2027-03-15'`);
+eq('limites restaurados', (await sug('mercadolivre')).PAU01, 'pausar');
+
+// Limites exatos e sobreposicao de regras (abril/2027, janela 01-30/04; limites da semente)
+const metABR = [
+  ...dias('2027-04-01', 7).map((d, k) => met('mercadolivre', 'MLN1', d, 1, k < 6 ? 7 : 8)),     // BND01: gasto 50 em 7 dias
+  ...dias('2027-04-01', 7).map((d, k) => met('mercadolivre', 'MLN2', d, k < 6 ? 14 : 16, 1)),   // BND02: 100 cliques em 7 dias
+  met('mercadolivre', 'MLN3', '2027-04-10', 100, 10, 50, 1),                                    // BND03: conversao 1,00
+  met('mercadolivre', 'MLN4', '2027-04-10', 20, 30, 100, 1),                                    // BND04: ACOS 30 = equilibrio 30
+  met('mercadolivre', 'MLN5', '2027-04-10', 30, 60, 300, 3),                                    // BND05: ACOS 20 = equilibrio 30 - 10, 3 unidades
+  ...dias('2027-04-01', 6).map((d, k) => met('mercadolivre', 'MLN8', d, 1, k < 5 ? 8 : 10)),    // BND08: gasto 50 em 6 dias
+  met('mercadolivre', 'MLN9', '2027-04-10', 200, 40, 100, 1),                                   // BND09: Reduzir e Revisar
+  met('mercadolivre', 'MLN10', '2027-04-10', 400, 45, 300, 3),                                  // BND10: Revisar e Escalar
+];
+await db.exec(`
+insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, source) values
+ ('BND03',1,49,25,'2026-01-01','erp'), ('BND04',1,49,70,'2026-01-01','erp'), ('BND05',1,49,70,'2026-01-01','erp'),
+ ('BND06',1,49,80,'2026-01-01','erp'), ('BND07',1,49,80,'2026-01-01','erp'), ('BND09',1,49,70,'2026-01-01','erp'),
+ ('BND10',1,49,70,'2026-01-01','erp');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','N3','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',50,'{}'),
+ ('mercadolivre','N4','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',100,'{}'),
+ ('mercadolivre','N5','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',300,'{}'),
+ ('mercadolivre','N6','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',300,'{}'),
+ ('mercadolivre','N7','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',200,'{}'),
+ ('mercadolivre','N9','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',100,'{}'),
+ ('mercadolivre','N10','paid','2027-04-10 12:00+00','2027-04-10 12:00+00',300,'{}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','N3',1,'MLN3','BND03-AZU','b3',1,50), ('mercadolivre','N4',1,'MLN4','BND04-AZU','b4',1,100),
+ ('mercadolivre','N5',1,'MLN5','BND05-AZU','b5',3,100), ('mercadolivre','N6',1,'MLN6','BND06-AZU','b6',3,100),
+ ('mercadolivre','N7',1,'MLN7','BND07-AZU','b7',2,100), ('mercadolivre','N9',1,'MLN9','BND09-AZU','b9',1,100),
+ ('mercadolivre','N10',1,'MLN10','BND10-AZU','b10',3,100);
+insert into mkt.items (channel, item_id, title, sku) values
+ ('mercadolivre','MLN1','b1','BND01-AZU'), ('mercadolivre','MLN2','b2','BND02-AZU'), ('mercadolivre','MLN8','b8','BND08-AZU');
+insert into mkt.ads_metrics_daily (channel, item_id, day, campaign_id, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units) values
+ ${metABR.join(',\n ')};
+`);
+const ABR = ['2027-04-01', '2027-04-30'];
+const ab = await modelos('mercadolivre', ...ABR);
+const abm = (mod) => ab.filter((m) => m.modelo === mod).map((m) => [m.sugestao, m.motivo])[0];
+eq('limite: gasto = 50 e dias = 7 -> Pausar', abm('BND01'), ['pausar', 'gastou R$ 50,00 em 30 dias sem venda']);
+eq('limite: cliques = 100 (7 dias) -> Pausar', abm('BND02'), ['pausar', '100 cliques em 30 dias sem venda (gastou R$ 7,00)']);
+eq('limite: conversao = 1,00% nao e Revisar', abm('BND03')[0], 'manter');
+eq('limite: ACOS = equilibrio nao e Reduzir', abm('BND04'), ['manter', 'ACOS 30,00% dentro do equilíbrio 30,00%, sem folga de 10,00 pontos para escalar']);
+eq('limite: ACOS = equilibrio - 10 com 3 unidades -> Escalar', abm('BND05'), ['escalar', 'ACOS 20,00% bem abaixo do equilíbrio 30,00% com 3 unidades vendidas por Ads']);
+eq('limite: margem = 20% e 3 unidades pagas sem Ads -> Testar', abm('BND06'), ['testar', 'margem 20,00% e 3 unidades vendidas sem Ads']);
+eq('limite: margem 20% e 2 unidades pagas -> Manter', abm('BND07'), ['manter', 'sem Ads em 30 dias: margem 20,00%, mas só 2 unidades vendidas; mínimo 3 para testar']);
+eq('limite: gasto 50 em 6 dias -> Manter (minimo 7 dias)', abm('BND08'), ['manter', 'gastou R$ 50,00 em 30 dias sem venda, mas só 6 dias com dados; mínimo 7']);
+eq('prioridade: Reduzir > Revisar', abm('BND09'), ['reduzir', 'ACOS 40,00% acima do equilíbrio 30,00%']);
+eq('prioridade: Revisar > Escalar', abm('BND10'), ['revisar', '400 cliques e conversão 0,75% (abaixo de 1,00%)']);
+await perfil('comercial');
+const abCom = await comoAuth(() => modelos('mercadolivre', ...ABR));
+eq('FR-009 sem custos: Reduzir que tambem cumpre Revisar aparece como Revisar (o CASE segue)',
+  abCom.filter((m) => ['BND09', 'BND10', 'BND05'].includes(m.modelo)).map((m) => [m.modelo, m.sugestao]).sort((a, b) => a[0].localeCompare(b[0])),
+  [['BND05', null], ['BND09', 'revisar'], ['BND10', 'revisar']]);
+await perfil('admin');
+
+eq('ads_fmt: stable', await val(`select provolatile from pg_proc where proname = 'ads_fmt'`), 's');
 eq('ads_sugestoes: invoker', await val(`select prosecdef from pg_proc where proname = 'ads_sugestoes'`), false);
 await db.exec(mig('0019_ads_funcoes.sql'));
 eq('0019 reexecutavel com as sugestoes', (await sug('mercadolivre')).ESC04, 'escalar');

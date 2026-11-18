@@ -270,7 +270,7 @@ $$;
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_fmt(p_valor numeric, p_qtd boolean default false)
 returns text
-language sql immutable set search_path = '' as $$
+language sql stable set search_path = '' as $$
   select translate(to_char(round(p_valor, 2),
                            case when p_qtd and p_valor = trunc(p_valor) then 'FM999,999,999,990'
                                 else 'FM999,999,999,990.00' end),
@@ -290,7 +290,7 @@ $$;
 --     nao derruba a margem de quem ainda nao anuncia (regra Testar);
 --   unidades_pagas = unidades vendidas em pedidos pagos no canal (dash_itens, classe 'pago').
 -- Limites: core.parametros_ads vigente em p_ate no canal da linha (consolidado: o canal em que o modelo mais
--- investiu na janela; sem Ads, mercadolivre). Antes da primeira vigencia vale a primeira linha do canal.
+-- investiu na janela; sem Ads, mercadolivre), via ads_parametros. Sem linha vigente em p_ate: sugestao nula.
 -- Prioridade: pausar > reduzir > revisar > escalar > testar > manter.
 -- Sem 'custos' (FR-009): equilibrio/margem nulos -> so pausar, revisar ou nulo. Modelo sem custo: so
 -- pausar, revisar ou manter. Pausado (todos os anuncios do modelo pausados, anuncio ou campanha): sem sugestao.
@@ -458,12 +458,7 @@ begin
            pa.revisar_cliques_min, pa.revisar_conversao_max_pct, pa.escalar_folga_pp, pa.escalar_unidades_min,
            pa.testar_margem_min_pct, pa.testar_unidades_min
       from calc c
-      left join lateral (
-        -- vigente em p_ate; antes da primeira vigencia, a primeira
-        select x.* from core.parametros_ads x
-         where x.channel = c.canal
-         order by (x.vigente_desde <= p_ate) desc, abs(x.vigente_desde - p_ate)
-         limit 1) pa on true
+      left join lateral analytics.ads_parametros(c.canal, p_ate) pa on true   -- sem linha vigente: sugestao nula
   ),
   dec as (
     select r.*,
@@ -494,17 +489,37 @@ begin
            when 'escalar' then format('ACOS %s%% bem abaixo do equilíbrio %s%% com %s unidades vendidas por Ads',
                                       analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.un, true))
            when 'testar' then format('margem %s%% e %s unidades vendidas sem Ads', analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true))
-           when 'manter' then
-             case when d.sem_custo
-                    then format('sem custo cadastrado; investiu R$ %s em 30 dias e vendeu %s unidades por Ads',
+           when 'manter' then   -- diz por que nenhuma regra disparou
+             case when (d.inv >= d.pausar_gasto_min or d.cli >= d.pausar_cliques_min) and d.un = 0
+                    then format('%s em 30 dias sem venda, mas só %s dias com dados; mínimo %s',
+                                case when d.inv >= d.pausar_gasto_min then format('gastou R$ %s', analytics.ads_fmt(d.inv))
+                                     else format('%s cliques', analytics.ads_fmt(d.cli, true)) end,
+                                d.dias, d.min_dias_dados)
+                  when d.sem_custo and d.inv > 0
+                    then format('sem custo cadastrado, sem ACOS de equilíbrio: investiu R$ %s em 30 dias e vendeu %s unidades por Ads',
                                 analytics.ads_fmt(d.inv), analytics.ads_fmt(d.un, true))
+                  when d.sem_custo
+                    then format('sem custo cadastrado e sem investimento em Ads em 30 dias; %s unidades vendidas',
+                                analytics.ads_fmt(d.pagas, true))
+                  when d.acos is not null and d.eqb is not null and d.acos <= d.eqb - d.escalar_folga_pp
+                    then format('ACOS %s%% bem abaixo do equilíbrio %s%%, mas só %s unidades vendidas por Ads; mínimo %s',
+                                analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.un, true), d.escalar_unidades_min)
                   when d.acos is not null and d.eqb is not null
-                    then format('ACOS %s%% dentro do equilíbrio %s%%', analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb))
+                    then format('ACOS %s%% dentro do equilíbrio %s%%, sem folga de %s pontos para escalar',
+                                analytics.ads_fmt(d.acos), analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.escalar_folga_pp))
+                  when d.inv > 0 and d.vend = 0
+                    then format('investiu R$ %s e teve %s cliques em 30 dias sem venda, abaixo dos limites para pausar (R$ %s ou %s cliques)',
+                                analytics.ads_fmt(d.inv), analytics.ads_fmt(d.cli, true),
+                                analytics.ads_fmt(d.pausar_gasto_min), analytics.ads_fmt(d.pausar_cliques_min::numeric, true))
                   when d.inv > 0
-                    then format('investiu R$ %s em 30 dias e vendeu %s unidades por Ads', analytics.ads_fmt(d.inv), analytics.ads_fmt(d.un, true))
+                    then format('ACOS %s%% sem ACOS de equilíbrio (sem venda paga em 30 dias)', analytics.ads_fmt(d.acos))
+                  when d.eqb is not null and d.eqb < d.testar_margem_min_pct
+                    then format('sem Ads em 30 dias: margem %s%% abaixo do mínimo de %s%% para testar',
+                                analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.testar_margem_min_pct))
                   when d.eqb is not null
-                    then format('sem Ads em 30 dias: margem %s%% e %s unidades vendidas', analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true))
-                  else format('sem Ads em 30 dias e %s unidades vendidas', analytics.ads_fmt(d.pagas, true))
+                    then format('sem Ads em 30 dias: margem %s%%, mas só %s unidades vendidas; mínimo %s para testar',
+                                analytics.ads_fmt(d.eqb), analytics.ads_fmt(d.pagas, true), d.testar_unidades_min)
+                  else format('sem Ads em 30 dias e sem margem calculada; %s unidades vendidas', analytics.ads_fmt(d.pagas, true))
              end
          end,
          d.pausado, d.inv, d.cli, d.vend, d.un, d.conv, d.acos, d.eqb, d.eqb,

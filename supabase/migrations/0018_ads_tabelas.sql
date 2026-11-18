@@ -86,9 +86,10 @@ create table if not exists core.parametros_ads (
   alerta_sobra_pct          numeric not null default 80,
   primary key (channel, vigente_desde)
 );
+-- Limites vigentes desde 2025-01-01: os periodos historicos (ate 12 meses) tambem tem limites.
 insert into core.parametros_ads (channel, vigente_desde) values
-  ('mercadolivre', '2026-11-01'),
-  ('shopee', '2026-11-01')
+  ('mercadolivre', '2025-01-01'),
+  ('shopee', '2025-01-01')
 on conflict (channel, vigente_desde) do nothing;
 
 alter table core.parametros_ads enable row level security;

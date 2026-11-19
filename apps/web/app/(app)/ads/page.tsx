@@ -148,6 +148,10 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   // Cartão Investimento = Product Ads + Seguidores. ACOS, ROAS e TACOS continuam só com Product Ads.
   const investimentoTotal = a ? Math.round((a.investimento + segAtual) * 100) / 100 : 0;
   const investimentoAnterior = p ? Math.round((p.investimento + segAnterior) * 100) / 100 : undefined;
+  // Vendas orgânicas = vendas brutas do canal − vendas por Ads (mesmo escopo do cartão de vendas brutas).
+  const orgVendas = a ? Math.max(0, Math.round((a.vendas_brutas_canal - a.vendas_ads) * 100) / 100) : 0;
+  const orgAnterior = p ? Math.max(0, Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100) : undefined;
+  const pctOrg = a && a.pct_vendas_ads != null ? Math.round((100 - a.pct_vendas_ads) * 100) / 100 : null;
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
@@ -220,6 +224,15 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               ajuda="Investimento ÷ vendas brutas do canal." />
             <CartaoIndicador titulo="% das vendas via Ads" valor={pctTxt(a.pct_vendas_ads)} variacao={variacaoPp(a.pct_vendas_ads, p?.pct_vendas_ads)}
               ajuda="Vendas por Ads ÷ vendas brutas do canal." />
+            {!semShopee && (
+              <CartaoIndicador titulo="Seguidores" valor={brl(segAtual)} variacao={variacao(segAtual, segAnterior)}
+                ajuda="Cobrança de Seguidores na fatura do Mercado Livre no período (o investimento total soma com o Product Ads)." />
+            )}
+            {!semShopee && (
+              <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}
+                detalhe={pctOrg === null ? undefined : `${pctTxt(pctOrg)} orgânico · ${pctTxt(a.pct_vendas_ads)} via Ads`}
+                ajuda="Vendas brutas do canal menos as vendas por Ads (escopo atual: Mercado Livre)." />
+            )}
           </section>
 
           {semDetalhe && <p className="mt-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">{semDetalhe[0].toUpperCase() + semDetalhe.slice(1)}.</p>}

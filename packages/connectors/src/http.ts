@@ -39,11 +39,14 @@ export async function fetchJson<T>(
     }
     if (res.ok) return (await res.json()) as T;
     const body = await res.text();
-    const retryable = res.status === 429 || res.status >= 500;
+    // O Mercado Livre às vezes devolve o limite de requisições como 400 ("Http status error with code 429"),
+    // na faturação. Conta como 429, senão a busca desiste na 1ª tentativa e a fatura fica sem atualizar.
+    const limite = res.status === 429 || (res.status === 400 && /code 429/i.test(body));
+    const retryable = limite || res.status >= 500;
     if (!retryable || attempt >= retries) throw new HttpError(res.status, body, label);
     const retryAfter = Number(res.headers.get('retry-after'));
     if (retryAfter > 0) await sleep(retryAfter * 1000);
-    else if (res.status === 429 && opts.rateLimitDelay) await sleep(opts.rateLimitDelay(attempt));
+    else if (limite && opts.rateLimitDelay) await sleep(opts.rateLimitDelay(attempt));
     else await sleep(1000 * 2 ** attempt);
   }
 }

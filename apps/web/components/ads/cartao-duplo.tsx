@@ -24,7 +24,7 @@ function Parte({ p, inverterCores }: { p: ParteCartao; inverterCores: boolean })
       <p className="mt-1 text-xl font-semibold tabular-nums">{p.valor}</p>
       <p className="mt-1 flex flex-wrap gap-x-2 text-xs">
         <span className={corVariacao(p.variacao.valor, inverterCores)}>{p.variacao.rotulo}</span>
-        <span className="text-muted">{p.participacao} {p.rotulo ?? 'do total'}</span>
+        <span className="text-muted">{p.rotulo === undefined ? `${p.participacao} do total` : p.participacao}</span>
       </p>
     </div>
   );

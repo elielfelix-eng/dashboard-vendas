@@ -154,7 +154,6 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const orgVendas = a ? Math.max(0, Math.round((a.vendas_brutas_canal - a.vendas_ads) * 100) / 100) : 0;
   const orgAnterior = p ? Math.max(0, Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100) : undefined;
   const pctOrg = a && a.pct_vendas_ads != null ? Math.round((100 - a.pct_vendas_ads) * 100) / 100 : null;
-  const pctOrgAnterior = p && p.pct_vendas_ads != null ? Math.round((100 - p.pct_vendas_ads) * 100) / 100 : undefined;
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
@@ -217,12 +216,6 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
           <GradeArrastavel id="ads" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" itens={[
             { chave: 'investimento', node: <CartaoIndicador titulo="Investimento" valor={brl(investimentoTotal)} variacao={variacao(investimentoTotal, investimentoAnterior)} inverterCores
               ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} /> },
-            { chave: 'roas', node: <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}
-              ajuda="Vendas por Ads para cada R$ 1 investido." /> },
-            { chave: 'acos', node: <CartaoIndicador titulo="ACOS" valor={pctTxt(a.acos)} variacao={variacaoPp(a.acos, p?.acos)} inverterCores
-              ajuda="Investimento ÷ vendas por Ads." /> },
-            { chave: 'tacos', node: <CartaoIndicador titulo="TACOS" valor={pctTxt(a.tacos)} variacao={variacaoPp(a.tacos, p?.tacos)} inverterCores
-              ajuda="Investimento ÷ vendas brutas do canal." /> },
             { chave: 'product-ads-seguidores', node: <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
               esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
                 participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null) }}
@@ -231,9 +224,15 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             { chave: 'vendas-ads-organicas', node: <CartaoDuplo inverterCores={false}
               ajuda="Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo atual: Mercado Livre). A participação é sobre as vendas brutas do canal."
               esquerda={{ titulo: 'Vendas por Ads', valor: brl(a.vendas_ads), variacao: variacao(a.vendas_ads, p?.vendas_ads),
-                participacao: pctTxt(a.pct_vendas_ads), rotulo: 'das vendas' }}
+                participacao: pctTxt(a.pct_vendas_ads), rotulo: '' }}
               direita={{ titulo: 'Vendas orgânicas', valor: brl(orgVendas), variacao: variacao(orgVendas, orgAnterior),
-                participacao: pctTxt(pctOrg), rotulo: 'das vendas' }} /> },
+                participacao: pctTxt(pctOrg), rotulo: '' }} /> },
+            { chave: 'roas', node: <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}
+              ajuda="Vendas por Ads para cada R$ 1 investido." /> },
+            { chave: 'acos', node: <CartaoIndicador titulo="ACOS" valor={pctTxt(a.acos)} variacao={variacaoPp(a.acos, p?.acos)} inverterCores
+              ajuda="Investimento ÷ vendas por Ads." /> },
+            { chave: 'tacos', node: <CartaoIndicador titulo="TACOS" valor={pctTxt(a.tacos)} variacao={variacaoPp(a.tacos, p?.tacos)} inverterCores
+              ajuda="Investimento ÷ vendas brutas do canal." /> },
           ]} />
 
           {semDetalhe && <p className="mt-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">{semDetalhe[0].toUpperCase() + semDetalhe.slice(1)}.</p>}

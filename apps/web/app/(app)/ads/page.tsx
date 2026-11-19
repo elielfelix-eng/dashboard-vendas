@@ -271,9 +271,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
                 {d.orcamento.length === 0 ? (
                   <SemDados texto="Nenhum canal conectado com orçamento para mostrar." />
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {d.orcamento.map((o) => <CartaoOrcamento key={o.canal} o={o} />)}
-                  </div>
+                  <GradeArrastavel id="ads-orcamento" className="grid gap-4 md:grid-cols-2"
+                    itens={d.orcamento.map((o) => ({ chave: o.canal, node: <CartaoOrcamento o={o} /> }))} />
                 )}
               </>
             ) : aba === 'campanhas' ? (

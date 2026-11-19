@@ -7,33 +7,39 @@ export interface ParteCartao {
   valor: string;
   variacao: { valor: number | null; rotulo: string };
   participacao: string;
+  /** Texto depois da participação. Padrão: "do total". */
+  rotulo?: string;
 }
 
-function corVariacao(v: number | null): string {
+function corVariacao(v: number | null, inverterCores: boolean): string {
   if (v == null || v === 0) return 'text-muted';
-  return v < 0 ? 'text-good' : 'text-bad';
+  const bom = inverterCores ? v < 0 : v > 0;
+  return bom ? 'text-good' : 'text-bad';
 }
 
-function Parte({ p }: { p: ParteCartao }) {
+function Parte({ p, inverterCores }: { p: ParteCartao; inverterCores: boolean }) {
   return (
     <div className="min-w-0">
       <p className="text-sm text-muted">{p.titulo}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{p.valor}</p>
       <p className="mt-1 flex flex-wrap gap-x-2 text-xs">
-        <span className={corVariacao(p.variacao.valor)}>{p.variacao.rotulo}</span>
-        <span className="text-muted">{p.participacao} do total</span>
+        <span className={corVariacao(p.variacao.valor, inverterCores)}>{p.variacao.rotulo}</span>
+        <span className="text-muted">{p.participacao} {p.rotulo ?? 'do total'}</span>
       </p>
     </div>
   );
 }
 
-export function CartaoDuplo({ esquerda, direita, ajuda }: { esquerda: ParteCartao; direita: ParteCartao; ajuda?: string }) {
+/** `inverterCores`: true para custos (subir é ruim, padrão); false para vendas (subir é bom). */
+export function CartaoDuplo({ esquerda, direita, ajuda, inverterCores = true }: {
+  esquerda: ParteCartao; direita: ParteCartao; ajuda?: string; inverterCores?: boolean;
+}) {
   return (
     <div className="rounded-xl border border-border bg-surface p-4" title={ajuda}>
       <div className="grid grid-cols-2 gap-4">
-        <Parte p={esquerda} />
+        <Parte p={esquerda} inverterCores={inverterCores} />
         <div className="border-l border-border pl-4">
-          <Parte p={direita} />
+          <Parte p={direita} inverterCores={inverterCores} />
         </div>
       </div>
     </div>

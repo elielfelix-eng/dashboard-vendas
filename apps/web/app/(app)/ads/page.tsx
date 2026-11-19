@@ -7,6 +7,7 @@ import { GraficoAds } from '@/components/grafico-ads';
 import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
+import { CartaoDuplo } from '@/components/ads/cartao-duplo';
 import {
   avisoFalhaAds, avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
@@ -226,9 +227,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             <CartaoIndicador titulo="% das vendas via Ads" valor={pctTxt(a.pct_vendas_ads)} variacao={variacaoPp(a.pct_vendas_ads, p?.pct_vendas_ads)}
               ajuda="Vendas por Ads ÷ vendas brutas do canal." />
             {!semShopee && (
-              <CartaoIndicador titulo="Seguidores" valor={brl(segAtual)} variacao={variacao(segAtual, segAnterior)}
-                detalhe={`Product Ads: investido ${brl(a.investimento)} · vendas ${brl(a.vendas_ads)}`}
-                ajuda="Cobrança de Seguidores na fatura do Mercado Livre no período. Abaixo, os números de Product Ads do mesmo período." />
+              <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
+                esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
+                  participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null) }}
+                direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
+                  participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null) }} />
             )}
             {!semShopee && (
               <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}

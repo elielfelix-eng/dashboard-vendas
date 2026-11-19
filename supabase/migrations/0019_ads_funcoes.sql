@@ -961,6 +961,28 @@ $$;
 revoke execute on function analytics.ads_orcamento(text, date) from public, anon;
 grant execute on function analytics.ads_orcamento(text, date) to authenticated;
 
+-- ---------------------------------------------------------------------
+-- Seguidores do periodo (cartao Investimento da tela Ads = Product Ads + Seguidores).
+-- EXCECAO DOCUMENTADA (security definer), como ads_orcamento: a fatura so e legivel com 'custos', mas o
+-- total de Seguidores aparece para quem tem 'ads'. Devolve um unico agregado (zero se nao liberado);
+-- exige core.has_perm('ads') e core.can_see_channel('mercadolivre'). Shopee: zero (sem Seguidores).
+-- Mesma data de ml_fatura (data_ref) usada por ads_orcamento.
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_seguidores(p_canal text, p_de date, p_ate date)
+returns table (seguidores numeric)
+language sql stable security definer set search_path = '' as $$
+  select round(coalesce(sum(f.valor), 0), 2)
+    from analytics.ml_fatura f
+   where core.has_perm('ads')
+     and coalesce(p_canal, '') in ('consolidado', 'mercadolivre')
+     and core.can_see_channel('mercadolivre')
+     and f.categoria = 'seguidores'
+     and f.data_ref between p_de and p_ate
+$$;
+
+revoke execute on function analytics.ads_seguidores(text, date, date) from public, anon;
+grant execute on function analytics.ads_seguidores(text, date, date) to authenticated;
+
 grant execute on function analytics.ads_parametros(text, date),
                           analytics.ads_peso_sem_venda(text, date, date, text[]),
                           analytics.ads_peso_modelo(text, date, date),

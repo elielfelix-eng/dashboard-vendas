@@ -50,6 +50,10 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
 export async function adsResumo(canal: Canal, de: string, ate: string, detalhe = true): Promise<AdsResumo> {
   return (await rpc<AdsResumo>('ads_resumo', { p_canal: canal, p_de: de, p_ate: ate, p_detalhe: detalhe }))[0];
 }
+/** Seguidores do periodo (fatura do ML): entram no cartao Investimento (Product Ads + Seguidores). */
+export async function adsSeguidores(canal: Canal, de: string, ate: string): Promise<number> {
+  return (await rpc<{ seguidores: number }>('ads_seguidores', { p_canal: canal, p_de: de, p_ate: ate }))[0]?.seguidores ?? 0;
+}
 export const adsSerie = (canal: Canal, de: string, ate: string) =>
   rpc<AdsSeriePonto>('ads_serie', { p_canal: canal, p_de: de, p_ate: ate });
 export const adsModelos = (canal: Canal, de: string, ate: string) =>

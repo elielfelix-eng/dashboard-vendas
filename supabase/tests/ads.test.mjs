@@ -840,5 +840,23 @@ eq('ads_orcamento: security definer, execucao so para authenticated', await rows
 await db.exec(mig('0019_ads_funcoes.sql'));
 eq('0019 reexecutavel com o orcamento', await orc('mercadolivre', '2026-11-18'), [ML18]);
 
+// ---------------- Seguidores do periodo (cartao Investimento) ----------------
+// Fixture de novembro: 500 com data_ref 15/11 e 50 com data_ref 30/11.
+const SEG = `select seguidores::float as s from analytics.ads_seguidores($1, $2::date, $3::date)`;
+await perfil('comercial'); await canais('mercadolivre');
+eq('seguidores: comercial (ads, sem custos) ve o total do periodo', await comoAuth(() => rows(SEG, ['mercadolivre', '2026-11-01', '2026-11-30'])), [{ s: 550 }]);
+eq('seguidores: recorte 01 a 18/11 = 500', await comoAuth(() => rows(SEG, ['mercadolivre', '2026-11-01', '2026-11-18'])), [{ s: 500 }]);
+eq('seguidores: consolidado = ML', await comoAuth(() => rows(SEG, ['consolidado', '2026-11-01', '2026-11-30'])), [{ s: 550 }]);
+eq('seguidores: Shopee = zero', await comoAuth(() => rows(SEG, ['shopee', '2026-11-01', '2026-11-30'])), [{ s: 0 }]);
+await perfil('visualizador');
+eq('seguidores: sem a permissao ads = zero', await comoAuth(() => rows(SEG, ['mercadolivre', '2026-11-01', '2026-11-30'])), [{ s: 0 }]);
+await perfil('admin'); await canais('mercadolivre,shopee');
+eq('seguidores: definer, execucao so para authenticated', await rows(`select prosecdef,
+  has_function_privilege('anon', 'analytics.ads_seguidores(text, date, date)', 'execute') as anon,
+  has_function_privilege('authenticated', 'analytics.ads_seguidores(text, date, date)', 'execute') as auth
+  from pg_proc where proname = 'ads_seguidores'`), [{ prosecdef: true, anon: false, auth: true }]);
+await db.exec(mig('0019_ads_funcoes.sql'));
+eq('0019 reexecutavel com seguidores do periodo', await rows(SEG, ['mercadolivre', '2026-11-01', '2026-11-30']), [{ s: 550 }]);
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

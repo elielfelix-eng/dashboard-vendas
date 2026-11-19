@@ -71,7 +71,7 @@ const COL_CAMPANHAS: Coluna<LinhaCampanha>[] = [
 ];
 
 const EXPLICACOES: [string, string][] = [
-  ['Investimento', 'O que foi gasto em Product Ads no período, como consumido em cada dia.'],
+  ['Investimento', 'O que foi gasto no período: Product Ads (como consumido em cada dia) mais Seguidores (cobrança da fatura do Mercado Livre no período). ACOS, ROAS e TACOS usam só o Product Ads.'],
   ['Vendas por Ads', 'Vendas que o Mercado Livre atribui aos anúncios patrocinados.'],
   ['ROAS', 'Quanto você vendeu por Ads para cada R$ 1 investido (vendas por Ads ÷ investimento). ROAS 5x significa R$ 5 vendidos por R$ 1 gasto.'],
   ['ACOS', 'Quanto do valor vendido por Ads foi gasto em Ads (investimento ÷ vendas por Ads). É o inverso do ROAS: ROAS 5x equivale a ACOS de 20%.'],
@@ -126,9 +126,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   try {
     // Os cartões não usam nao_atribuido (a tabela tem a linha própria): detalhe = false pula a atribuição
     // por modelo nas duas chamadas. Tabelas só da aba aberta; nada na Shopee (tela sem dados).
-    const [atual, anterior, serie, modelos, campanhas, sinc] = await Promise.all([
+    const [atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc] = await Promise.all([
       ads.adsResumo(canal, periodo.de, periodo.ate, false),
       ads.adsResumo(canal, periodo.anteriorDe, periodo.anteriorAte, false),
+      canal !== 'shopee' ? ads.adsSeguidores(canal, periodo.de, periodo.ate) : Promise.resolve(0),
+      canal !== 'shopee' ? ads.adsSeguidores(canal, periodo.anteriorDe, periodo.anteriorAte) : Promise.resolve(0),
       ads.adsSerie(canal, periodo.de, periodo.ate),
       aba === 'modelos' && canal !== 'shopee' ? ads.adsModelos(canal, periodo.de, periodo.ate) : Promise.resolve([]),
       aba === 'campanhas' && canal !== 'shopee' ? ads.adsCampanhas(canal, periodo.de, periodo.ate) : Promise.resolve([]),
@@ -138,11 +140,14 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
     const [orcamento, vigencias] = aba === 'orcamento' && canal !== 'shopee'
       ? await Promise.all([ads.adsOrcamento(canal), podeEditarOrcamento ? ads.orcamentoVigencias() : Promise.resolve([])])
       : [[], []];
-    d = { atual, anterior, serie, modelos, campanhas, sinc, orcamento, vigencias };
+    d = { atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc, orcamento, vigencias };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const { atual: a, anterior: p } = d;
+  const { atual: a, anterior: p, segAtual, segAnterior } = d;
+  // Cartão Investimento = Product Ads + Seguidores. ACOS, ROAS e TACOS continuam só com Product Ads.
+  const investimentoTotal = a ? Math.round((a.investimento + segAtual) * 100) / 100 : 0;
+  const investimentoAnterior = p ? Math.round((p.investimento + segAnterior) * 100) / 100 : undefined;
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
@@ -203,7 +208,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
           {!semInvestimento && (
             <>
           <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <CartaoIndicador titulo="Investimento" valor={brl(a.investimento)} variacao={variacao(a.investimento, p?.investimento)} inverterCores />
+            <CartaoIndicador titulo="Investimento" valor={brl(investimentoTotal)} variacao={variacao(investimentoTotal, investimentoAnterior)} inverterCores
+              ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} />
             <CartaoIndicador titulo="Vendas por Ads" valor={brl(a.vendas_ads)} variacao={variacao(a.vendas_ads, p?.vendas_ads)}
               ajuda="Vendas que o Mercado Livre atribui aos anúncios patrocinados." />
             <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}

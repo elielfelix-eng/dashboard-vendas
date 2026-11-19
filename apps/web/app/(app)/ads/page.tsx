@@ -227,7 +227,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               ajuda="Vendas por Ads ÷ vendas brutas do canal." />
             {!semShopee && (
               <CartaoIndicador titulo="Seguidores" valor={brl(segAtual)} variacao={variacao(segAtual, segAnterior)}
-                ajuda="Cobrança de Seguidores na fatura do Mercado Livre no período (o investimento total soma com o Product Ads)." />
+                detalhe={`Product Ads: investido ${brl(a.investimento)} · vendas ${brl(a.vendas_ads)}`}
+                ajuda="Cobrança de Seguidores na fatura do Mercado Livre no período. Abaixo, os números de Product Ads do mesmo período." />
             )}
             {!semShopee && (
               <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}

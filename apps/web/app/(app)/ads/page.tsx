@@ -152,6 +152,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const orgVendas = a ? Math.max(0, Math.round((a.vendas_brutas_canal - a.vendas_ads) * 100) / 100) : 0;
   const orgAnterior = p ? Math.max(0, Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100) : undefined;
   const pctOrg = a && a.pct_vendas_ads != null ? Math.round((100 - a.pct_vendas_ads) * 100) / 100 : null;
+  const pctOrgAnterior = p && p.pct_vendas_ads != null ? Math.round((100 - p.pct_vendas_ads) * 100) / 100 : undefined;
   const semShopee = canal === 'shopee';
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const statsMl = d.sinc.mercadolivre?.stats ?? null;
@@ -230,8 +231,11 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             )}
             {!semShopee && (
               <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}
-                detalhe={pctOrg === null ? undefined : `${pctTxt(pctOrg)} orgânico · ${pctTxt(a.pct_vendas_ads)} via Ads`}
                 ajuda="Vendas brutas do canal menos as vendas por Ads (escopo atual: Mercado Livre)." />
+            )}
+            {!semShopee && (
+              <CartaoIndicador titulo="% das vendas orgânicas" valor={pctTxt(pctOrg)} variacao={variacaoPp(pctOrg, pctOrgAnterior)}
+                ajuda="Vendas orgânicas ÷ vendas brutas do canal." />
             )}
           </section>
 

@@ -218,9 +218,9 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} /> },
             { chave: 'product-ads-seguidores', node: <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
               esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
-                participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null) }}
+                participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null), rotulo: '' }}
               direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
-                participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null) }} /> },
+                participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null), rotulo: '' }} /> },
             { chave: 'vendas-ads-organicas', node: <CartaoDuplo inverterCores={false}
               ajuda="Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo atual: Mercado Livre). A participação é sobre as vendas brutas do canal."
               esquerda={{ titulo: 'Vendas por Ads', valor: brl(a.vendas_ads), variacao: variacao(a.vendas_ads, p?.vendas_ads),

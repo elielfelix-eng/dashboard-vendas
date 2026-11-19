@@ -267,7 +267,10 @@ export class MercadoLivreConnector implements MarketplaceConnector {
         );
         const rows = r.results
           .map((x) => ({ x, m: x.metrics ?? {} }))
-          .filter(({ m }) => (m.prints ?? 0) > 0 || (m.cost ?? 0) > 0)
+          // Mantém o dia se houver qualquer atividade: venda atribuída sem custo no dia (compra de um clique
+          // anterior, anúncio sem verba) também conta. Descartar essas linhas perdia receita (outubro/2026).
+          .filter(({ m }) => ['prints', 'clicks', 'cost', 'direct_amount', 'indirect_amount',
+            'direct_units_quantity', 'indirect_units_quantity', 'organic_units_quantity'].some((k) => (m[k] ?? 0) > 0))
           .map(({ x, m }) => ({
             itemId: x.item_id,
             day,

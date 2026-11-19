@@ -152,6 +152,22 @@ test('métricas por anúncio: devolve status (null se ausente)', async () => {
   assert.deepEqual(rows.map((r) => [r.itemId, r.status]), [['MLB1', 'active'], ['MLB2', null]]);
 });
 
+test('métricas por anúncio: dia sem custo e sem impressões, mas com venda atribuída, é mantido', async () => {
+  fakeAds({
+    [ADV]: advertiser,
+    [ADS]: json({ paging: { total: 3 }, results: [
+      { item_id: 'MLB3', campaign_id: 5, status: 'active', metrics: { prints: 0, cost: 0, direct_amount: 120, direct_units_quantity: 1, indirect_amount: 0 } },
+      { item_id: 'MLB4', campaign_id: 5, status: 'active', metrics: { prints: 0, cost: 0, indirect_amount: 0, direct_amount: 0 } },
+      { item_id: 'MLB5', campaign_id: 5, status: 'active', metrics: { prints: 0, cost: 0, indirect_units_quantity: 2, indirect_amount: 80 } },
+    ] }),
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const rows = [];
+  for await (const lote of ml.listAdsMetrics(new Date('2026-10-15T12:00:00Z'), new Date('2026-10-15T12:00:00Z'))) rows.push(...lote);
+  // MLB4 não tem nenhuma atividade: continua descartado
+  assert.deepEqual(rows.map((r) => [r.itemId, r.directAmount, r.indirectAmount, r.indirectUnits]), [['MLB3', 120, 0, 0], ['MLB5', 0, 80, 2]]);
+});
+
 test('status dos anúncios: traz todos, mesmo sem impressões e custo, numa única passada', async () => {
   const chamadas = fakeAds({
     [ADV]: advertiser,

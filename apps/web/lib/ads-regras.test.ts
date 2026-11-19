@@ -76,7 +76,21 @@ test('valida o parametro sug da URL', () => {
 // ---- Orçamento (T027-T029) ----
 import {
   validarOrcamento, primeiroDiaProximoMes, textoAlertaOrcamento, estadoOrcamento, textoValorDiario, type LinhaOrcamento,
+  agregarSeriePorMes,
 } from './ads-regras.ts';
+
+test('agregarSeriePorMes: soma os dias de cada mês e ordena por mês', () => {
+  const serie = [
+    { dia: '2026-10-02', investimento: 100.1, vendas_ads: 50 },
+    { dia: '2026-09-30', investimento: 20, vendas_ads: 10 },
+    { dia: '2026-10-31', investimento: 0.3, vendas_ads: 0 },
+  ];
+  assert.deepEqual(agregarSeriePorMes(serie), [
+    { dia: '2026-09-01', investimento: 20, vendas_ads: 10 },
+    { dia: '2026-10-01', investimento: 100.4, vendas_ads: 50 },
+  ]);
+  assert.deepEqual(agregarSeriePorMes([]), []);
+});
 
 const orc = (o: Partial<LinhaOrcamento> = {}): LinhaOrcamento => ({
   canal: 'mercadolivre', orcamento: 5000, gasto_mes: 1000, gasto_product_ads: 900, gasto_seguidores: 100, gasto_ate_ontem: 900,

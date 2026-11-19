@@ -125,6 +125,21 @@ export function textoValorDiario(o: LinhaOrcamento): string | null {
 }
 
 /** 1º dia do mês seguinte a `hoje` (YYYY-MM-DD). */
+/** Soma a série diária do Ads por mês. O ponto de cada mês vem com `dia` = primeiro dia do mês (AAAA-MM-01). */
+export function agregarSeriePorMes(serie: { dia: string; investimento: number; vendas_ads: number }[]) {
+  const porMes = new Map<string, { investimento: number; vendas_ads: number }>();
+  for (const p of serie) {
+    const mes = `${p.dia.slice(0, 7)}-01`;
+    const acumulado = porMes.get(mes) ?? { investimento: 0, vendas_ads: 0 };
+    acumulado.investimento += p.investimento;
+    acumulado.vendas_ads += p.vendas_ads;
+    porMes.set(mes, acumulado);
+  }
+  return [...porMes.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([dia, v]) => ({ dia, investimento: Math.round(v.investimento * 100) / 100, vendas_ads: Math.round(v.vendas_ads * 100) / 100 }));
+}
+
 export function primeiroDiaProximoMes(hoje: string): string {
   const a = Number(hoje.slice(0, 4)), m = Number(hoje.slice(5, 7));
   return m === 12 ? `${a + 1}-01-01` : `${a}-${String(m + 1).padStart(2, '0')}-01`;

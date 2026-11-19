@@ -10,12 +10,13 @@ import * as ads from '@/lib/ads';
 import { CartaoDuplo } from '@/components/ads/cartao-duplo';
 import { GradeArrastavel } from '@/components/grade-arrastavel';
 import {
+  agregarSeriePorMes,
   avisoFalhaAds, avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
 } from '@/lib/ads-regras';
 import * as dash from '@/lib/dash';
 import { brl, pct as pctTxt, variacao, variacaoPp } from '@/lib/formato';
-import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
+import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -240,7 +241,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-1 text-sm font-semibold">Investimento e vendas por Ads, dia a dia</h2>
             <p className="mb-2 text-xs text-muted">Barras: quanto foi investido no dia. Linha: quanto foi vendido por Ads no dia.</p>
-            <GraficoAds serie={d.serie} />
+            <GraficoAds serie={granularidadeDoPeriodo(chave) === 'mes' ? agregarSeriePorMes(d.serie) : d.serie}
+              grao={granularidadeDoPeriodo(chave)} />
           </section>
 
             </>

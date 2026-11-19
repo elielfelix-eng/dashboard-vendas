@@ -89,6 +89,11 @@ export function resolverPeriodo(chave: PeriodoChave, hoje: string, de?: string, 
 type Params = Record<string, string | string[] | undefined>;
 const um = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
+/** Granularidade padrão dos gráficos: no filtro "Ano" mostra os meses; nos demais, os dias. */
+export function granularidadeDoPeriodo(chave: PeriodoChave): 'dia' | 'mes' {
+  return chave === 'ano' ? 'mes' : 'dia';
+}
+
 export function lerFiltros(searchParams: Params, hoje: string): { canal: Canal; chave: PeriodoChave; periodo: Periodo } {
   const c = um(searchParams.canal);
   const p = um(searchParams.periodo);

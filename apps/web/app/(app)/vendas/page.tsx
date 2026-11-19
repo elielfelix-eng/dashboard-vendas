@@ -6,7 +6,7 @@ import { lerGrao, queryFiltros, SeletorGrao } from '@/components/seletor-grao';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
 import * as dash from '@/lib/dash';
 import { brl, num, pct, variacao } from '@/lib/formato';
-import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
+import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -32,7 +32,8 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
   const params = await searchParams;
   const hoje = hojeBrasilia();
   const { canal, chave, periodo } = lerFiltros(params, hoje);
-  const grao = lerGrao(params.grao);
+  // Sem escolha explícita do usuário: no filtro Ano, os gráficos mostram os meses; nos demais, os dias.
+  const grao = params.grao ? lerGrao(params.grao) : granularidadeDoPeriodo(chave);
   const qs = queryFiltros(params);
 
   let d;

@@ -9,7 +9,7 @@ import { PainelAtencao } from '@/components/painel-atencao';
 import { canalMetaVisaoGeral } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, dataBr, num, pct, variacao } from '@/lib/formato';
-import { hojeBrasilia, lerFiltros, resolverPeriodo } from '@/lib/periodo';
+import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros, resolverPeriodo } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -28,8 +28,8 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
     const [atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
-      dash.serie(canal, periodo.de, periodo.ate, 'dia'),
-      dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, 'dia'),
+      dash.serie(canal, periodo.de, periodo.ate, granularidadeDoPeriodo(chave)),
+      dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, granularidadeDoPeriodo(chave)),
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.sincronizacoes(),
       perms.has('metas') ? dash.metas(canalMetaVisaoGeral(canal), Number(hoje.slice(0, 4))) : Promise.resolve([]),
@@ -90,7 +90,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
 
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-2 text-sm font-semibold">Vendas brutas por dia</h2>
-            <GraficoSerie atual={serieAtual} anterior={serieAnterior} />
+            <GraficoSerie atual={serieAtual} anterior={serieAnterior} grao={granularidadeDoPeriodo(chave)} />
           </section>
 
           <section className="mt-6 grid gap-4 lg:grid-cols-2">

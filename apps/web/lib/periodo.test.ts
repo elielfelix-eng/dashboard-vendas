@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lerFiltros, resolverPeriodo } from './periodo.ts';
+import { granularidadeDoPeriodo, lerFiltros, resolverPeriodo } from './periodo.ts';
 
 const datas = (p: { de: string; ate: string; anteriorDe: string; anteriorAte: string }) =>
   [p.de, p.ate, p.anteriorDe, p.anteriorAte];
@@ -60,4 +60,9 @@ test('lerFiltros: personalizado com datas', () => {
   const f = lerFiltros({ canal: 'mercadolivre', periodo: 'personalizado', de: '2026-10-01', ate: '2026-10-31' }, '2026-11-12');
   assert.equal(f.canal, 'mercadolivre');
   assert.deepEqual([f.periodo.de, f.periodo.ate], ['2026-10-01', '2026-10-31']);
+});
+
+test('granularidade: filtro Ano mostra meses; os demais mostram dias', () => {
+  assert.equal(granularidadeDoPeriodo('ano'), 'mes');
+  for (const c of ['hoje', '7d', '30d', 'mes', 'mes_anterior', 'personalizado'] as const) assert.equal(granularidadeDoPeriodo(c), 'dia');
 });

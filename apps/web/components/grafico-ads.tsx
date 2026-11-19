@@ -7,9 +7,10 @@ const BRL = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL',
 const curto = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} mil` : String(Math.round(v)));
 const estilo = { background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 };
 
-/** Barras = investimento do dia; linha = vendas atribuídas a Ads no dia. */
-export function GraficoAds({ serie }: { serie: AdsSeriePonto[] }) {
-  const dados = serie.map((p) => ({ rotulo: `${p.dia.slice(8, 10)}/${p.dia.slice(5, 7)}`, investimento: p.investimento, vendas: p.vendas_ads }));
+/** Barras = investimento do dia (ou do mês); linha = vendas atribuídas a Ads no mesmo intervalo. */
+export function GraficoAds({ serie, grao = 'dia' }: { serie: AdsSeriePonto[]; grao?: 'dia' | 'mes' }) {
+  const rotulo = (dia: string) => (grao === 'mes' ? `${dia.slice(5, 7)}/${dia.slice(2, 4)}` : `${dia.slice(8, 10)}/${dia.slice(5, 7)}`);
+  const dados = serie.map((p) => ({ rotulo: rotulo(p.dia), investimento: p.investimento, vendas: p.vendas_ads }));
   return (
     <div className="h-72 w-full">
       <ResponsiveContainer>

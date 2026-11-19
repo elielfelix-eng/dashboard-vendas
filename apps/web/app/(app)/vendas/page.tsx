@@ -1,4 +1,5 @@
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { lerGrao, queryFiltros, SeletorGrao } from '@/components/seletor-grao';
@@ -73,20 +74,20 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
             Como nas Métricas do Mercado Livre: vendas brutas e quantidade de vendas incluem as canceladas e as devolvidas;
             pedidos cancelados porque o carrinho foi dividido não contam. Vendas líquidas são só os pedidos pagos.
           </p>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)} />
-            <CartaoIndicador titulo="Quantidade de vendas" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} />
-            <CartaoIndicador titulo="Unidades vendidas" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} />
-            <CartaoIndicador titulo="Preço médio por venda" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} />
-            <CartaoIndicador titulo="Preço médio por unidade" valor={brl(a.unidades ? a.vendas_brutas / a.unidades : null)}
-              variacao={variacao(a.unidades ? a.vendas_brutas / a.unidades : null, p.unidades ? p.vendas_brutas / p.unidades : null)} />
-            <CartaoIndicador titulo="Vendas canceladas" valor={brl(a.canceladas_valor)} inverterCores
-              variacao={variacao(a.canceladas_valor, p.canceladas_valor)} detalhe={`${num(a.cancelados)} vendas`} />
-            <CartaoIndicador titulo="Vendas devolvidas" valor={brl(a.devolvidas_valor)} inverterCores
-              variacao={variacao(a.devolvidas_valor, p.devolvidas_valor)} detalhe={`${num(a.devolvidos)} vendas`} />
-            <CartaoIndicador titulo="Vendas líquidas" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)}
-              detalhe={`${pct(a.pct_cancel_devol)} canceladas ou devolvidas`} ajuda="Só os pedidos pagos: é a base da margem." />
-          </section>
+          <GradeArrastavel id="vendas" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" itens={[
+            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)} /> },
+            { chave: 'quantidade', node: <CartaoIndicador titulo="Quantidade de vendas" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} /> },
+            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades vendidas" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} /> },
+            { chave: 'preco-venda', node: <CartaoIndicador titulo="Preço médio por venda" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} /> },
+            { chave: 'preco-unidade', node: <CartaoIndicador titulo="Preço médio por unidade" valor={brl(a.unidades ? a.vendas_brutas / a.unidades : null)}
+              variacao={variacao(a.unidades ? a.vendas_brutas / a.unidades : null, p.unidades ? p.vendas_brutas / p.unidades : null)} /> },
+            { chave: 'canceladas', node: <CartaoIndicador titulo="Vendas canceladas" valor={brl(a.canceladas_valor)} inverterCores
+              variacao={variacao(a.canceladas_valor, p.canceladas_valor)} detalhe={`${num(a.cancelados)} vendas`} /> },
+            { chave: 'devolvidas', node: <CartaoIndicador titulo="Vendas devolvidas" valor={brl(a.devolvidas_valor)} inverterCores
+              variacao={variacao(a.devolvidas_valor, p.devolvidas_valor)} detalhe={`${num(a.devolvidos)} vendas`} /> },
+            { chave: 'liquidas', node: <CartaoIndicador titulo="Vendas líquidas" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)}
+              detalhe={`${pct(a.pct_cancel_devol)} canceladas ou devolvidas`} ajuda="Só os pedidos pagos: é a base da margem." /> },
+          ]} />
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Vendas brutas</h2>

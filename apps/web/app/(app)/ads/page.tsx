@@ -8,6 +8,7 @@ import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
 import { CartaoDuplo } from '@/components/ads/cartao-duplo';
+import { GradeArrastavel } from '@/components/grade-arrastavel';
 import {
   avisoFalhaAds, avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
@@ -213,35 +214,29 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
           {semInvestimento && <div className="mb-4"><SemDados texto="Sem investimento em Ads no período." /></div>}
           {!semInvestimento && (
             <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <CartaoIndicador titulo="Investimento" valor={brl(investimentoTotal)} variacao={variacao(investimentoTotal, investimentoAnterior)} inverterCores
-              ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} />
-            <CartaoIndicador titulo="Vendas por Ads" valor={brl(a.vendas_ads)} variacao={variacao(a.vendas_ads, p?.vendas_ads)}
-              ajuda="Vendas que o Mercado Livre atribui aos anúncios patrocinados." />
-            <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}
-              ajuda="Vendas por Ads para cada R$ 1 investido." />
-            <CartaoIndicador titulo="ACOS" valor={pctTxt(a.acos)} variacao={variacaoPp(a.acos, p?.acos)} inverterCores
-              ajuda="Investimento ÷ vendas por Ads." />
-            <CartaoIndicador titulo="TACOS" valor={pctTxt(a.tacos)} variacao={variacaoPp(a.tacos, p?.tacos)} inverterCores
-              ajuda="Investimento ÷ vendas brutas do canal." />
-            <CartaoIndicador titulo="% das vendas via Ads" valor={pctTxt(a.pct_vendas_ads)} variacao={variacaoPp(a.pct_vendas_ads, p?.pct_vendas_ads)}
-              ajuda="Vendas por Ads ÷ vendas brutas do canal." />
-            {!semShopee && (
-              <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
-                esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
-                  participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null) }}
-                direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
-                  participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null) }} />
-            )}
-            {!semShopee && (
-              <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}
-                ajuda="Vendas brutas do canal menos as vendas por Ads (escopo atual: Mercado Livre)." />
-            )}
-            {!semShopee && (
-              <CartaoIndicador titulo="% das vendas orgânicas" valor={pctTxt(pctOrg)} variacao={variacaoPp(pctOrg, pctOrgAnterior)}
-                ajuda="Vendas orgânicas ÷ vendas brutas do canal." />
-            )}
-          </section>
+          <GradeArrastavel id="ads" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" itens={[
+            { chave: 'investimento', node: <CartaoIndicador titulo="Investimento" valor={brl(investimentoTotal)} variacao={variacao(investimentoTotal, investimentoAnterior)} inverterCores
+              ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} /> },
+            { chave: 'vendas-ads', node: <CartaoIndicador titulo="Vendas por Ads" valor={brl(a.vendas_ads)} variacao={variacao(a.vendas_ads, p?.vendas_ads)}
+              ajuda="Vendas que o Mercado Livre atribui aos anúncios patrocinados." /> },
+            { chave: 'roas', node: <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}
+              ajuda="Vendas por Ads para cada R$ 1 investido." /> },
+            { chave: 'acos', node: <CartaoIndicador titulo="ACOS" valor={pctTxt(a.acos)} variacao={variacaoPp(a.acos, p?.acos)} inverterCores
+              ajuda="Investimento ÷ vendas por Ads." /> },
+            { chave: 'tacos', node: <CartaoIndicador titulo="TACOS" valor={pctTxt(a.tacos)} variacao={variacaoPp(a.tacos, p?.tacos)} inverterCores
+              ajuda="Investimento ÷ vendas brutas do canal." /> },
+            { chave: 'pct-ads', node: <CartaoIndicador titulo="% das vendas via Ads" valor={pctTxt(a.pct_vendas_ads)} variacao={variacaoPp(a.pct_vendas_ads, p?.pct_vendas_ads)}
+              ajuda="Vendas por Ads ÷ vendas brutas do canal." /> },
+            { chave: 'product-ads-seguidores', node: <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
+              esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
+                participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null) }}
+              direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
+                participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null) }} /> },
+            { chave: 'vendas-organicas', node: <CartaoIndicador titulo="Vendas orgânicas" valor={brl(orgVendas)} variacao={variacao(orgVendas, orgAnterior)}
+              ajuda="Vendas brutas do canal menos as vendas por Ads (escopo atual: Mercado Livre)." /> },
+            { chave: 'pct-organicas', node: <CartaoIndicador titulo="% das vendas orgânicas" valor={pctTxt(pctOrg)} variacao={variacaoPp(pctOrg, pctOrgAnterior)}
+              ajuda="Vendas orgânicas ÷ vendas brutas do canal." /> },
+          ]} />
 
           {semDetalhe && <p className="mt-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">{semDetalhe[0].toUpperCase() + semDetalhe.slice(1)}.</p>}
 

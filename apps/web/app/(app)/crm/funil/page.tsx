@@ -1,4 +1,5 @@
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
 import { AVISO_SEM_VINCULO, TopoCrm, semVinculo } from '@/components/topo-crm';
 import { requireUser } from '@/lib/auth';
@@ -80,18 +81,18 @@ export default async function FunilPage({ searchParams }: { searchParams: SP }) 
       {f.area && <p className="mb-4 text-xs text-muted">O filtro Área de Negócio não se aplica aos leads</p>}
       {vazio ? <SemDados /> : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <CartaoIndicador titulo="Leads novos" valor={num(a.leads_novos)} variacao={variacao(a.leads_novos, b?.leads_novos)} />
-            <CartaoIndicador titulo="% Lead → negócio" valor={pct(pctDe(a.leads_com_negocio, a.leads_novos))}
+          <GradeArrastavel id="crm-funil" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5" itens={[
+            { chave: 'leads-novos', node: <CartaoIndicador titulo="Leads novos" valor={num(a.leads_novos)} variacao={variacao(a.leads_novos, b?.leads_novos)} /> },
+            { chave: 'lead-negocio', node: <CartaoIndicador titulo="% Lead → negócio" valor={pct(pctDe(a.leads_com_negocio, a.leads_novos))}
               variacao={variacaoPp(pctDe(a.leads_com_negocio, a.leads_novos), b ? pctDe(b.leads_com_negocio, b.leads_novos) : null)}
-              ajuda="Dos leads que chegaram no período, quantos viraram negócio." />
-            <CartaoIndicador titulo="% Negócio → ganho" valor={pct(pctDe(a.ganhos_coorte, a.negocios_coorte))}
+              ajuda="Dos leads que chegaram no período, quantos viraram negócio." /> },
+            { chave: 'negocio-ganho', node: <CartaoIndicador titulo="% Negócio → ganho" valor={pct(pctDe(a.ganhos_coorte, a.negocios_coorte))}
               variacao={variacaoPp(pctDe(a.ganhos_coorte, a.negocios_coorte), b ? pctDe(b.ganhos_coorte, b.negocios_coorte) : null)}
-              ajuda="Dos negócios nascidos desses leads, quantos já foram ganhos até hoje." />
-            <CartaoIndicador titulo="Valor ganho" valor={brl(a.valor_ganho)} variacao={variacao(a.valor_ganho, b?.valor_ganho)} />
-            <CartaoIndicador titulo="Ciclo médio (dias)" valor={dec1(a.ciclo_medio_dias)} variacao={variacao(a.ciclo_medio_dias, b?.ciclo_medio_dias)} inverterCores
-              ajuda="Dias entre criar o negócio e ganhá-lo." />
-          </section>
+              ajuda="Dos negócios nascidos desses leads, quantos já foram ganhos até hoje." /> },
+            { chave: 'valor-ganho', node: <CartaoIndicador titulo="Valor ganho" valor={brl(a.valor_ganho)} variacao={variacao(a.valor_ganho, b?.valor_ganho)} /> },
+            { chave: 'ciclo', node: <CartaoIndicador titulo="Ciclo médio (dias)" valor={dec1(a.ciclo_medio_dias)} variacao={variacao(a.ciclo_medio_dias, b?.ciclo_medio_dias)} inverterCores
+              ajuda="Dias entre criar o negócio e ganhá-lo." /> },
+          ]} />
 
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-3 text-sm font-semibold">Funil do período</h2>

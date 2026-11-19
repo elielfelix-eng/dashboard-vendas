@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { ComoCalculamos } from '@/components/como-calculamos';
 import { FotoProduto } from '@/components/foto-produto';
 import { FiltroTopo } from '@/components/filtro-topo';
@@ -67,31 +68,25 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
         <SemDados />
       ) : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)}
-              ajuda="Pedidos pagos, cancelados e devolvidos (sem divididos), igual ao painel do Mercado Livre." />
-            <CartaoIndicador titulo="Pedidos" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} />
-            <CartaoIndicador titulo="Unidades" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} />
-            <CartaoIndicador titulo="Ticket médio" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} />
-            {verCustos && a.margem_bruta != null && (
-              <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)} variacao={variacao(a.margem_bruta, p.margem_bruta)}
-                detalhe={pct(margemPct(a.margem_bruta, a.receita))} ajuda="Receita (pedidos pagos) menos o custo dos produtos." />
-            )}
-            {verCustos && a.margem_contribuicao != null && (
-              <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
-                variacao={variacao(a.margem_contribuicao, p.margem_contribuicao)} detalhe={pct(margemPct(a.margem_contribuicao, a.receita))}
-                ajuda="Receita menos tarifas do Mercado Livre, frete, Ads, imposto, embalagem e custo dos produtos." />
-            )}
-            <CartaoIndicador titulo="Ads" valor={brl(a.product_ads)} variacao={variacao(a.product_ads, p.product_ads)} inverterCores
-              detalhe={`TACOS ${pct(tacos)}`} ajuda="Investimento em Product Ads. TACOS = Ads ÷ vendas brutas." />
-            <CartaoIndicador titulo="Cancelados e devolvidos" valor={num(a.cancelados + a.devolvidos)}
+          <GradeArrastavel id="visao-geral" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" itens={[
+            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)}
+              ajuda="Pedidos pagos, cancelados e devolvidos (sem divididos), igual ao painel do Mercado Livre." /> },
+            { chave: 'pedidos', node: <CartaoIndicador titulo="Pedidos" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} /> },
+            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} /> },
+            { chave: 'ticket-medio', node: <CartaoIndicador titulo="Ticket médio" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} /> },
+            ...(verCustos && a.margem_bruta != null ? [{ chave: 'margem-bruta', node: <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)} variacao={variacao(a.margem_bruta, p.margem_bruta)}
+              detalhe={pct(margemPct(a.margem_bruta, a.receita))} ajuda="Receita (pedidos pagos) menos o custo dos produtos." /> }] : []),
+            ...(verCustos && a.margem_contribuicao != null ? [{ chave: 'margem-contribuicao', node: <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
+              variacao={variacao(a.margem_contribuicao, p.margem_contribuicao)} detalhe={pct(margemPct(a.margem_contribuicao, a.receita))}
+              ajuda="Receita menos tarifas do Mercado Livre, frete, Ads, imposto, embalagem e custo dos produtos." /> }] : []),
+            { chave: 'ads', node: <CartaoIndicador titulo="Ads" valor={brl(a.product_ads)} variacao={variacao(a.product_ads, p.product_ads)} inverterCores
+              detalhe={`TACOS ${pct(tacos)}`} ajuda="Investimento em Product Ads. TACOS = Ads ÷ vendas brutas." /> },
+            { chave: 'cancelados', node: <CartaoIndicador titulo="Cancelados e devolvidos" valor={num(a.cancelados + a.devolvidos)}
               variacao={variacao(a.cancelados + a.devolvidos, p.cancelados + p.devolvidos)} inverterCores
-              detalhe={`${pct(a.pct_cancel_devol)} dos pedidos`} />
-            {mesAtual?.meta != null && (
-              <CartaoIndicador titulo="Mês atual: realizado × meta" valor={`${pct(((mesAtual.realizado ?? 0) / mesAtual.meta) * 100)}`}
-                detalhe={`${brl(mesAtual.realizado)} de ${brl(mesAtual.meta)}`} ajuda="Receita (pedidos pagos) do mês até hoje ÷ meta do mês." />
-            )}
-          </section>
+              detalhe={`${pct(a.pct_cancel_devol)} dos pedidos`} /> },
+            ...(mesAtual?.meta != null ? [{ chave: 'meta-mes', node: <CartaoIndicador titulo="Mês atual: realizado × meta" valor={`${pct(((mesAtual.realizado ?? 0) / mesAtual.meta) * 100)}`}
+              detalhe={`${brl(mesAtual.realizado)} de ${brl(mesAtual.meta)}`} ajuda="Receita (pedidos pagos) do mês até hoje ÷ meta do mês." /> }] : []),
+          ]} />
 
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
             <h2 className="mb-2 text-sm font-semibold">Vendas brutas por dia</h2>

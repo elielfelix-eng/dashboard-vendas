@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { CascataCustos } from '@/components/cascata-custos';
 import { ComoCalculamos } from '@/components/como-calculamos';
 import { FiltroTopo } from '@/components/filtro-topo';
@@ -157,21 +158,21 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={d.sinc.mercadolivre?.ultimoSucesso ?? null} />
       {a.pedidos === 0 ? <SemDados /> : (
         <>
-          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <CartaoIndicador titulo="Receita (vendas líquidas)" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)} ajuda="Só pedidos pagos." />
-            <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)}
+          <GradeArrastavel id="rentabilidade" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5" itens={[
+            { chave: 'receita', node: <CartaoIndicador titulo="Receita (vendas líquidas)" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)} ajuda="Só pedidos pagos." /> },
+            { chave: 'margem-bruta', node: <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)}
               variacao={variacaoPp(pctDe(a.margem_bruta, a.receita), pctDe(p.margem_bruta, p.receita))}
-              detalhe={pct(pctDe(a.margem_bruta, a.receita))} />
-            <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
+              detalhe={pct(pctDe(a.margem_bruta, a.receita))} /> },
+            { chave: 'margem-contribuicao', node: <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
               variacao={variacaoPp(pctDe(a.margem_contribuicao, a.receita), pctDe(p.margem_contribuicao, p.receita))}
-              detalhe={pct(pctDe(a.margem_contribuicao, a.receita))} />
-            <CartaoIndicador titulo="Aguardando a fatura do ML" valor={`${num(a.estimados)} pedidos`}
+              detalhe={pct(pctDe(a.margem_contribuicao, a.receita))} /> },
+            { chave: 'aguardando-fatura', node: <CartaoIndicador titulo="Aguardando a fatura do ML" valor={`${num(a.estimados)} pedidos`}
               detalhe="frete e comissão estimados; acertam sozinhos quando a fatura chegar"
-              ajuda="Pedidos pagos que ainda não aparecem na fatura do Mercado Livre. Até lá, o frete e a comissão vêm do próprio pedido." />
-            <CartaoIndicador titulo="Sem custo do produto" valor={`${num(a.pedidos_sem_custo)} pedidos`}
+              ajuda="Pedidos pagos que ainda não aparecem na fatura do Mercado Livre. Até lá, o frete e a comissão vêm do próprio pedido." /> },
+            { chave: 'sem-custo', node: <CartaoIndicador titulo="Sem custo do produto" valor={`${num(a.pedidos_sem_custo)} pedidos`}
               detalhe={(a.pedidos_sem_custo ?? 0) > 0 ? 'margem maior que a real: veja Pontos de atenção' : 'todos têm cotação no ERP'}
-              ajuda="Pedidos pagos de modelos sem cotação de compra no ERP: entram com custo zero." />
-          </section>
+              ajuda="Pedidos pagos de modelos sem cotação de compra no ERP: entram com custo zero." /> },
+          ]} />
 
           <section className="mt-6 grid gap-4 lg:grid-cols-2">
             <div className="rounded-xl border border-border bg-surface p-4">

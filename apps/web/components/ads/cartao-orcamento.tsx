@@ -30,10 +30,20 @@ export function CartaoOrcamento({ o }: { o: LinhaOrcamento }) {
             <div className={cor} style={{ width: `${wPA}%` }} />
             <div className={`${cor} opacity-50`} style={{ width: `${wSeg}%` }} />
           </div>
-          <p className="mt-1 text-xs text-muted">
-            Product Ads {brl(o.gasto_product_ads)}
-            {o.canal !== 'shopee' ? ` + Seguidores ${brl(o.gasto_seguidores)}` : ''}
-          </p>
+          <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-sm" aria-label="Composição do gasto">
+            <dt className="text-muted">Product Ads</dt>
+            <dd className="text-right">{brl(o.gasto_product_ads)}</dd>
+            {o.canal !== 'shopee' && (
+              <>
+                <dt className="text-muted">Seguidores</dt>
+                <dd className="text-right">{brl(o.gasto_seguidores)}</dd>
+              </>
+            )}
+            <dt className="border-t border-border pt-1 font-medium">Total gasto no mês</dt>
+            <dd className="border-t border-border pt-1 text-right font-medium">{brl(o.gasto_mes)}</dd>
+            <dt className="text-muted">Orçamento do mês</dt>
+            <dd className="text-right">{brl(o.orcamento)}</dd>
+          </dl>
           <p className="mt-1 text-xs text-muted">{pct(o.pct_mes)} do mês já decorrido ({o.dias_completos} de {o.dias_mes} dias).</p>
 
           <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">

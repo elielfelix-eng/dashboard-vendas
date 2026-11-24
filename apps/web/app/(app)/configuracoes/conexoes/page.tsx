@@ -5,6 +5,7 @@ const MESSAGES: Record<string, { text: string; ok: boolean }> = {
   mercadolivre: { text: 'Conta do Mercado Livre conectada com sucesso.', ok: true },
   shopee: { text: 'Loja da Shopee conectada com sucesso.', ok: true },
   'negado-shopee': { text: 'A autorização foi cancelada na Shopee.', ok: false },
+  'recusado-shopee': { text: 'A Shopee recusou a autorização. Tente conectar de novo.', ok: false },
   state: { text: 'A conexão expirou ou foi adulterada. Tente novamente.', ok: false },
   negado: { text: 'A autorização foi cancelada no Mercado Livre.', ok: false },
   falha: { text: 'Não foi possível concluir a conexão. Tente novamente.', ok: false },

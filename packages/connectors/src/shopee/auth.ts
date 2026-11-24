@@ -69,7 +69,8 @@ async function tokenRequest(
         headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify(body),
       },
-      { label, retries: 2 },
+      // Sem nova tentativa: código e refresh token são de uso único; repetir pode queimar o novo token.
+      { label, retries: 0 },
     );
   } catch (err) {
     if (!(err instanceof HttpError)) throw err; // falha de rede: a mensagem já usa só o label

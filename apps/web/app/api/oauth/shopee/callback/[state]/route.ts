@@ -1,14 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { exchangeShopeeCode } from '@dash/connectors';
+import { ShopeeAuthError, exchangeShopeeCode } from '@dash/connectors';
 import { getCurrentUser } from '@/lib/auth';
 import { db } from '@/lib/db';
-import { SHOPEE_OAUTH_COOKIE, shopeeApp } from '@/lib/shopee';
+import { SHOPEE_OAUTH_COOKIE, isShopeeState, shopeeApp } from '@/lib/shopee';
 
 /**
  * Retorno da Shopee após o admin autorizar a loja: troca o código por tokens e salva no Vault.
  * O código de autorização e os tokens nunca vão para o log nem para a tela.
  */
-export async function GET(req: NextRequest) {
+export async function GET(req: NextRequest, { params: routeParams }: { params: Promise<{ state: string }> }) {
   const done = (q: string) => {
     const res = NextResponse.redirect(new URL(`/configuracoes/conexoes?${q}`, req.url));
     res.cookies.delete({ name: SHOPEE_OAUTH_COOKIE, path: '/api/oauth/shopee' });
@@ -23,7 +23,8 @@ export async function GET(req: NextRequest) {
   try {
     saved = JSON.parse(req.cookies.get(SHOPEE_OAUTH_COOKIE)?.value ?? 'null');
   } catch { /* cookie inválido */ }
-  if (!saved || saved.state !== params.get('state') || saved.uid !== ctx.user.id) return done('erro=state');
+  const { state } = await routeParams; // state vem no caminho (/callback/<state>), não na query
+  if (!isShopeeState(state) || !saved || saved.state !== state || saved.uid !== ctx.user.id) return done('erro=state');
 
   const code = params.get('code');
   const shopId = params.get('shop_id') ?? '';
@@ -46,6 +47,11 @@ export async function GET(req: NextRequest) {
     });
     return done('ok=shopee');
   } catch (err) {
+    // Na conexão, recusa da Shopee não é "autorização vencida": é tentar conectar de novo.
+    if (err instanceof ShopeeAuthError) {
+      console.error(`Falha na conexão da Shopee (etapa ${etapa}): autorização recusada`);
+      return done('erro=recusado-shopee');
+    }
     const detalhe = safeDetail(err);
     console.error(`Falha na conexão da Shopee (etapa ${etapa}):`, detalhe);
     return done(new URLSearchParams({ erro: 'falha', etapa, detalhe }).toString());

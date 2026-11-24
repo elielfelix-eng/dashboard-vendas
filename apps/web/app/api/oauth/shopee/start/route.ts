@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createState, shopeeAuthUrl } from '@dash/connectors';
 import { getCurrentUser } from '@/lib/auth';
-import { SHOPEE_OAUTH_COOKIE, shopeeApp, shopeeConfigProblems } from '@/lib/shopee';
+import { SHOPEE_OAUTH_COOKIE, shopeeApp, shopeeConfigProblems, shopeeRedirectUrl } from '@/lib/shopee';
 
 /** Inicia a conexão com a loja da Shopee (somente admin, somente leitura). */
 export async function GET(req: NextRequest) {
@@ -16,12 +16,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // A Shopee não devolve um "state" próprio: ele vai na URL de retorno e é conferido com o cookie.
+  // A Shopee não devolve um "state" próprio: ele vai no caminho da URL de retorno e é conferido com o cookie.
   const state = createState();
-  const redirect = new URL('/api/oauth/shopee/callback', req.url);
-  redirect.searchParams.set('state', state);
+  const redirect = shopeeRedirectUrl(req.url, state);
 
-  const res = NextResponse.redirect(shopeeAuthUrl(shopeeApp(), redirect.toString(), Math.floor(Date.now() / 1000)));
+  const res = NextResponse.redirect(shopeeAuthUrl(shopeeApp(), redirect, Math.floor(Date.now() / 1000)));
   res.cookies.set(SHOPEE_OAUTH_COOKIE, JSON.stringify({ state, uid: ctx.user.id }), {
     httpOnly: true,
     secure: true,

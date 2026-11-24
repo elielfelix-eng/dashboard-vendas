@@ -51,7 +51,7 @@ test('assinatura de chamada da loja inclui access_token e shop_id', () => {
 });
 
 test('URL de autorização: auth_partner com partner_id, timestamp, sign e redirect; sem a partner key', () => {
-  const redirect = 'https://painel.exemplo.test/api/oauth/shopee/callback?state=abc';
+  const redirect = 'https://painel.exemplo.test/api/oauth/shopee/callback/estado-ficticio_123';
   const u = new URL(shopeeAuthUrl(app, redirect, 1655714431));
   assert.equal(u.origin + u.pathname, `${SHOPEE_API}/api/v2/shop/auth_partner`);
   assert.equal(u.searchParams.get('partner_id'), '2001887');
@@ -141,6 +141,21 @@ test('HTTP 400 comum vira erro com o código, sem segredo', async () => {
     () => refreshShopeeTokens(app, SHOP_ID, 'ref-velho'),
     (e: unknown) => !(e instanceof ShopeeAuthError) && /HTTP 400/.test((e as Error).message) && semSegredo(e),
   );
+});
+
+test('renovação com HTTP 5xx não é tentada de novo (refresh de uso único) e vira erro sem segredo', async () => {
+  const chamadas = responder([json({ error: 'internal', message: 'refresh ref-velho' }, 500), json({ access_token: 'acc-vazado', refresh_token: 'ref-vazado', expire_in: 14400 })]);
+  await assert.rejects(
+    () => refreshShopeeTokens(app, SHOP_ID, 'ref-velho'),
+    (e: unknown) => !(e instanceof ShopeeAuthError) && /HTTP 500/.test((e as Error).message) && semSegredo(e),
+  );
+  assert.equal(chamadas.length, 1);
+});
+
+test('troca do código com HTTP 5xx não é tentada de novo (código de uso único)', async () => {
+  const chamadas = responder([json({ error: 'internal' }, 502), json({ access_token: 'acc-vazado', refresh_token: 'ref-vazado', expire_in: 14400 })]);
+  await assert.rejects(() => exchangeShopeeCode(app, 'codigo-ficticio', SHOP_ID), semSegredo);
+  assert.equal(chamadas.length, 1);
 });
 
 test('resposta sem refresh token vira erro, sem expor o access token', async () => {

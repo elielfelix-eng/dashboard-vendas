@@ -3,6 +3,8 @@ import { createClient } from '@/lib/supabase/server';
 
 const MESSAGES: Record<string, { text: string; ok: boolean }> = {
   mercadolivre: { text: 'Conta do Mercado Livre conectada com sucesso.', ok: true },
+  shopee: { text: 'Loja da Shopee conectada com sucesso.', ok: true },
+  'negado-shopee': { text: 'A autorização foi cancelada na Shopee.', ok: false },
   state: { text: 'A conexão expirou ou foi adulterada. Tente novamente.', ok: false },
   negado: { text: 'A autorização foi cancelada no Mercado Livre.', ok: false },
   falha: { text: 'Não foi possível concluir a conexão. Tente novamente.', ok: false },
@@ -12,6 +14,8 @@ const ETAPAS: Record<string, string> = {
   token: 'troca da autorização por tokens no Mercado Livre (confira ML_CLIENT_ID, ML_CLIENT_SECRET, Redirect URI e PKCE no app do ML)',
   conta: 'leitura dos dados da conta no Mercado Livre',
   banco: 'gravação no banco de dados (confira a DATABASE_URL na Vercel)',
+  'shopee-token': 'troca da autorização por tokens na Shopee (confira SHOPEE_PARTNER_ID, SHOPEE_PARTNER_KEY e a URL de retorno no app do Shopee Open Platform)',
+  'shopee-banco': 'gravação da loja da Shopee no banco de dados (confira a DATABASE_URL na Vercel)',
 };
 
 export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string; etapa?: string; detalhe?: string }> }) {
@@ -28,6 +32,12 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
           'Corrija em Settings > Environment Variables e faça Redeploy. O ML_REDIRECT_URI deve terminar em /api/oauth/mercadolivre/callback.',
         ok: false,
       }
+    : params.erro === 'config-shopee'
+    ? {
+        text: `Configuração da Shopee incompleta na Vercel: ${(params.faltando ?? '').replace(/[^A-Z_, ()a-z]/g, '')}. ` +
+          'Corrija em Settings > Environment Variables e faça Redeploy.',
+        ok: false,
+      }
     : MESSAGES[params.ok ?? params.erro ?? ''];
 
   const supabase = await createClient();
@@ -38,6 +48,8 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
     .order('created_at');
 
   const ml = (accounts ?? []).filter((a) => a.channel === 'mercadolivre');
+  // A conta da Shopee só é criada junto com os tokens (mesma transação no retorno da autorização).
+  const shopee = (accounts ?? []).filter((a) => a.channel === 'shopee');
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -65,9 +77,21 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
         </div>
       </section>
 
-      <section className="mt-4 rounded-xl border border-border bg-surface p-5 opacity-70">
-        <h2 className="font-semibold">Shopee</h2>
-        <p className="text-sm text-muted">Disponível após a aprovação no Shopee Open Platform (Fase 6).</p>
+      <section className="mt-4 rounded-xl border border-border bg-surface p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Shopee</h2>
+            <p className="text-sm text-muted">
+              {shopee.length
+                ? `Conectada (somente leitura): ${shopee.map((a) => `${a.nickname ?? `loja ${a.external_id}`}${a.active ? '' : ' (inativa)'}`).join(', ')}`
+                : 'Nenhuma loja conectada'}
+            </p>
+          </div>
+          {/* Link comum (GET) para iniciar a autorização — precisa sair do site */}
+          <a href="/api/oauth/shopee/start" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white">
+            {shopee.length ? 'Reconectar' : 'Conectar Shopee'}
+          </a>
+        </div>
       </section>
 
       <section className="mt-4 rounded-xl border border-border bg-surface p-5 opacity-70">

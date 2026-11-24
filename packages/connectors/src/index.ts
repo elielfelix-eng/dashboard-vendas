@@ -7,4 +7,14 @@ export type { MlAdStatus, MlAdsCampaign, MlAdsCampaignDay, MlBillingDetail, MlBi
 export { BitrixClient } from './bitrix24/client.ts';
 export type { BitrixResponse } from './bitrix24/client.ts';
 export * from './bitrix24/mapear.ts';
-export { ShopeeConnector, shopeeSign, SHOPEE_API } from './shopee/connector.ts';
+export {
+  ShopeeConnector,
+  shopeeSign,
+  SHOPEE_API,
+  SHOPEE_AUTH_EXPIRED,
+  ShopeeAuthError,
+  exchangeShopeeCode,
+  refreshShopeeTokens,
+  shopeeAuthUrl,
+} from './shopee/connector.ts';
+export type { ShopeeAppCredentials } from './shopee/connector.ts';

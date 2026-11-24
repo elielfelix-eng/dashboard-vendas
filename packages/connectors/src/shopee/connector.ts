@@ -19,6 +19,14 @@ export interface ShopeeAppCredentials {
   partnerKey: string;
 }
 
+export {
+  SHOPEE_AUTH_EXPIRED,
+  ShopeeAuthError,
+  exchangeShopeeCode,
+  refreshShopeeTokens,
+  shopeeAuthUrl,
+} from './auth.ts';
+
 /** Assinatura HMAC-SHA256 exigida em toda chamada da Shopee. */
 export function shopeeSign(
   app: ShopeeAppCredentials,

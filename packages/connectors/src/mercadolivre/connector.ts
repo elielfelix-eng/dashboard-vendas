@@ -9,6 +9,8 @@ import type {
   VisitsDaily,
 } from '../types.ts';
 import { MercadoLivreClient } from './client.ts';
+import { lerPrazosEnvio, lerReputacao } from './prazos.ts';
+import type { PrazosEnvio, Reputacao } from './prazos.ts';
 
 /* ---------- Tipos parciais das respostas da API do ML ---------- */
 interface MlAttribute { id: string; value_name: string | null }
@@ -384,6 +386,30 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       if (err instanceof HttpError && (err.status === 404 || err.status === 403)) return null;
       throw err;
     }
+  }
+
+  /** Prazos de despacho/entrega de um envio. 404/403 no envio => null; no /sla => sla null. */
+  async getPrazosEnvio(shipmentId: string): Promise<PrazosEnvio | null> {
+    let envio: unknown;
+    try {
+      envio = await this.api.get<unknown>(`/shipments/${shipmentId}`, {}, { 'x-format-new': 'true' });
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 404 || err.status === 403)) return null;
+      throw err;
+    }
+    let sla: unknown = null;
+    try {
+      sla = await this.api.get<unknown>(`/shipments/${shipmentId}/sla`);
+    } catch (err) {
+      if (!(err instanceof HttpError && (err.status === 404 || err.status === 403))) throw err;
+    }
+    return lerPrazosEnvio(envio, sla);
+  }
+
+  /** Reputação atual do vendedor (de /users/me). */
+  async getReputacao(): Promise<Reputacao> {
+    const u = await this.me();
+    return lerReputacao(u.seller_reputation);
   }
 
   /* ------------------------------- Fatura ------------------------------ */

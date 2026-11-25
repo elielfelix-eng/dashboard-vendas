@@ -17,6 +17,11 @@ const LINHAS = [
   { chave: 'atrasos', rotulo: 'Atrasos', cor: '#d97706' },
 ] as const;
 
+const hhmm = (iso: string | null) => {
+  const d = iso ? new Date(iso) : null;
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Sao_Paulo' }) : null;
+};
 const ddmm = (iso: string | null) => (iso ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : '—');
 const pct1 = (v: number) => `${v.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
 const urlVenda = (orderId: string) => `https://www.mercadolivre.com.br/vendas/${encodeURIComponent(orderId)}/detalhe`;
@@ -52,7 +57,7 @@ function GraficoReputacao({ serie }: { serie: alertas.PontoReputacao[] }) {
   );
 }
 
-function Tabela({ linhas }: { linhas: alertas.AlertaEnvio[] }) {
+function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho' | 'entrega' }) {
   const normais = linhas.filter((a) => a.situacao !== 'prazo_desconhecido');
   const desconhecidas = linhas.filter((a) => a.situacao === 'prazo_desconhecido');
   const celulas = (a: alertas.AlertaEnvio) => (
@@ -81,7 +86,7 @@ function Tabela({ linhas }: { linhas: alertas.AlertaEnvio[] }) {
             <>
               <tr className="bg-bg">
                 <td colSpan={6} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                  Prazo desconhecido ({desconhecidas.length}): o Mercado Livre não informou prazo de despacho para estas vendas
+                  {`Prazo desconhecido (${desconhecidas.length}): o Mercado Livre não informou prazo de ${aba === 'despacho' ? 'despacho' : 'entrega'} para estas vendas`}
                 </td>
               </tr>
               {desconhecidas.map((a) => <tr key={a.shipment_id} className="border-b border-border text-muted last:border-0">{celulas(a)}</tr>)}
@@ -110,6 +115,8 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
   }
 
   const linhas = aba === 'despacho' ? d.despacho : d.entrega;
+  const ultima = d.reputacao.map((r) => r.capturado_em).sort().at(-1) ?? null;
+  const atualizado = hhmm(ultima);
   const nivel = corDoNivel(d.reputacao[0]?.level_id ?? null);
   const abas = [
     { chave: 'despacho', rotulo: `Despacho em risco (${d.despacho.length})` },
@@ -118,7 +125,10 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Alertas e Reputação</h1>
+      <div className="mb-4 flex flex-wrap items-baseline gap-3">
+        <h1 className="text-2xl font-semibold">Alertas e Reputação</h1>
+        {atualizado && <span className="text-xs text-muted">Atualizado às {atualizado}</span>}
+      </div>
 
       <section className="rounded-xl border border-border bg-surface p-4">
         <div className="mb-3 flex items-center gap-3">
@@ -158,7 +168,7 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
       </nav>
 
       <section className="mt-4">
-        {linhas.length === 0 ? <SemDados texto="Nenhuma venda em risco agora." /> : <Tabela linhas={linhas} />}
+        {linhas.length === 0 ? <SemDados texto="Nenhuma venda em risco agora." /> : <Tabela linhas={linhas} aba={aba} />}
       </section>
 
       <section className="mt-6 rounded-xl border border-border bg-surface p-4">

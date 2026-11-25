@@ -10,6 +10,8 @@ test('textoFaltam: dias úteis restantes', () => {
 test('textoFaltam: atrasada e prazo desconhecido', () => {
   assert.equal(textoFaltam(-2, 'atrasada'), 'atrasada há 2 dias úteis');
   assert.equal(textoFaltam(-1, 'atrasada'), 'atrasada há 1 dia útil');
+  assert.equal(textoFaltam(0, 'atrasada'), 'atrasada');
+  assert.equal(textoFaltam(null, 'atrasada'), 'atrasada');
   assert.equal(textoFaltam(null, 'prazo_desconhecido'), 'prazo desconhecido');
 });
 test('corDoNivel: nomes dos níveis', () => {

@@ -4,6 +4,7 @@ const plural = (n: number) => (n === 1 ? 'dia útil' : 'dias úteis');
 
 /** Quanto falta para o prazo, em dias úteis (negativo = atrasada). */
 export function textoFaltam(faltam: number | null, situacao: string): string {
+  if (situacao === 'atrasada') return faltam != null && faltam < 0 ? `atrasada há ${-faltam} ${plural(-faltam)}` : 'atrasada';
   if (situacao === 'prazo_desconhecido' || faltam == null) return 'prazo desconhecido';
   if (faltam < 0) return `atrasada há ${-faltam} ${plural(-faltam)}`;
   if (faltam === 0) return 'vence hoje';

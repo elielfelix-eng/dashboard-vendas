@@ -104,13 +104,12 @@ export function lerPrazosEnvio(envio: unknown, sla: unknown): PrazosEnvio {
 }
 
 /**
- * SUPOSIÇÃO (formato real a confirmar no levantamento): valor <= 1 é fração
- * (x100); valor > 1 já é percentual.
+ * O ML documenta `rate` como fração decimal (0.01 = 1%). Sempre x100, sem heurística.
+ * A confirmar no levantamento; se vier em percentual, basta remover o "* 100".
  */
 export function paraPercentual(v: unknown): number | null {
   if (typeof v !== 'number' || !Number.isFinite(v)) return null;
-  const p = v <= 1 ? v * 100 : v;
-  return Math.round(p * 1e6) / 1e6;
+  return Math.round(v * 100 * 1e6) / 1e6;
 }
 
 export function lerReputacao(sellerReputation: unknown): Reputacao {

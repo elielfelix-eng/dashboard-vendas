@@ -60,8 +60,12 @@ test('lerReputacao converte frações em percentual', () => {
   assert.equal(r.periodo, '60 days');
 });
 
-test('lerReputacao trata valor > 1 como já percentual', () => {
-  assert.equal(lerReputacao({ metrics: { claims: { rate: 2.5 } } }).reclamacoesPct, 2.5);
+test('lerReputacao: rate é sempre fração (x100)', () => {
+  const pct = (rate: number) => lerReputacao({ metrics: { claims: { rate } } }).reclamacoesPct;
+  assert.equal(pct(0.005), 0.5);
+  assert.equal(pct(0.01), 1);
+  assert.equal(pct(0.03), 3);
+  assert.equal(pct(1), 100);
 });
 
 test('lerReputacao(undefined): tudo null', () => {

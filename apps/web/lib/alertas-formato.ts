@@ -11,6 +11,13 @@ export function textoFaltam(faltam: number | null, situacao: string): string {
   return `${faltam} ${plural(faltam)}`;
 }
 
+/** Separa da lista de despacho os pedidos 'em_producao' (fora da antecedência), ordenados pelo prazo. */
+export function separarProducao<T extends { situacao: string; prazo: string | null }>(linhas: T[]): { riscos: T[]; emProducao: T[] } {
+  const emProducao = linhas.filter((l) => l.situacao === 'em_producao')
+    .sort((a, b) => (a.prazo ?? '9999-12-31').localeCompare(b.prazo ?? '9999-12-31'));
+  return { riscos: linhas.filter((l) => l.situacao !== 'em_producao'), emProducao };
+}
+
 const ORIGENS: Record<string, string> = { producao: 'Terminar produto', envio: 'Despacho', estimado: 'Estimado' };
 
 /** Rótulo da origem do prazo na lista de despacho ('—' quando não há). */

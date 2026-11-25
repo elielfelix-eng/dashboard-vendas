@@ -3,7 +3,8 @@ import { createClient } from './supabase/server';
 // Chamadas tipadas às funções analytics.alertas_* e analytics.reputacao_* (o banco calcula; permissão 'operacao').
 // Valores numeric chegam como string pela API: são convertidos para number aqui.
 
-export type SituacaoAlerta = 'atrasada' | 'em_risco' | 'prazo_desconhecido';
+// 'em_producao': só no despacho, pedido em produção ainda fora da antecedência (não conta no aviso do menu).
+export type SituacaoAlerta = 'atrasada' | 'em_risco' | 'prazo_desconhecido' | 'em_producao';
 
 export interface AlertaEnvio {
   situacao: SituacaoAlerta; shipment_id: string; order_id: string | null; pack_id: string | null; item_id: string | null;

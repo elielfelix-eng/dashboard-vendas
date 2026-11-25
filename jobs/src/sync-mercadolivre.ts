@@ -2,7 +2,7 @@ import { MercadoLivreConnector, refreshTokens, type MlAppCredentials, type Order
 import { requireEnv, upsert, type Sql } from './db.ts';
 import { createTokenProvider } from './token-store.ts';
 import { diasRebuscaAds } from './ads-janela.ts';
-import { enviosParaAtualizar, salvarPrazos, salvarReputacao } from './prazos-envio.ts';
+import { atualizarPrazos, salvarReputacao } from './prazos-envio.ts';
 
 const DAY = 86_400_000;
 
@@ -45,7 +45,9 @@ export async function syncMercadoLivre(sql: Sql) {
       stats.cancelled_shipments = await syncCancelledShipments(sql, ml);
       // Prazos de envio e reputação (alertas): não fatais; o log mostra só a mensagem
       try {
-        stats.prazos_envio = await syncPrazosEnvio(sql, ml, acc.id);
+        const pz = await atualizarPrazos(sql, ml, acc.id);
+        stats.prazos_envio = pz.processados;
+        if (pz.falhas) stats.prazos_envio_falhas = pz.falhas;
       } catch (err) {
         console.warn('[ML] Falha ao buscar os prazos de envio (será tentada de novo):', (err as Error).message);
         stats.prazos_envio = -1;
@@ -181,13 +183,6 @@ async function syncCancelledShipments(sql: Sql, ml: MercadoLivreConnector) {
        where channel = 'mercadolivre' and shipment_id = ${p.shipment_id}`;
   }
   return pending.length;
-}
-
-/** Atualiza os prazos de envio dos pedidos pagos recentes ainda sem estado final. */
-async function syncPrazosEnvio(sql: Sql, ml: MercadoLivreConnector, accountId: string) {
-  const ids = await enviosParaAtualizar(sql);
-  for (const id of ids) await salvarPrazos(sql, accountId, id, await ml.getPrazosEnvio(id));
-  return ids.length;
 }
 
 /**

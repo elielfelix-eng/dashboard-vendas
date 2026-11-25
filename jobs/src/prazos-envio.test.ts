@@ -1,7 +1,7 @@
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { PGlite } from '@electric-sql/pglite';
-import { enviosParaAtualizar, salvarPrazos, salvarReputacao } from './prazos-envio.ts';
+import { atualizarPrazos, enviosParaAtualizar, salvarPrazos, salvarReputacao } from './prazos-envio.ts';
 import type { Sql } from './db.ts';
 
 // Banco: PGlite real, com as tabelas mínimas (mesmas colunas da migration 0023 e de mkt.orders).
@@ -90,4 +90,28 @@ test('salvarReputacao grava as taxas em percentual', async () => {
        from mkt.reputacao_fotos where account_id = $1`, [CONTA]);
   assert.equal(rows.length, 1);
   assert.deepEqual([rows[0].level_id, rows[0].rec, rows[0].can, rows[0].atr, rows[0].vendas_periodo], ['5_green', 1.5, 0.5, 2, 120]);
+});
+
+test('um envio que falha não impede os demais; a falha é contada; envio em 2 pedidos é buscado uma vez', async () => {
+  await db.exec('delete from mkt.orders; delete from mkt.envios_prazos');
+  await pedido('10', 'S-A', 'paid', 9);
+  await pedido('11', 'S-A', 'paid', 8); // mesmo envio, 2 pedidos
+  await pedido('12', 'S-RUIM', 'paid', 7);
+  await pedido('13', 'S-B', 'paid', 6);
+  const chamadas: string[] = [];
+  const ml = {
+    async getPrazosEnvio(id: string) {
+      chamadas.push(id);
+      if (id === 'S-RUIM') throw new Error('HTTP 429');
+      return { ...prazos };
+    },
+  };
+  const orig = console.warn;
+  console.warn = () => {};
+  let r;
+  try { r = await atualizarPrazos(sql, ml, CONTA); } finally { console.warn = orig; }
+  assert.deepEqual(r, { processados: 2, falhas: 1 });
+  assert.deepEqual(chamadas, ['S-A', 'S-RUIM', 'S-B']);
+  const { rows } = await db.query<{ shipment_id: string }>('select shipment_id from mkt.envios_prazos order by 1');
+  assert.deepEqual(rows.map((x) => x.shipment_id), ['S-A', 'S-B']);
 });

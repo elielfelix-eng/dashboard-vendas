@@ -24,7 +24,7 @@ export async function salvarPrazos(sql: Sql, accountId: string, shipmentId: stri
     insert into mkt.envios_prazos
       (channel, shipment_id, account_id, status, substatus, prazo_despacho, prazo_entrega, despachado_em, entregue_em, atualizado_em)
     values
-      ('mercadolivre', ${shipmentId}, ${accountId}, ${status}, ${p?.substatus ?? null}, ${p?.prazoDespacho ?? null},
+      ('mercadolivre', ${shipmentId}, ${accountId}, ${status ?? null}, ${p?.substatus ?? null}, ${p?.prazoDespacho ?? null},
        ${p?.prazoEntrega ?? null}, ${p?.despachadoEm ?? null}, ${p?.entregueEm ?? null}, now())
     on conflict (channel, shipment_id) do update set
       account_id = excluded.account_id, status = excluded.status, substatus = excluded.substatus,
@@ -38,6 +38,28 @@ export async function salvarReputacao(sql: Sql, accountId: string, r: Reputacao)
     insert into mkt.reputacao_fotos
       (account_id, level_id, power_seller_status, reclamacoes_taxa, cancelamentos_taxa, atrasos_taxa, vendas_periodo, periodo)
     values
-      (${accountId}, ${r.levelId}, ${r.powerSellerStatus}, ${r.reclamacoesPct}, ${r.cancelamentosPct}, ${r.atrasosPct},
-       ${r.vendasPeriodo}, ${r.periodo})`;
+      (${accountId}, ${r.levelId ?? null}, ${r.powerSellerStatus ?? null}, ${r.reclamacoesPct ?? null},
+       ${r.cancelamentosPct ?? null}, ${r.atrasosPct ?? null}, ${r.vendasPeriodo ?? null}, ${r.periodo ?? null})`;
+}
+
+/**
+ * Busca e grava os prazos de cada envio pendente, isolando cada um: a falha de um (429, timeout, 5xx)
+ * é contada e não impede os demais. O log mostra só um rótulo e a mensagem, sem token nem corpo.
+ */
+export async function atualizarPrazos(
+  sql: Sql, ml: { getPrazosEnvio(id: string): Promise<PrazosEnvio | null> }, accountId: string,
+): Promise<{ processados: number; falhas: number }> {
+  const ids = await enviosParaAtualizar(sql);
+  let processados = 0;
+  let falhas = 0;
+  for (const id of ids) {
+    try {
+      await salvarPrazos(sql, accountId, id, await ml.getPrazosEnvio(id));
+      processados++;
+    } catch (err) {
+      falhas++;
+      console.warn('[ML] Falha ao atualizar o prazo de um envio (será tentado de novo):', (err as Error).message);
+    }
+  }
+  return { processados, falhas };
 }

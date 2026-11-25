@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
 import { validarLimites } from '@/lib/ads-limites';
+import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
 
 const CANAIS = ['mercadolivre', 'shopee'];
@@ -92,4 +93,75 @@ export async function excluirLimitesAds(form: FormData): Promise<void> {
   if (error) voltar('Não foi possível excluir agora.', 'erro');
   if (!apagadas || apagadas.length === 0) voltar('Nada excluído: a vigência não foi encontrada.', 'erro');
   voltar('Vigência de limites excluída.', 'ok');
+}
+
+// ---------------------------------------------------------------------
+// Alertas e reputacao (so quem tem a permissao 'configuracoes')
+// ---------------------------------------------------------------------
+const INDICADORES = ['reclamacoes', 'cancelamentos', 'atrasos'];
+
+export async function salvarParametrosAlertas(form: FormData): Promise<void> {
+  await exigirPermissao('configuracoes');
+  const ant = numero(form.get('antecedencia_padrao'));
+  const perto = numero(form.get('perto_limite_pct'));
+  if (String(form.get('antecedencia_padrao') ?? '').trim() === '' || !Number.isInteger(ant) || ant < 0 || ant > 30) {
+    voltar('A antecedência padrão deve ser um número inteiro de 0 a 30 dias úteis.', 'erro');
+  }
+  if (String(form.get('perto_limite_pct') ?? '').trim() === '' || Number.isNaN(perto) || perto < 1 || perto > 100) {
+    voltar('"Perto do limite" deve ser um percentual de 1 a 100.', 'erro');
+  }
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('parametros_alertas')
+    .upsert({ id: true, antecedencia_padrao: ant, perto_limite_pct: perto }, { onConflict: 'id' });
+  if (error) voltar('Não foi possível salvar os parâmetros dos alertas agora.', 'erro');
+  voltar('Parâmetros dos alertas salvos.', 'ok');
+}
+
+export async function adicionarFeriado(form: FormData): Promise<void> {
+  await exigirPermissao('configuracoes');
+  const data = String(form.get('data') ?? '');
+  const nome = String(form.get('nome') ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) voltar('Informe a data do feriado.', 'erro');
+  if (nome.length < 1 || nome.length > 80) voltar('Informe o nome do feriado (até 80 caracteres).', 'erro');
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('feriados').upsert({ data, nome }, { onConflict: 'data' });
+  if (error) voltar('Não foi possível salvar o feriado agora.', 'erro');
+  voltar('Feriado salvo.', 'ok');
+}
+
+export async function excluirFeriado(form: FormData): Promise<void> {
+  await exigirPermissao('configuracoes');
+  const data = String(form.get('data') ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) voltar('Data do feriado inválida.', 'erro');
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('feriados').delete().eq('data', data);
+  if (error) voltar('Não foi possível excluir o feriado agora.', 'erro');
+  voltar('Feriado excluído.', 'ok');
+}
+
+export async function salvarLimiteReputacao(form: FormData): Promise<void> {
+  await exigirPermissao('configuracoes');
+  const level = String(form.get('level_id') ?? '').trim();
+  const indicador = String(form.get('indicador') ?? '');
+  const bruto = String(form.get('limite_pct') ?? '').trim();
+  const limite = numero(bruto);
+  if (level.length < 1 || level.length > 40) voltar('Informe o nível (cor) da reputação.', 'erro');
+  if (!INDICADORES.includes(indicador)) voltar('Escolha o indicador.', 'erro');
+  if (bruto === '' || Number.isNaN(limite) || limite < 0 || limite > 100) voltar('O limite deve ser um percentual de 0 a 100.', 'erro');
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('reputacao_limites')
+    .upsert({ level_id: level, indicador, limite_pct: limite }, { onConflict: 'level_id,indicador' });
+  if (error) voltar('Não foi possível salvar o limite agora.', 'erro');
+  voltar('Limite de reputação salvo.', 'ok');
+}
+
+export async function excluirLimiteReputacao(form: FormData): Promise<void> {
+  await exigirPermissao('configuracoes');
+  const level = String(form.get('level_id') ?? '').trim();
+  const indicador = String(form.get('indicador') ?? '');
+  if (!level || !INDICADORES.includes(indicador)) voltar('Limite inválido.', 'erro');
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('reputacao_limites').delete().eq('level_id', level).eq('indicador', indicador);
+  if (error) voltar('Não foi possível excluir o limite agora.', 'erro');
+  voltar('Limite excluído.', 'ok');
 }

@@ -29,6 +29,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   { section: 'Administração', items: [
     { href: '/configuracoes/permissoes', label: 'Permissões', ready: true, perm: 'configuracoes' },
     { href: '/configuracoes/parametros', label: 'Parâmetros de custo', ready: true, perm: 'configuracoes' },
+    { href: '/configuracoes/grupos-anuncios', label: 'Grupos de anúncios', ready: true, perm: 'editar_grupos' },
     { href: '/configuracoes/metas', label: 'Metas (upload)', ready: true, perm: 'editar_metas' },
     { href: '/configuracoes/conexoes', label: 'Conexões', ready: true, perm: 'configuracoes' },
     { href: '/configuracoes/vendedores-crm', label: 'Vendedores do CRM', ready: true, perm: 'configuracoes' },

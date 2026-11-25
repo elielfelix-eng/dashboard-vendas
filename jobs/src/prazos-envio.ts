@@ -1,14 +1,15 @@
 import type { PrazosEnvio, Reputacao } from '@dash/connectors';
 import type { Sql } from './db.ts';
 
-/** Envios de pedidos pagos dos últimos 45 dias cujo prazo ainda não está salvo ou não está em estado final. */
+/** Envios de pedidos pagos da janela de 46 dias (por data de Brasília, superconjunto da lista de alertas de 45 dias) cujo prazo ainda não está salvo ou não está em estado final. */
 export async function enviosParaAtualizar(sql: Sql, limite = 1500): Promise<string[]> {
   const rows = await sql<{ shipment_id: string }[]>`
     select o.shipment_id
       from mkt.orders o
       left join mkt.envios_prazos p on p.channel = o.channel and p.shipment_id = o.shipment_id
      where o.channel = 'mercadolivre' and o.status = 'paid' and o.shipment_id is not null
-       and o.date_created >= now() - interval '45 days'
+       and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date
+           >= (now() at time zone 'America/Sao_Paulo')::date - 46
        and (p.shipment_id is null or p.status is null
             or p.status not in ('delivered', 'not_delivered', 'cancelled', 'sem_envio'))
      group by o.shipment_id

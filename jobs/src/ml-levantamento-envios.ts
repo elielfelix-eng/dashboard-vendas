@@ -95,6 +95,75 @@ async function levantarPrazoProducao(sql: ReturnType<typeof connect>, api: Merca
   console.log(`\n  envios em produção examinados: ${achados}`);
 }
 
+/** Procura recursivamente uma chave pelo nome e devolve o valor se for string/número curto. */
+function acharChave(v: unknown, chave: string): string | null {
+  if (Array.isArray(v)) {
+    for (const x of v) {
+      const r = acharChave(x, chave);
+      if (r !== null) return r;
+    }
+  } else if (isObj(v)) {
+    for (const [k, x] of Object.entries(v)) {
+      if (k === chave && (typeof x === 'string' || typeof x === 'number')) return String(x);
+      const r = acharChave(x, chave);
+      if (r !== null) return r;
+    }
+  }
+  return null;
+}
+
+/** Imprime folhas (caminho = valor) cujo valor é data ISO, número ou enum curto. */
+function imprimirFolhas(raiz: unknown, prefixo: string): number {
+  let n = 0;
+  const andar = (v: unknown, caminho: string) => {
+    if (Array.isArray(v)) v.forEach((x, i) => andar(x, `${caminho}[${i}]`));
+    else if (isObj(v)) {
+      for (const [k, x] of Object.entries(v)) {
+        if (SENSIVEL_RE.test(k)) continue;
+        andar(x, `${caminho}.${k}`);
+      }
+    } else if (typeof v === 'number' || (typeof v === 'string' && (ISO_RE.test(v) || ENUM_RE.test(v)))) {
+      console.log(`    ${caminho} = ${v}`);
+      n++;
+    }
+  };
+  andar(raiz, prefixo);
+  return n;
+}
+
+async function levantarDataEntregaAtual(sql: ReturnType<typeof connect>, api: MercadoLivreClient) {
+  console.log('\n=== DATA DE ENTREGA ATUAL ===');
+  const FORCADOS = ['48542334057', '48598060391', '48617609826', '48584195979'];
+  const linhas = await sql<{ order_id: string; shipment_id: string; raw: unknown }[]>`
+    select order_id, shipment_id, raw from mkt.orders
+     where channel = 'mercadolivre' and shipment_id = any(${FORCADOS})`;
+  const recentes = await sql<{ order_id: string; shipment_id: string; raw: unknown }[]>`
+    select order_id, shipment_id, raw from mkt.orders
+     where channel = 'mercadolivre' and status = 'paid' and shipment_id is not null
+     order by date_created desc
+     limit 30`;
+  const vistos = new Set<string>();
+  const fila = [...linhas, ...recentes].filter((r) => (vistos.has(r.shipment_id) ? false : (vistos.add(r.shipment_id), true)));
+  console.log(`  envios: ${fila.length} (forçados no banco: ${linhas.length}/${FORCADOS.length})`);
+  const SUB = ['estimated_delivery_time', 'estimated_delivery_extended', 'estimated_delivery_final', 'estimated_delivery_limit', 'estimated_schedule_limit', 'delivery_promise'];
+  for (const { order_id, shipment_id, raw } of fila) {
+    console.log(`\n# envio ${shipment_id} (pedido ${order_id})${FORCADOS.includes(shipment_id) ? ' [forçado]' : ''}`);
+    console.log(`  manufacturing_ending_date (pedido): ${texto(acharChave(raw, 'manufacturing_ending_date'))}`);
+    const s = await tentar('shipment', () => api.get<Obj>(`/shipments/${shipment_id}`, {}, { 'x-format-new': 'true' }));
+    if (!s) continue;
+    console.log(`  status: ${texto(s.status)} | substatus: ${texto(s.substatus)}`);
+    const lt = isObj(s.lead_time) ? s.lead_time : {};
+    for (const k of SUB) {
+      if (!(k in lt)) {
+        console.log(`  lead_time.${k}: (ausente)`);
+        continue;
+      }
+      console.log(`  lead_time.${k}:`);
+      if (imprimirFolhas(lt[k], `lead_time.${k}`) === 0) console.log('    (sem folhas imprimíveis)');
+    }
+  }
+}
+
 async function main() {
   const sql = connect();
   try {
@@ -135,6 +204,7 @@ async function main() {
     }
 
     await levantarPrazoProducao(sql, api);
+    await levantarDataEntregaAtual(sql, api);
 
     console.log('\n=== REPUTAÇÃO (seller_reputation) ===');
     const me = await tentar('users/me', () => api.get<Obj>('/users/me'));

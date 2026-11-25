@@ -4,7 +4,10 @@ import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
 import { CAMPOS_LIMITES, situacaoVigencias } from '@/lib/ads-limites';
 import { hojeBrasilia } from '@/lib/periodo';
-import { excluirLimitesAds, excluirParametro, salvarLimitesAds, salvarParametro } from './actions';
+import {
+  adicionarFeriado, excluirFeriado, excluirLimiteReputacao, excluirLimitesAds, excluirParametro,
+  salvarLimiteReputacao, salvarLimitesAds, salvarParametro, salvarParametrosAlertas,
+} from './actions';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 const CANAL: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee' };
@@ -26,6 +29,15 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
   const situacao = (lista: Array<Record<string, unknown>>, d: unknown) =>
     situacaoVigencias(lista.map((x) => String(x.vigente_desde)), hoje)[lista.findIndex((x) => x.vigente_desde === d)];
   const rotuloSit = (v?: string) => (v === 'em vigor' ? ' (em vigor)' : v === 'futura' ? ' (futura)' : '');
+  const [{ data: pa }, { data: fer }, { data: lim }] = await Promise.all([
+    supabase.schema('core').from('parametros_alertas').select('antecedencia_padrao, perto_limite_pct').maybeSingle(),
+    supabase.schema('core').from('feriados').select('data, nome').order('data'),
+    supabase.schema('core').from('reputacao_limites').select('level_id, indicador, limite_pct').order('level_id').order('indicador'),
+  ]);
+  const feriados = fer ?? [];
+  const limitesRep = lim ?? [];
+  const INDIC: Record<string, string> = { reclamacoes: 'Reclamações', cancelamentos: 'Cancelamentos', atrasos: 'Atrasos' };
+  const campo = 'rounded border border-border bg-surface px-2 py-1';
   const linhasCanal = (c: string) => linhas.filter((x) => x.channel === c);
 
   return (
@@ -167,6 +179,122 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
           </form>
         );
       })}
+
+      <h2 className="mb-1 mt-10 text-xl font-semibold">Alertas e reputação</h2>
+      <p className="mb-4 text-sm text-muted">
+        Antecedência padrão dos avisos de atraso (para anúncios sem grupo), sensibilidade do aviso de reputação, feriados usados na
+        contagem de dias úteis e limites de reputação.{!ehAdmin && ' Só o administrador pode alterar.'}
+      </p>
+      {ehAdmin ? (
+        <form action={salvarParametrosAlertas} className="grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">
+          <label className="flex flex-col gap-1">Antecedência padrão (dias úteis, 0 a 30)
+            <input name="antecedencia_padrao" type="number" min={0} max={30} step={1} required
+              defaultValue={Number(pa?.antecedencia_padrao ?? 4)} className={campo} />
+          </label>
+          <label className="flex flex-col gap-1">Perto do limite (%, 1 a 100)
+            <input name="perto_limite_pct" inputMode="decimal" required
+              defaultValue={String(pa?.perto_limite_pct ?? 80).replace('.', ',')} className={campo} />
+          </label>
+          <div className="flex items-end">
+            <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar</button>
+          </div>
+          <p className="text-xs text-muted sm:col-span-3">
+            &quot;Perto do limite&quot; avisa quando um indicador de reputação chega a esse percentual do limite cadastrado.
+          </p>
+        </form>
+      ) : (
+        <p className="text-sm">Antecedência padrão: {Number(pa?.antecedencia_padrao ?? 4)} dias úteis. Perto do limite: {Number(pa?.perto_limite_pct ?? 80).toLocaleString('pt-BR')}%.</p>
+      )}
+
+      <h3 className="mb-2 mt-6 text-sm font-semibold">Feriados</h3>
+      <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+        <table className="w-full text-sm">
+          <tbody>
+            {feriados.length === 0 && <tr><td className="px-3 py-3 text-muted">Nenhum feriado cadastrado.</td></tr>}
+            {feriados.map((f) => (
+              <tr key={f.data} className="border-b border-border last:border-0">
+                <td className="whitespace-nowrap px-3 py-1.5">{dataBr(f.data)}</td>
+                <td className="px-3 py-1.5">{f.nome}</td>
+                <td className="px-3 py-1.5 text-right">
+                  {ehAdmin && (
+                    <form action={excluirFeriado}>
+                      <input type="hidden" name="data" value={f.data} />
+                      <button className="text-xs text-muted hover:text-bad">Excluir</button>
+                    </form>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {ehAdmin && (
+        <form action={adicionarFeriado} className="mt-3 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-surface p-4 text-sm">
+          <label className="flex flex-col gap-1">Data
+            <input type="date" name="data" required className={campo} />
+          </label>
+          <label className="flex flex-col gap-1">Nome
+            <input name="nome" required maxLength={80} placeholder="Ex.: feriado municipal" className={`${campo} w-64`} />
+          </label>
+          <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Adicionar feriado</button>
+        </form>
+      )}
+
+      <h3 className="mb-2 mt-6 text-sm font-semibold">Limites de reputação (%)</h3>
+      <p className="mb-2 text-xs text-muted">
+        Esta tabela começa vazia de propósito. Confirme os valores na página oficial do Mercado Livre sobre reputação de vendedores
+        antes de cadastrar qualquer limite; sem limite cadastrado, o painel mostra &quot;limite não cadastrado&quot;.
+      </p>
+      <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-xs text-muted">
+              <th className="px-3 py-2 text-left font-medium">Nível (cor)</th>
+              <th className="px-3 py-2 text-left font-medium">Indicador</th>
+              <th className="px-3 py-2 text-right font-medium">Limite</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {limitesRep.length === 0 && <tr><td colSpan={4} className="px-3 py-3 text-muted">Nenhum limite cadastrado.</td></tr>}
+            {limitesRep.map((l) => (
+              <tr key={`${l.level_id}|${l.indicador}`} className="border-b border-border last:border-0">
+                <td className="px-3 py-1.5">{l.level_id}</td>
+                <td className="px-3 py-1.5">{INDIC[l.indicador] ?? l.indicador}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{Number(l.limite_pct).toLocaleString('pt-BR')}%</td>
+                <td className="px-3 py-1.5 text-right">
+                  {ehAdmin && (
+                    <form action={excluirLimiteReputacao}>
+                      <input type="hidden" name="level_id" value={l.level_id} />
+                      <input type="hidden" name="indicador" value={l.indicador} />
+                      <button className="text-xs text-muted hover:text-bad">Excluir</button>
+                    </form>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {ehAdmin && (
+        <form action={salvarLimiteReputacao} className="mt-3 flex flex-wrap items-end gap-3 rounded-xl border border-border bg-surface p-4 text-sm">
+          <label className="flex flex-col gap-1">Nível (código do Mercado Livre)
+            <input name="level_id" required maxLength={40} className={`${campo} w-48`} />
+          </label>
+          <label className="flex flex-col gap-1">Indicador
+            <select name="indicador" defaultValue="reclamacoes" className={campo}>
+              <option value="reclamacoes">Reclamações</option>
+              <option value="cancelamentos">Cancelamentos</option>
+              <option value="atrasos">Atrasos</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">Limite (%)
+            <input name="limite_pct" inputMode="decimal" required className={`${campo} w-24`} />
+          </label>
+          <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limite</button>
+          <p className="w-full text-xs text-muted">Salvar um nível e indicador que já existem substitui o limite.</p>
+        </form>
+      )}
     </div>
   );
 }

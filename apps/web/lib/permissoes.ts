@@ -4,7 +4,8 @@ import { createClient } from './supabase/server';
 import { requireUser } from './auth';
 
 export type Permissao = 'visao_geral' | 'vendas' | 'rentabilidade' | 'metas' | 'custos' | 'editar_metas' | 'configuracoes'
-  | 'ads' | 'editar_ads' | 'crm_funil' | 'crm_vendedores' | 'crm_origens';
+  | 'ads' | 'editar_ads' | 'crm_funil' | 'crm_vendedores' | 'crm_origens'
+  | 'operacao' | 'editar_grupos';
 
 export const PERMISSOES: { chave: Permissao; rotulo: string }[] = [
   { chave: 'visao_geral', rotulo: 'Visão Geral' },
@@ -19,6 +20,8 @@ export const PERMISSOES: { chave: Permissao; rotulo: string }[] = [
   { chave: 'crm_funil', rotulo: 'CRM – Funil' },
   { chave: 'crm_vendedores', rotulo: 'CRM – Vendedores' },
   { chave: 'crm_origens', rotulo: 'CRM – Origens' },
+  { chave: 'operacao', rotulo: 'Alertas e Reputação' },
+  { chave: 'editar_grupos', rotulo: 'Editar grupos de anúncios' },
 ];
 
 /** Permissões do perfil do usuário logado (uma consulta por requisição). */
@@ -36,7 +39,7 @@ export const getPermissoes = cache(async (): Promise<Set<Permissao>> => {
 });
 
 const ORDEM_TELAS: [Permissao, string][] = [
-  ['visao_geral', '/'], ['vendas', '/vendas'], ['rentabilidade', '/rentabilidade'], ['ads', '/ads'], ['metas', '/metas'],
+  ['visao_geral', '/'], ['vendas', '/vendas'], ['rentabilidade', '/rentabilidade'], ['ads', '/ads'], ['operacao', '/alertas'], ['metas', '/metas'],
   ['crm_funil', '/crm/funil'], ['crm_vendedores', '/crm/vendedores'], ['crm_origens', '/crm/origens'],
   ['configuracoes', '/configuracoes/permissoes'],
 ];

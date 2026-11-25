@@ -88,3 +88,12 @@ A antecedência não é a mesma para todos os anúncios: cada anúncio tem prazo
 - Comparar a lista de despacho em risco com a página "Vendas › Para despachar" do Mercado Livre em um dia real: as vendas e os prazos têm de bater.
 - Comparar a cor e os três índices com a página de reputação do Mercado Livre no mesmo dia.
 - O dono cria dois grupos com antecedências diferentes e confere que uma venda de cada grupo entra no alerta no dia certo.
+
+## Adendo (26/11/2026): pedidos em produção
+Confirmado pelo dono. A tela de vendas do Mercado Livre mostra, para pedidos em "Aguardando disponibilidade de estoque", a data "Você tem até o dia X para terminar o produto". Esse prazo é o que importa para os personalizados.
+
+- **Prazo para terminar o produto:** se a API informar essa data, ela é usada. Caso não informe, a regra provisória é **2 dias antes da data de entrega prometida**, marcada como estimada. Hipótese levantada com dois pedidos (2 dias de diferença); a confirmação (dias corridos ou úteis) depende do levantamento com o terceiro pedido.
+- **Alerta dos pedidos em produção:** dispara **4 dias úteis antes do prazo para terminar** (ou da antecedência do grupo do anúncio, quando houver).
+- **Data de entrega ao comprador:** a data prometida que a API já devolve (`estimated_delivery_time`), exibida na tela.
+- **Demais pedidos:** seguem com os alertas de despacho e de entrega já aprovados.
+- **Pedidos em produção sem o prazo da API:** saem da regra "prazo desconhecido" e passam a usar a estimativa acima, com o rótulo "estimado".

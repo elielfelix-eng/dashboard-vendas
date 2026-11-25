@@ -26,9 +26,9 @@ await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
   '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
   '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql', '0023_alertas_tabelas.sql',
-  '0024_alertas_funcoes.sql', '0025_alertas_producao.sql'])
+  '0024_alertas_funcoes.sql', '0025_alertas_producao.sql', '0026_grupos_conta.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 aplicadas');
+console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 aplicadas');
 
 // Perfil, usuario e canais controlados pelo teste
 await db.exec(`
@@ -303,6 +303,15 @@ eq('reputacao_serie(1): so os ultimos dias', await val(`select count(*)::int fro
 await perfil('comercial');
 eq('comercial le reputacao_atual', await comoAuth(async () => (await rows(`select * from analytics.reputacao_atual()`)).length), 3);
 await perfil('admin');
+
+// ---------------- Grupos por conta (0026) ----------------
+await db.exec(`insert into core.accounts (id, channel, external_id, active) values ('00000000-0000-0000-0000-0000000000a1', 'mercadolivre', 'conta-g', true)`);
+await db.exec(`insert into core.grupos_anuncio (nome, antecedencia_dias) values ('SemConta', 2)`);
+await db.exec(mig('0026_grupos_conta.sql'));
+await db.exec(mig('0026_grupos_conta.sql'));
+eq('0026: backfill preenche grupo sem conta', await val(`select account_id::text from core.grupos_anuncio where nome = 'SemConta'`), '00000000-0000-0000-0000-0000000000a1');
+await erro('0026: mesmo nome na mesma conta recusado (sem diferenciar maiusculas)',
+  `insert into core.grupos_anuncio (account_id, nome, antecedencia_dias) values ('00000000-0000-0000-0000-0000000000a1', 'semconta', 3)`, /duplicate|unique/i);
 
 // ---------------- Reexecucao ----------------
 await db.exec(`update core.role_permissions set allowed = true where role = 'comercial' and permission = 'editar_grupos'`);

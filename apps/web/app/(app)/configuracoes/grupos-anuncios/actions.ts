@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { validarGrupo } from '@/lib/grupos';
+import { mesmoNome, validarGrupo } from '@/lib/grupos';
 import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
 
@@ -13,14 +13,35 @@ function voltar(msg: string, tipo: 'ok' | 'erro'): never {
   redirect(`/configuracoes/grupos-anuncios?${new URLSearchParams({ [tipo]: msg }).toString()}`);
 }
 
+type Cliente = Awaited<ReturnType<typeof createClient>>;
+
+async function contaMercadoLivre(supabase: Cliente): Promise<string> {
+  const { data } = await supabase.schema('core').from('accounts').select('id')
+    .eq('channel', 'mercadolivre').eq('active', true).order('id').limit(1);
+  const id = data?.[0]?.id;
+  if (!id) voltar('Conecte a conta do Mercado Livre antes de criar grupos.', 'erro');
+  return String(id);
+}
+
+// ilike sem curingas: escapa % _ e a barra para comparar o nome inteiro, sem diferenciar maiusculas.
+async function nomeJaExiste(supabase: Cliente, conta: string, nome: string, ignorarId?: number): Promise<boolean> {
+  const padrao = nome.replace(/[\\%_]/g, (c) => '\\' + c);
+  let q = supabase.schema('core').from('grupos_anuncio').select('id, nome').eq('account_id', conta).ilike('nome', padrao);
+  if (ignorarId !== undefined) q = q.neq('id', ignorarId);
+  const { data } = await q;
+  return (data ?? []).some((g) => mesmoNome(g.nome, nome));
+}
+
 export async function criarGrupo(form: FormData): Promise<void> {
   await exigirPermissao('editar_grupos');
   const r = validarGrupo(String(form.get('nome') ?? ''), String(form.get('antecedencia') ?? ''));
   if (!r.ok) voltar(r.erro, 'erro');
   const v = r.ok ? r : { nome: '', antecedencia: 0 };
   const supabase = await createClient();
+  const conta = await contaMercadoLivre(supabase);
+  if (await nomeJaExiste(supabase, conta, v.nome)) voltar('Já existe um grupo com este nome.', 'erro');
   const { error } = await supabase.schema('core').from('grupos_anuncio')
-    .insert({ nome: v.nome, antecedencia_dias: v.antecedencia });
+    .insert({ account_id: conta, nome: v.nome, antecedencia_dias: v.antecedencia });
   if (error) voltar('Não foi possível criar o grupo agora (o nome pode já existir).', 'erro');
   voltar('Grupo criado.', 'ok');
 }
@@ -33,8 +54,10 @@ export async function editarGrupo(form: FormData): Promise<void> {
   if (!r.ok) voltar(r.erro, 'erro');
   const v = r.ok ? r : { nome: '', antecedencia: 0 };
   const supabase = await createClient();
+  const conta = await contaMercadoLivre(supabase);
+  if (await nomeJaExiste(supabase, conta, v.nome, id)) voltar('Já existe um grupo com este nome.', 'erro');
   const { data, error } = await supabase.schema('core').from('grupos_anuncio')
-    .update({ nome: v.nome, antecedencia_dias: v.antecedencia }).eq('id', id).select('id');
+    .update({ account_id: conta, nome: v.nome, antecedencia_dias: v.antecedencia }).eq('id', id).select('id');
   if (error) voltar('Não foi possível salvar o grupo agora (o nome pode já existir).', 'erro');
   if (!data || data.length === 0) voltar('Grupo não encontrado.', 'erro');
   voltar('Grupo salvo.', 'ok');

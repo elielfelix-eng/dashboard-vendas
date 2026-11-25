@@ -28,6 +28,73 @@ async function tentar<T>(rotulo: string, fn: () => Promise<T>): Promise<T | null
   }
 }
 
+const CHAVE_RE = /manufactur|produc|terminar|handl|limit|prazo|deadline|promise|estimat|expect|ready|tag/i;
+const SENSIVEL_RE = /buyer|receiver|address|phone|email|name|document|nickname/i;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$/;
+const ENUM_RE = /^[A-Za-z0-9_.\-]{1,40}$/;
+
+/** Imprime só o caminho das folhas cujo nome casa com CHAVE_RE; valor só se for data ISO ou enum curto. */
+function imprimirCampos(rotulo: string, raiz: unknown): void {
+  const linhas: string[] = [];
+  const andar = (v: unknown, caminho: string, chave: string, sensivel: boolean) => {
+    const sens = sensivel || SENSIVEL_RE.test(chave);
+    if (Array.isArray(v)) {
+      v.forEach((x, i) => andar(x, `${caminho}[${i}]`, chave, sens));
+    } else if (isObj(v)) {
+      for (const [k, x] of Object.entries(v)) andar(x, caminho ? `${caminho}.${k}` : k, k, sens);
+    } else if (CHAVE_RE.test(chave)) {
+      if (!sens && typeof v === 'string' && (ISO_RE.test(v) || ENUM_RE.test(v))) linhas.push(`    ${caminho} = ${v}`);
+      else linhas.push(`    ${caminho}`);
+    }
+  };
+  andar(raiz, '', '', false);
+  console.log(`  ${rotulo} campos candidatos (${linhas.length}):`);
+  for (const l of linhas) console.log(l);
+}
+
+const nomesTopo = (v: unknown) => (isObj(v) ? Object.keys(v).join(', ') : '(vazio)');
+
+async function levantarPrazoProducao(sql: ReturnType<typeof connect>, api: MercadoLivreClient) {
+  console.log('\n=== PRAZO DE PRODUÇÃO (pedidos em "Aguardando disponibilidade de estoque") ===');
+  const FORCADOS = ['48617609826', '48598060391', '48584195979'];
+  const forcados = await sql<{ order_id: string; shipment_id: string }[]>`
+    select order_id, shipment_id from mkt.orders
+     where channel = 'mercadolivre' and shipment_id = any(${FORCADOS})`;
+  const candidatos = await sql<{ order_id: string; shipment_id: string }[]>`
+    select order_id, shipment_id from mkt.orders
+     where channel = 'mercadolivre' and status = 'paid' and shipment_id is not null
+       and date_created >= now() - interval '45 days'
+     order by date_created desc
+     limit 200`;
+  console.log(`  forçados encontrados no banco: ${forcados.length}/${FORCADOS.length} | candidatos: ${candidatos.length}`);
+
+  const fila = [...forcados, ...candidatos.filter((c) => !forcados.some((f) => f.shipment_id === c.shipment_id))];
+  let achados = 0;
+  const vistos = new Set<string>();
+  for (const { order_id, shipment_id } of fila) {
+    const forcado = FORCADOS.includes(shipment_id);
+    if (!forcado && achados >= 40) break;
+    if (vistos.has(shipment_id)) continue;
+    vistos.add(shipment_id);
+    const s = await tentar('shipment', () => api.get<Obj>(`/shipments/${shipment_id}`, {}, { 'x-format-new': 'true' }));
+    if (!s) continue;
+    const emProducao = s.status === 'pending' && s.substatus === 'manufacturing';
+    if (!forcado && !emProducao) continue;
+    achados++;
+    console.log(`\n# envio ${shipment_id} (pedido ${order_id})${forcado ? ' [forçado]' : ''} status=${texto(s.status)}/${texto(s.substatus)}`);
+    console.log(`  shipment chaves de topo: ${nomesTopo(s)}`);
+    imprimirCampos('shipment', s);
+    const sla = await tentar('sla', () => api.get<Obj>(`/shipments/${shipment_id}/sla`));
+    if (sla) imprimirCampos('sla', sla);
+    const o = await tentar('order', () => api.get<Obj>(`/orders/${order_id}`));
+    if (o) {
+      console.log(`  order chaves de topo: ${nomesTopo(o)}`);
+      imprimirCampos('order', o);
+    }
+  }
+  console.log(`\n  envios em produção examinados: ${achados}`);
+}
+
 async function main() {
   const sql = connect();
   try {
@@ -66,6 +133,8 @@ async function main() {
       const sla = await tentar('sla', () => api.get<Obj>(`/shipments/${id}/sla`));
       if (sla) console.log(`  sla: status=${texto(sla.status)} | expected_date=${texto(sla.expected_date)}`);
     }
+
+    await levantarPrazoProducao(sql, api);
 
     console.log('\n=== REPUTAÇÃO (seller_reputation) ===');
     const me = await tentar('users/me', () => api.get<Obj>('/users/me'));

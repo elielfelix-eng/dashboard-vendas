@@ -26,9 +26,9 @@ await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
 for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
   '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
   '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql', '0023_alertas_tabelas.sql',
-  '0024_alertas_funcoes.sql'])
+  '0024_alertas_funcoes.sql', '0025_alertas_producao.sql', '0026_grupos_conta.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 aplicadas');
+console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 aplicadas');
 
 // Perfil, usuario e canais controlados pelo teste
 await db.exec(`
@@ -202,6 +202,73 @@ await db.exec(`
   delete from mkt.envios_prazos where shipment_id in ('SH', 'SI');
   delete from mkt.orders where order_id in ('OF', 'OG', 'OH', 'OI', 'OJ', 'OK');`);
 
+// ---------------- Prazo para terminar o produto (0025) ----------------
+// manufacturing_ending_date do pedido (mkt.orders.raw), na data de Brasilia.
+// P1: pending/manufacturing, grupo G2, campo 02/12 (mesmo com prazo_despacho 20/12, o campo vale); entrega 01/12.
+// P1b: handling sem prazo de despacho, com campo 04/12 -> prazo_desconhecido (so pending/manufacturing usa o campo).
+// P2: campo 02/12 23:30 em Brasilia; P2z: o mesmo instante em UTC (03/12 02:30Z).
+// P3: em producao sem o campo, entrega segunda 07/12 -> estimado quinta 03/12 (2 dias uteis antes).
+// P4: em producao sem o campo e sem entrega -> prazo_desconhecido (o prazo de despacho nao entra).
+// P5: ready_to_ship com prazo de despacho 01/12 e campo 10/12 -> vale o prazo do envio.
+// P6: shipped com campo -> fora do despacho; na entrega vale prazo_entrega.
+// P7: ready_to_ship com campo e sem prazo de despacho -> prazo_desconhecido.
+// P8: pending/manufacturing com campo sem fuso (2026-12-02T10:00:00) -> campo ignorado, estimado (entrega 07/12 -> 03/12).
+await db.exec(`
+  insert into mkt.orders (channel, order_id, status, shipment_id, date_created, raw) values
+    ('mercadolivre', 'OP1', 'paid', 'SP1', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-02T09:25:53.000-04:00"}'),
+    ('mercadolivre', 'OP1b', 'paid', 'SP1b', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-04T10:00:00.000-03:00"}'),
+    ('mercadolivre', 'OP2', 'paid', 'SP2', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-02T23:30:00.000-03:00"}'),
+    ('mercadolivre', 'OP2z', 'paid', 'SP2z', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-03T02:30:00.000Z"}'),
+    ('mercadolivre', 'OP3', 'paid', 'SP3', '2026-11-25 10:00-03', '{"id": 3}'),
+    ('mercadolivre', 'OP4', 'paid', 'SP4', '2026-11-25 10:00-03', null),
+    ('mercadolivre', 'OP5', 'paid', 'SP5', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-10T10:00:00.000-03:00"}'),
+    ('mercadolivre', 'OP6', 'paid', 'SP6', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-11-25T10:00:00.000-03:00"}'),
+    ('mercadolivre', 'OP7', 'paid', 'SP7', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-02T10:00:00.000-03:00"}'),
+    ('mercadolivre', 'OP8', 'paid', 'SP8', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-02T10:00:00"}');
+  insert into mkt.order_items (channel, order_id, line_no, item_id, title, quantity, unit_price) values
+    ('mercadolivre', 'OP1', 1, 'MLB-B2', 'Caneca P1', 1, 10);
+  insert into mkt.envios_prazos (channel, shipment_id, status, substatus, prazo_despacho, prazo_entrega, despachado_em) values
+    ('mercadolivre', 'SP1', 'pending', 'manufacturing', '2026-12-20', '2026-12-01', null),
+    ('mercadolivre', 'SP1b', 'handling', null, null, '2026-12-15', null),
+    ('mercadolivre', 'SP2', 'pending', 'manufacturing', null, '2026-12-15', null),
+    ('mercadolivre', 'SP2z', 'pending', 'manufacturing', null, '2026-12-15', null),
+    ('mercadolivre', 'SP3', 'pending', 'manufacturing', null, '2026-12-07', null),
+    ('mercadolivre', 'SP4', 'pending', 'manufacturing', '2026-12-01', null, null),
+    ('mercadolivre', 'SP5', 'ready_to_ship', null, '2026-12-01', '2026-12-15', null),
+    ('mercadolivre', 'SP6', 'shipped', null, '2026-11-27', '2026-12-01', '2026-11-27 10:00-03'),
+    ('mercadolivre', 'SP7', 'ready_to_ship', null, null, '2026-12-15', null),
+    ('mercadolivre', 'SP8', 'pending', 'manufacturing', null, '2026-12-07', null);`);
+const listaP = (tipo, hoje) => rows(`select situacao, shipment_id, grupo, antecedencia, prazo::text as prazo, faltam, origem_prazo
+  from analytics.alertas_envio('${tipo}', '${hoje}')`);
+const pz = (r) => [r.situacao, r.prazo, r.faltam, r.antecedencia, r.grupo, r.origem_prazo];
+eq('P1 em 27/11 (antes de 2 dias uteis do G2): ausente', de(await listaP('despacho', '2026-11-27'), 'SP1').length, 0);
+const p30 = await listaP('despacho', '2026-11-30');
+eq('P1 em 30/11: prazo de producao 02/12, em_risco, faltam 2, G2', de(p30, 'SP1').map(pz), [['em_risco', '2026-12-02', 2, 2, 'G2', 'producao']]);
+eq('P1 em 03/12: atrasada', de(await listaP('despacho', '2026-12-03'), 'SP1').map((r) => [r.situacao, r.faltam, r.origem_prazo]), [['atrasada', -1, 'producao']]);
+eq('P1 pending/manufacturing com campo: producao (mesmo com prazo_despacho 20/12)', de(p30, 'SP1').map((r) => r.origem_prazo), ['producao']);
+eq('P1b handling sem prazo de despacho: ignora o campo, prazo_desconhecido', de(p30, 'SP1b').map(pz), [['prazo_desconhecido', null, null, 4, null, null]]);
+eq('P7 ready_to_ship com campo e sem prazo de despacho: prazo_desconhecido', de(p30, 'SP7').map(pz), [['prazo_desconhecido', null, null, 4, null, null]]);
+eq('P8 campo sem fuso: ignorado, estimado 03/12', de(p30, 'SP8').map(pz), [['em_risco', '2026-12-03', 3, 4, null, 'estimado']]);
+eq('P2 23:30 em Brasilia: data de Brasilia (02/12)', de(p30, 'SP2').map((r) => [r.prazo, r.origem_prazo]), [['2026-12-02', 'producao']]);
+eq('P2z mesmo instante em UTC: 02/12, nao 03/12', de(p30, 'SP2z').map((r) => [r.prazo, r.origem_prazo]), [['2026-12-02', 'producao']]);
+eq('P3 sem o campo: estimado 2 dias uteis antes da entrega (07/12 -> 03/12)', de(p30, 'SP3').map(pz), [['em_risco', '2026-12-03', 3, 4, null, 'estimado']]);
+eq('P4 sem o campo e sem entrega: prazo_desconhecido', de(p30, 'SP4').map(pz), [['prazo_desconhecido', null, null, 4, null, null]]);
+eq('P5 ready_to_ship com prazo de despacho: ignora o campo, usa o prazo do envio', de(p30, 'SP5').map(pz), [['em_risco', '2026-12-01', 1, 4, null, 'envio']]);
+eq('P6 shipped: fora do despacho', de(p30, 'SP6').length, 0);
+const pe30 = await listaP('entrega', '2026-11-30');
+eq('P6 shipped na entrega: prazo_entrega, origem envio', de(pe30, 'SP6').map((r) => [r.situacao, r.prazo, r.origem_prazo]), [['em_risco', '2026-12-01', 'envio']]);
+eq('P1 na entrega: prazo_entrega, origem envio', de(pe30, 'SP1').map((r) => [r.situacao, r.prazo, r.origem_prazo]), [['em_risco', '2026-12-01', 'envio']]);
+eq('A (prazo do envio): origem envio', de(await listaP('despacho', '2026-11-24'), 'SA').map((r) => r.origem_prazo), ['envio']);
+eq('C (prazo desconhecido): origem nula', de(await listaP('despacho', '2026-11-26'), 'SC').map((r) => r.origem_prazo), [null]);
+const chaves = new Set([...p30, ...pe30].map((r) => r.shipment_id));
+eq('contagem em 30/11: P1 nas duas listas conta uma vez', [await val(`select analytics.alertas_contagem('2026-11-30')`), de(p30, 'SP1').length + de(pe30, 'SP1').length],
+  [chaves.size, 2]);
+eq('contagem em 30/11 inclui os alertas de producao', ['SP1', 'SP2', 'SP2z', 'SP3', 'SP8'].every((s) => chaves.has(s)), true);
+await db.exec(`
+  delete from mkt.order_items where order_id = 'OP1';
+  delete from mkt.envios_prazos where shipment_id like 'SP%';
+  delete from mkt.orders where order_id like 'OP%';`);
+
 await perfil('comercial');
 eq('comercial (operacao) ve a lista', await comoAuth(async () => (await lista('despacho', '2026-11-26')).length), 3);
 await db.exec(`set teste.canais = 'shopee'`);
@@ -237,14 +304,26 @@ await perfil('comercial');
 eq('comercial le reputacao_atual', await comoAuth(async () => (await rows(`select * from analytics.reputacao_atual()`)).length), 3);
 await perfil('admin');
 
+// ---------------- Grupos por conta (0026) ----------------
+await db.exec(`insert into core.accounts (id, channel, external_id, active) values ('00000000-0000-0000-0000-0000000000a1', 'mercadolivre', 'conta-g', true)`);
+await db.exec(`insert into core.grupos_anuncio (nome, antecedencia_dias) values ('SemConta', 2)`);
+await db.exec(mig('0026_grupos_conta.sql'));
+await db.exec(mig('0026_grupos_conta.sql'));
+eq('0026: backfill preenche grupo sem conta', await val(`select account_id::text from core.grupos_anuncio where nome = 'SemConta'`), '00000000-0000-0000-0000-0000000000a1');
+await erro('0026: mesmo nome na mesma conta recusado (sem diferenciar maiusculas)',
+  `insert into core.grupos_anuncio (account_id, nome, antecedencia_dias) values ('00000000-0000-0000-0000-0000000000a1', 'semconta', 3)`, /duplicate|unique/i);
+
 // ---------------- Reexecucao ----------------
 await db.exec(`update core.role_permissions set allowed = true where role = 'comercial' and permission = 'editar_grupos'`);
 await db.exec(`update core.parametros_alertas set antecedencia_padrao = 6`);
 await db.exec(mig('0023_alertas_tabelas.sql'));
 await db.exec(mig('0023_alertas_tabelas.sql'));
-await db.exec(mig('0024_alertas_funcoes.sql'));
-await db.exec(mig('0024_alertas_funcoes.sql'));
-eq('reexecucao da 0024: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
+// A 0024 nao e reaplicada depois da 0025 (a 0025 muda o retorno de alertas_envio); a 0025 e reexecutavel.
+await db.exec(mig('0025_alertas_producao.sql'));
+await db.exec(mig('0025_alertas_producao.sql'));
+eq('reexecucao da 0025: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
+eq('0025: grants de alertas_envio mantidos', await rows(`select has_function_privilege('anon', 'analytics.alertas_envio(text, date)', 'execute') as a,
+    has_function_privilege('authenticated', 'analytics.alertas_envio(text, date)', 'execute') as u`), [{ a: false, u: true }]);
 eq('reexecucao preserva permissao alterada', await val(`select allowed from core.role_permissions where role = 'comercial' and permission = 'editar_grupos'`), true);
 eq('reexecucao preserva parametros alterados', await val(`select antecedencia_padrao from core.parametros_alertas`), 6);
 eq('reexecucao nao duplica sementes', await rows(`select (select count(*)::int from core.feriados) as f,

@@ -8,8 +8,10 @@ export type SituacaoAlerta = 'atrasada' | 'em_risco' | 'prazo_desconhecido';
 export interface AlertaEnvio {
   situacao: SituacaoAlerta; shipment_id: string; order_id: string | null; pack_id: string | null; item_id: string | null;
   titulo: string | null; grupo: string | null; antecedencia: number; prazo: string | null; faltam: number | null;
-  status_envio: string | null; substatus: string | null; despachado: boolean;
+  status_envio: string | null; substatus: string | null; despachado: boolean; origem_prazo: OrigemPrazo | null;
 }
+/** De onde vem o prazo: prazo para terminar o produto, prazo do envio ou estimativa (2 dias úteis antes da entrega). */
+export type OrigemPrazo = 'producao' | 'envio' | 'estimado';
 export interface IndicadorReputacao {
   level_id: string | null; power_seller_status: string | null; capturado_em: string; indicador: 'reclamacoes' | 'cancelamentos' | 'atrasos';
   valor_pct: number | null; limite_pct: number | null; perto: boolean | null; acima: boolean | null;
@@ -39,7 +41,7 @@ export async function listarAlertas(tipo: 'despacho' | 'entrega'): Promise<Alert
     grupo: (l.grupo as string | null) ?? null, antecedencia: Number(l.antecedencia),
     prazo: (l.prazo as string | null) ?? null, faltam: num(l.faltam),
     status_envio: (l.status_envio as string | null) ?? null, substatus: (l.substatus as string | null) ?? null,
-    despachado: l.despachado === true,
+    despachado: l.despachado === true, origem_prazo: (l.origem_prazo as OrigemPrazo | null) ?? null,
   }));
 }
 

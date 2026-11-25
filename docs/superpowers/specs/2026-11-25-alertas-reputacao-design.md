@@ -92,8 +92,8 @@ A antecedência não é a mesma para todos os anúncios: cada anúncio tem prazo
 ## Adendo (26/11/2026): pedidos em produção
 Confirmado pelo dono. A tela de vendas do Mercado Livre mostra, para pedidos em "Aguardando disponibilidade de estoque", a data "Você tem até o dia X para terminar o produto". Esse prazo é o que importa para os personalizados.
 
-- **Prazo para terminar o produto:** se a API informar essa data, ela é usada. Caso não informe, a regra provisória é **2 dias antes da data de entrega prometida**, marcada como estimada. Hipótese levantada com dois pedidos (2 dias de diferença); a confirmação (dias corridos ou úteis) depende do levantamento com o terceiro pedido.
+- **Prazo para terminar o produto:** campo `manufacturing_ending_date` do próprio pedido (confirmado no levantamento de 25/11: as três datas do print batem com a tela do Mercado Livre). Fica em `mkt.orders.raw`, então não há chamada extra à API. A estimativa de 2 dias antes da entrega deixa de ser usada; só entra se o campo estiver ausente, marcada como estimada (hoje nenhum dos 13 pedidos em produção examinados ficou sem o campo).
 - **Alerta dos pedidos em produção:** dispara **4 dias úteis antes do prazo para terminar** (ou da antecedência do grupo do anúncio, quando houver).
 - **Data de entrega ao comprador:** a data prometida que a API já devolve (`estimated_delivery_time`), exibida na tela.
 - **Demais pedidos:** seguem com os alertas de despacho e de entrega já aprovados.
-- **Pedidos em produção sem o prazo da API:** saem da regra "prazo desconhecido" e passam a usar a estimativa acima, com o rótulo "estimado".
+- **Pedidos em produção sem o campo:** usam a estimativa acima, com o rótulo "estimado". Sem a estimativa, ficam em "prazo desconhecido".

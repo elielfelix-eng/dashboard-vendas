@@ -13,3 +13,8 @@ export function validarGrupo(nome: string, antecedencia: string): ResultadoGrupo
   }
   return { ok: true, nome: n, antecedencia: a };
 }
+
+// Compara nomes de grupo sem diferenciar maiusculas de minusculas nem espacos das pontas.
+export function mesmoNome(a: string, b: string): boolean {
+  return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
+}

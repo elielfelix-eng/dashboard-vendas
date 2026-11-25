@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validarGrupo } from './grupos.ts';
+import { mesmoNome, validarGrupo } from './grupos.ts';
 
 test('aceita nome com espacos nas pontas e antecedencia inteira', () => {
   assert.deepEqual(validarGrupo(' Personalizados ', '6'), { ok: true, nome: 'Personalizados', antecedencia: 6 });
@@ -21,4 +21,8 @@ test('recusa antecedencia acima de 30 ou nao inteira', () => {
 });
 test('aceita antecedencia zero', () => {
   assert.equal(validarGrupo('X', '0').ok, true);
+});
+test('mesmoNome ignora espacos das pontas e maiusculas', () => {
+  assert.equal(mesmoNome(' Personalizados ', 'personalizados'), true);
+  assert.equal(mesmoNome('A', 'B'), false);
 });

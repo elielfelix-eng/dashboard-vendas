@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { textoFaltam, corDoNivel } from './alertas-formato.ts';
+import { textoFaltam, corDoNivel, rotuloOrigem } from './alertas-formato.ts';
+
+test('rotuloOrigem: origem do prazo', () => {
+  assert.equal(rotuloOrigem('producao'), 'Terminar produto');
+  assert.equal(rotuloOrigem('envio'), 'Despacho');
+  assert.equal(rotuloOrigem('estimado'), 'Estimado');
+  assert.equal(rotuloOrigem(null), '—');
+});
 
 test('textoFaltam: dias úteis restantes', () => {
   assert.equal(textoFaltam(4, 'em_risco'), '4 dias úteis');

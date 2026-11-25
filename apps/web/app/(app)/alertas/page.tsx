@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ErroDados, SemDados } from '@/components/cartao-indicador';
 import * as alertas from '@/lib/alertas';
-import { corDoNivel, textoFaltam } from '@/lib/alertas-formato';
+import { corDoNivel, rotuloOrigem, textoFaltam } from '@/lib/alertas-formato';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -68,15 +68,17 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
       <td className="px-3 py-2">{a.titulo ?? a.item_id ?? '—'}</td>
       <td className="px-3 py-2">{a.grupo ?? '—'}</td>
       <td className="px-3 py-2">{ddmm(a.prazo)}</td>
+      {aba === 'despacho' && <td className="px-3 py-2">{rotuloOrigem(a.origem_prazo)}</td>}
       <td className="px-3 py-2">{textoFaltam(a.faltam, a.situacao)}</td>
       <td className="px-3 py-2">{a.status_envio ? (STATUS_ENVIO[a.status_envio] ?? a.status_envio) : '—'}</td>
     </>
   );
+  const colunas = ['Venda', 'Anúncio', 'Grupo', 'Prazo', ...(aba === 'despacho' ? ['Origem'] : []), 'Faltam', 'Status do envio'];
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-surface">
       <table className="w-full text-left text-sm">
         <thead className="border-b border-border text-xs text-muted">
-          <tr>{['Venda', 'Anúncio', 'Grupo', 'Prazo', 'Faltam', 'Status do envio'].map((t) => <th key={t} className="px-3 py-2 font-medium">{t}</th>)}</tr>
+          <tr>{colunas.map((t) => <th key={t} className="px-3 py-2 font-medium">{t}</th>)}</tr>
         </thead>
         <tbody>
           {normais.map((a) => (
@@ -85,7 +87,7 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
           {desconhecidas.length > 0 && (
             <>
               <tr className="bg-bg">
-                <td colSpan={6} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                <td colSpan={colunas.length} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
                   {`Prazo desconhecido (${desconhecidas.length}): o Mercado Livre não informou prazo de ${aba === 'despacho' ? 'despacho' : 'entrega'} para estas vendas`}
                 </td>
               </tr>

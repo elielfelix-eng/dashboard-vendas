@@ -11,7 +11,14 @@ export function textoFaltam(faltam: number | null, situacao: string): string {
   return `${faltam} ${plural(faltam)}`;
 }
 
-const NIVEIS: Record<string, { nome: string; classe: string }> = {
+const ORIGENS: Record<string, string> = { producao: 'Terminar produto', envio: 'Despacho', estimado: 'Estimado' };
+
+/** Rótulo da origem do prazo na lista de despacho ('—' quando não há). */
+export function rotuloOrigem(origem: string | null): string {
+  return (origem && ORIGENS[origem]) || '—';
+}
+
+const NIVEIS:Record<string, { nome: string; classe: string }> = {
   '5_green': { nome: 'Verde', classe: 'bg-green-600 text-white' },
   '4_light_green': { nome: 'Verde-claro', classe: 'bg-lime-500 text-white' },
   '3_yellow': { nome: 'Amarelo', classe: 'bg-yellow-400 text-black' },

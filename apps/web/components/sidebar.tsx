@@ -9,6 +9,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   { section: 'Marketplaces', items: [
     { href: '/', label: 'Visão Geral', ready: true, perm: 'visao_geral' },
     { href: '/vendas', label: 'Vendas', ready: true, perm: 'vendas' },
+    { href: '/alertas', label: 'Alertas e Reputação', ready: true, perm: 'operacao' },
     { href: '/rentabilidade', label: 'Rentabilidade', ready: true, perm: 'rentabilidade' },
     { href: '/ads', label: 'Ads', ready: true, perm: 'ads' },
     { href: '/comparativo', label: 'Comparativo anual', ready: true, perm: 'vendas' },
@@ -34,7 +35,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
   ]},
 ];
 
-export function Sidebar({ role, name, permissoes }: { role: Role | undefined; name: string; permissoes: Permissao[] }) {
+export function Sidebar({ role, name, permissoes, alertas = 0 }: { role: Role | undefined; name: string; permissoes: Permissao[]; alertas?: number }) {
   const perms = new Set(permissoes);
   return (
     <aside className="flex w-full flex-col border-b border-border bg-surface md:min-h-screen md:w-60 md:border-r md:border-b-0">
@@ -50,7 +51,12 @@ export function Sidebar({ role, name, permissoes }: { role: Role | undefined; na
             <div key={group.section} className="mb-4">
               <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.section}</p>
               {items.map((i) => i.ready ? (
-                <Link key={i.href} href={i.href} className="block rounded-lg px-2 py-1.5 text-sm hover:bg-accent-soft">{i.label}</Link>
+                <Link key={i.href} href={i.href} className="flex items-center justify-between rounded-lg px-2 py-1.5 text-sm hover:bg-accent-soft">
+                  {i.label}
+                  {i.href === '/alertas' && alertas > 0 && (
+                    <span className="rounded-full bg-red-600 px-1.5 text-[11px] font-semibold text-white" aria-label={`${alertas} alertas`}>{alertas}</span>
+                  )}
+                </Link>
               ) : (
                 <span key={i.href} className="flex items-center justify-between px-2 py-1.5 text-sm text-muted" title="Disponível em uma próxima fase">
                   {i.label}<span className="rounded bg-bg px-1.5 text-[10px]">em breve</span>

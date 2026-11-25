@@ -1,0 +1,26 @@
+name: ML - levantamento de envios
+
+# Rodado manualmente: mostra de onde vêm os prazos de envio e a reputação no Mercado Livre (só leitura).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  levantar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Levantar prazos de envio e reputacao
+        run: npm run ml:levantamento -w jobs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}

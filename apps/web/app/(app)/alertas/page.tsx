@@ -23,12 +23,12 @@ const urlVenda = (orderId: string) => `https://www.mercadolivre.com.br/vendas/${
 
 // grafico-serie.tsx é de barras em R$ (vendas); aqui são três linhas em %, então o gráfico é um SVG simples.
 function GraficoReputacao({ serie }: { serie: alertas.PontoReputacao[] }) {
-  // A série traz as taxas como fração; o gráfico mostra em %.
+  // A série (reputacao_serie) já vem em percentual (0 a 100); não multiplicar.
   const L = 720, A = 220, ml = 48, mb = 22, mt = 8, mr = 8;
-  const valores = serie.flatMap((p) => LINHAS.map((l) => p[l.chave])).filter((v): v is number => v != null).map((v) => v * 100);
-  const max = Math.max(1, ...valores) * 1.1;
+  const valores = serie.flatMap((p) => LINHAS.map((l) => p[l.chave])).filter((v): v is number => v != null);
+  const max = Math.max(1, ...valores);
   const x = (i: number) => ml + (serie.length < 2 ? (L - ml - mr) / 2 : (i * (L - ml - mr)) / (serie.length - 1));
-  const y = (v: number) => mt + (A - mt - mb) * (1 - (v * 100) / max);
+  const y = (v: number) => mt + (A - mt - mb) * (1 - v / max);
   return (
     <div>
       <svg viewBox={`0 0 ${L} ${A}`} className="h-56 w-full" role="img" aria-label="Evolução dos três indicadores de reputação">

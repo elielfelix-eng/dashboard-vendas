@@ -168,6 +168,40 @@ eq('entrega: E faltam 2 (27/11 e 30/11)', de(e26, 'SE').map((r) => [r.faltam, r.
 eq('alertas_contagem em 26/11: A, B (uma vez), C, E', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
 eq('tipo invalido: zero linhas', (await lista('outro', '2026-11-26')).length, 0);
 
+// Rodada de correcao: venda sem leitura de prazo, status nulo, atraso no fim de semana, pedido sem envio.
+// F: pago (25/11) sem linha em envios_prazos; G: pago ha mais de 45 dias sem linha; H: status nulo com prazo;
+// I: despacho na sexta 27/11 (hoje sabado 28/11); J: pago sem shipment_id; K: shopee pago sem linha.
+await db.exec(`
+  insert into mkt.orders (channel, order_id, status, shipment_id, date_created) values
+    ('mercadolivre', 'OF', 'paid', 'SF', '2026-11-25 10:00-03'),
+    ('mercadolivre', 'OG', 'paid', 'SG', '2026-09-01 10:00-03'),
+    ('mercadolivre', 'OH', 'paid', 'SH', '2026-11-25 10:00-03'),
+    ('mercadolivre', 'OI', 'paid', 'SI', '2026-11-20 10:00-03'),
+    ('mercadolivre', 'OJ', 'paid', null, '2026-11-25 10:00-03'),
+    ('shopee', 'OK', 'paid', 'SK', '2026-11-25 10:00-03');
+  insert into mkt.envios_prazos (channel, shipment_id, status, prazo_despacho, prazo_entrega) values
+    ('mercadolivre', 'SH', null, '2026-12-20', '2026-12-28'),
+    ('mercadolivre', 'SI', 'ready_to_ship', '2026-11-27', '2026-12-20');`);
+const d26b = await lista('despacho', '2026-11-26');
+eq('F sem leitura de prazo: prazo_desconhecido no despacho', de(d26b, 'SF').map((r) => [r.situacao, r.prazo, r.despachado]), [['prazo_desconhecido', null, false]]);
+eq('F sem leitura de prazo: prazo_desconhecido na entrega', de(await lista('entrega', '2026-11-26'), 'SF').map((r) => r.situacao), ['prazo_desconhecido']);
+eq('G (mais de 45 dias, sem leitura): ausente', de(d26b, 'SG').length, 0);
+eq('H status nulo: prazo_desconhecido no despacho', de(d26b, 'SH').map((r) => r.situacao), ['prazo_desconhecido']);
+eq('J sem shipment_id: aparece pelo pedido', d26b.filter((r) => r.order_id === 'OJ').map((r) => [r.situacao, r.shipment_id]), [['prazo_desconhecido', null]]);
+eq('K shopee: ausente', de(d26b, 'SK').length, 0);
+eq('despacho: prazo_desconhecido sempre por ultimo', d26b.findIndex((r) => r.situacao === 'prazo_desconhecido') === d26b.length - d26b.filter((r) => r.situacao === 'prazo_desconhecido').length, true);
+eq('I hoje sabado 28/11, prazo sexta 27/11: atrasada, faltam -1', de(await lista('despacho', '2026-11-28'), 'SI').map((r) => [r.situacao, r.faltam]), [['atrasada', -1]]);
+eq('I hoje segunda 30/11: atrasada, faltam -1', de(await lista('despacho', '2026-11-30'), 'SI').map((r) => [r.situacao, r.faltam]), [['atrasada', -1]]);
+eq('I hoje terca 01/12: atrasada, faltam -2', de(await lista('despacho', '2026-12-01'), 'SI').map((r) => [r.situacao, r.faltam]), [['atrasada', -2]]);
+eq('contagem com F, H, I, J: 8', await val(`select analytics.alertas_contagem('2026-11-26')`), 8);
+eq('subtrai_dias_uteis: p_n acima de 30 vale 30', await val(`select core.subtrai_dias_uteis('2026-11-30', 99) = core.subtrai_dias_uteis('2026-11-30', 30)`), true);
+eq('anon sem execute nas funcoes de dias uteis', await rows(`select has_function_privilege('anon', 'core.subtrai_dias_uteis(date, integer)', 'execute') as s,
+    has_function_privilege('anon', 'core.dias_uteis_ate(date, date)', 'execute') as d`), [{ s: false, d: false }]);
+eq('authenticated com execute nas funcoes de dias uteis', await val(`select has_function_privilege('authenticated', 'core.dias_uteis_ate(date, date)', 'execute')`), true);
+await db.exec(`
+  delete from mkt.envios_prazos where shipment_id in ('SH', 'SI');
+  delete from mkt.orders where order_id in ('OF', 'OG', 'OH', 'OI', 'OJ', 'OK');`);
+
 await perfil('comercial');
 eq('comercial (operacao) ve a lista', await comoAuth(async () => (await lista('despacho', '2026-11-26')).length), 3);
 await db.exec(`set teste.canais = 'shopee'`);

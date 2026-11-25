@@ -23,7 +23,7 @@ async function pedido(id: string, envio: string, status: string, diasAtras: numb
 before(async () => {
   await db.exec(`
     create schema mkt;
-    create table mkt.orders (channel text not null, order_id text not null, status text, date_created timestamptz,
+    create table mkt.orders (channel text not null, order_id text not null, status text, date_created timestamptz, date_closed timestamptz,
       shipment_id text, primary key (channel, order_id));
     create table mkt.envios_prazos (channel text not null, shipment_id text not null, account_id uuid, status text,
       substatus text, prazo_despacho date, prazo_entrega date, despachado_em timestamptz, entregue_em timestamptz,
@@ -114,4 +114,14 @@ test('um envio que falha não impede os demais; a falha é contada; envio em 2 p
   assert.deepEqual(chamadas, ['S-A', 'S-RUIM', 'S-B']);
   const { rows } = await db.query<{ shipment_id: string }>('select shipment_id from mkt.envios_prazos order by 1');
   assert.deepEqual(rows.map((x) => x.shipment_id), ['S-A', 'S-B']);
+});
+
+test('janela por data de Brasília: 45 dias atrás (madrugada) é selecionado; 47 dias não', async () => {
+  await db.exec('delete from mkt.orders; delete from mkt.envios_prazos');
+  // 00:30 em Brasília do dia (hoje_brasilia - n), independente da hora em que o teste roda
+  const dia = (n: number) =>
+    `(((now() at time zone 'America/Sao_Paulo')::date - ${n})::timestamp + interval '30 minutes') at time zone 'America/Sao_Paulo'`;
+  await db.exec(`insert into mkt.orders (channel, order_id, status, date_created, date_closed, shipment_id) values
+    ('mercadolivre', '20', 'paid', ${dia(45)}, ${dia(45)}, 'S-45'), ('mercadolivre', '21', 'paid', ${dia(47)}, ${dia(47)}, 'S-47')`);
+  assert.deepEqual(await enviosParaAtualizar(sql), ['S-45']);
 });

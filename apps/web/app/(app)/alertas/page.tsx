@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ErroDados, SemDados } from '@/components/cartao-indicador';
 import * as alertas from '@/lib/alertas';
-import { corDoNivel, rotuloOrigem, textoFaltam } from '@/lib/alertas-formato';
+import { corDoNivel, rotuloOrigem, separarProducao, textoFaltam } from '@/lib/alertas-formato';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -100,6 +100,36 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
   );
 }
 
+// Pedidos em produção ainda fora da antecedência (situacao 'em_producao'): só informativos, abaixo dos riscos.
+function TabelaProducao({ linhas }: { linhas: alertas.AlertaEnvio[] }) {
+  return (
+    <div className="overflow-x-auto rounded-xl border border-border bg-surface">
+      <table className="w-full text-left text-sm">
+        <thead className="border-b border-border text-xs text-muted">
+          <tr>{['Venda', 'Anúncio', 'Grupo', 'Terminar produto', 'Faltam', 'Status do envio'].map((t) => <th key={t} className="px-3 py-2 font-medium">{t}</th>)}</tr>
+        </thead>
+        <tbody>
+          {linhas.map((a) => (
+            <tr key={a.shipment_id} className="border-b border-border last:border-0">
+              <td className="px-3 py-2">
+                {a.order_id ? <a href={urlVenda(a.order_id)} target="_blank" rel="noopener noreferrer" className="text-accent underline">{a.order_id}</a> : '—'}
+              </td>
+              <td className="px-3 py-2">{a.titulo ?? a.item_id ?? '—'}</td>
+              <td className="px-3 py-2">{a.grupo ?? '—'}</td>
+              <td className="px-3 py-2">
+                {ddmm(a.prazo)}
+                {a.origem_prazo === 'estimado' && <span className="ml-1 text-xs text-muted">(estimado)</span>}
+              </td>
+              <td className="px-3 py-2">{textoFaltam(a.faltam, a.situacao)}</td>
+              <td className="px-3 py-2">{a.status_envio ? (STATUS_ENVIO[a.status_envio] ?? a.status_envio) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default async function AlertasPage({ searchParams }: { searchParams: SP }) {
   await exigirPermissao('operacao');
   const params = await searchParams;
@@ -116,12 +146,13 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Alertas e Reputação</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
 
-  const linhas = aba === 'despacho' ? d.despacho : d.entrega;
+  const { riscos: despachoRiscos, emProducao } = separarProducao(d.despacho);
+  const linhas = aba === 'despacho' ? despachoRiscos : d.entrega;
   const ultima = d.reputacao.map((r) => r.capturado_em).sort().at(-1) ?? null;
   const atualizado = hhmm(ultima);
   const nivel = corDoNivel(d.reputacao[0]?.level_id ?? null);
   const abas = [
-    { chave: 'despacho', rotulo: `Despacho em risco (${d.despacho.length})` },
+    { chave: 'despacho', rotulo: `Despacho em risco (${despachoRiscos.length})` },
     { chave: 'entrega', rotulo: `Entrega em risco (${d.entrega.length})` },
   ];
 
@@ -172,6 +203,13 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
       <section className="mt-4">
         {linhas.length === 0 ? <SemDados texto="Nenhuma venda em risco agora." /> : <Tabela linhas={linhas} aba={aba} />}
       </section>
+
+      {aba === 'despacho' && emProducao.length > 0 && (
+        <section className="mt-6">
+          <h2 className="mb-2 text-sm font-semibold">{`Em produção (fora da antecedência) (${emProducao.length})`}</h2>
+          <TabelaProducao linhas={emProducao} />
+        </section>
+      )}
 
       <section className="mt-6 rounded-xl border border-border bg-surface p-4">
         <h2 className="mb-1 text-sm font-semibold">Evolução da reputação (180 dias)</h2>

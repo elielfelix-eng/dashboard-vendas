@@ -27,9 +27,9 @@ for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_
   '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
   '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql', '0023_alertas_tabelas.sql',
   '0024_alertas_funcoes.sql', '0025_alertas_producao.sql', '0026_grupos_conta.sql',
-  '0027_entrega_sem_producao.sql'])
+  '0027_entrega_sem_producao.sql', '0028_producao_visivel.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 + 0027 aplicadas');
+console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 + 0027 + 0028 aplicadas');
 
 // Perfil, usuario e canais controlados pelo teste
 await db.exec(`
@@ -242,7 +242,7 @@ await db.exec(`
 const listaP = (tipo, hoje) => rows(`select situacao, shipment_id, grupo, antecedencia, prazo::text as prazo, faltam, origem_prazo
   from analytics.alertas_envio('${tipo}', '${hoje}')`);
 const pz = (r) => [r.situacao, r.prazo, r.faltam, r.antecedencia, r.grupo, r.origem_prazo];
-eq('P1 em 27/11 (antes de 2 dias uteis do G2): ausente', de(await listaP('despacho', '2026-11-27'), 'SP1').length, 0);
+eq('P1 em 27/11 (antes de 2 dias uteis do G2): em_producao (0028)', de(await listaP('despacho', '2026-11-27'), 'SP1').map(pz), [['em_producao', '2026-12-02', 3, 2, 'G2', 'producao']]);
 const p30 = await listaP('despacho', '2026-11-30');
 eq('P1 em 30/11: prazo de producao 02/12, em_risco, faltam 2, G2', de(p30, 'SP1').map(pz), [['em_risco', '2026-12-02', 2, 2, 'G2', 'producao']]);
 eq('P1 em 03/12: atrasada', de(await listaP('despacho', '2026-12-03'), 'SP1').map((r) => [r.situacao, r.faltam, r.origem_prazo]), [['atrasada', -1, 'producao']]);
@@ -262,7 +262,7 @@ eq('P1 em producao: fora da entrega (0027)', de(pe30, 'SP1').length, 0);
 eq('em producao (P2, P3, P4, P8): fora da entrega (0027)', ['SP2', 'SP2z', 'SP3', 'SP4', 'SP8'].map((x) => de(pe30, x).length), [0, 0, 0, 0, 0]);
 eq('A (prazo do envio): origem envio', de(await listaP('despacho', '2026-11-24'), 'SA').map((r) => r.origem_prazo), ['envio']);
 eq('C (prazo desconhecido): origem nula', de(await listaP('despacho', '2026-11-26'), 'SC').map((r) => r.origem_prazo), [null]);
-const chaves = new Set([...p30, ...pe30].map((r) => r.shipment_id));
+const chaves = new Set([...p30, ...pe30].filter((r) => r.situacao !== 'em_producao').map((r) => r.shipment_id));
 eq('contagem em 30/11: cada envio uma vez; P1 conta pelo despacho', [await val(`select analytics.alertas_contagem('2026-11-30')`), de(p30, 'SP1').length + de(pe30, 'SP1').length],
   [chaves.size, 1]);
 eq('contagem em 30/11 inclui os alertas de producao', ['SP1', 'SP2', 'SP2z', 'SP3', 'SP8'].every((s) => chaves.has(s)), true);
@@ -293,6 +293,41 @@ await db.exec(`
   delete from mkt.envios_prazos where shipment_id in ('SQ1', 'SQ2');
   delete from mkt.orders where order_id in ('OQ1', 'OQ2');`);
 eq('contagem em 26/11 volta ao valor anterior', await val(`select analytics.alertas_contagem('2026-11-26')`), base26);
+
+// ---------------- Pedidos em producao fora da antecedencia (0028) ----------------
+// R1: pending/manufacturing sem grupo (padrao 4), fim da producao quinta 03/12 = 5 dias uteis depois de 26/11.
+// R2: pending/manufacturing sem o campo, entrega 10/12 -> estimado 08/12, fora da janela em 26/11.
+// R3: ready_to_ship com prazo de despacho longe (10/12): nao e producao, continua fora da lista.
+await db.exec(`
+  insert into mkt.orders (channel, order_id, status, shipment_id, date_created, raw) values
+    ('mercadolivre', 'OR1', 'paid', 'SR1', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-03T10:00:00.000-03:00"}'),
+    ('mercadolivre', 'OR2', 'paid', 'SR2', '2026-11-25 10:00-03', null),
+    ('mercadolivre', 'OR3', 'paid', 'SR3', '2026-11-25 10:00-03', '{"manufacturing_ending_date": "2026-12-03T10:00:00.000-03:00"}');
+  insert into mkt.envios_prazos (channel, shipment_id, status, substatus, prazo_despacho, prazo_entrega, despachado_em) values
+    ('mercadolivre', 'SR1', 'pending', 'manufacturing', null, '2026-12-15', null),
+    ('mercadolivre', 'SR2', 'pending', 'manufacturing', null, '2026-12-10', null),
+    ('mercadolivre', 'SR3', 'ready_to_ship', null, '2026-12-10', '2026-12-15', null);`);
+const r26 = await listaP('despacho', '2026-11-26');
+eq('R1 fora da antecedencia: em_producao, producao, 03/12, faltam 5', de(r26, 'SR1').map(pz), [['em_producao', '2026-12-03', 5, 4, null, 'producao']]);
+eq('R2 estimado fora da antecedencia: em_producao, estimado 08/12', de(r26, 'SR2').map(pz), [['em_producao', '2026-12-08', 8, 4, null, 'estimado']]);
+eq('R3 ready_to_ship fora da antecedencia: ausente (nao e producao)', de(r26, 'SR3').length, 0);
+eq('R1 em 27/11 (dentro da janela): em_risco', de(await listaP('despacho', '2026-11-27'), 'SR1').map((r) => [r.situacao, r.faltam, r.origem_prazo]), [['em_risco', 4, 'producao']]);
+eq('em_producao so para producao', r26.filter((r) => r.situacao === 'em_producao').map((r) => r.shipment_id).sort(), ['SR1', 'SR2']);
+const idx = (sits) => r26.map((r, i) => (sits.includes(r.situacao) ? i : -1)).filter((i) => i >= 0);
+eq('em_producao depois dos riscos e antes do prazo desconhecido',
+  Math.max(...idx(['atrasada', 'em_risco'])) < Math.min(...idx(['em_producao'])) && Math.max(...idx(['em_producao'])) < Math.min(...idx(['prazo_desconhecido'])), true);
+let entregaEmProducao = 0;
+for (const h of ['2026-11-23', '2026-11-26', '2026-11-30', '2026-12-04'])
+  entregaEmProducao += (await listaP('entrega', h)).filter((r) => r.situacao === 'em_producao').length;
+eq('entrega nunca devolve em_producao', entregaEmProducao, 0);
+eq('contagem em 26/11 nao conta em_producao', await val(`select analytics.alertas_contagem('2026-11-26')`), base26);
+const riscos = async (h) => new Set([...(await listaP('despacho', h)), ...(await listaP('entrega', h))]
+  .filter((r) => r.situacao !== 'em_producao').map((r) => r.shipment_id));
+const k27 = await riscos('2026-11-27');
+eq('contagem em 27/11 conta R1 (em_risco) uma vez', [await val(`select analytics.alertas_contagem('2026-11-27')`), k27.has('SR1')], [k27.size, true]);
+await db.exec(`
+  delete from mkt.envios_prazos where shipment_id in ('SR1', 'SR2', 'SR3');
+  delete from mkt.orders where order_id in ('OR1', 'OR2', 'OR3');`);
 
 await perfil('comercial');
 eq('comercial (operacao) ve a lista', await comoAuth(async () => (await lista('despacho', '2026-11-26')).length), 3);
@@ -348,8 +383,10 @@ await db.exec(mig('0025_alertas_producao.sql'));
 await db.exec(mig('0025_alertas_producao.sql'));
 await db.exec(mig('0027_entrega_sem_producao.sql'));
 await db.exec(mig('0027_entrega_sem_producao.sql'));
-eq('reexecucao da 0025 e da 0027: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
-eq('0027: grants de alertas_envio mantidos', await rows(`select has_function_privilege('anon', 'analytics.alertas_envio(text, date)', 'execute') as a,
+await db.exec(mig('0028_producao_visivel.sql'));
+await db.exec(mig('0028_producao_visivel.sql'));
+eq('reexecucao da 0025, 0027 e 0028: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
+eq('0028: grants de alertas_envio mantidos', await rows(`select has_function_privilege('anon', 'analytics.alertas_envio(text, date)', 'execute') as a,
     has_function_privilege('authenticated', 'analytics.alertas_envio(text, date)', 'execute') as u`), [{ a: false, u: true }]);
 eq('reexecucao preserva permissao alterada', await val(`select allowed from core.role_permissions where role = 'comercial' and permission = 'editar_grupos'`), true);
 eq('reexecucao preserva parametros alterados', await val(`select antecedencia_padrao from core.parametros_alertas`), 6);

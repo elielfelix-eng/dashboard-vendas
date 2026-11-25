@@ -18,7 +18,7 @@ export function rotuloOrigem(origem: string | null): string {
   return (origem && ORIGENS[origem]) || '—';
 }
 
-const NIVEIS:Record<string, { nome: string; classe: string }> = {
+const NIVEIS: Record<string, { nome: string; classe: string }> = {
   '5_green': { nome: 'Verde', classe: 'bg-green-600 text-white' },
   '4_light_green': { nome: 'Verde-claro', classe: 'bg-lime-500 text-white' },
   '3_yellow': { nome: 'Amarelo', classe: 'bg-yellow-400 text-black' },

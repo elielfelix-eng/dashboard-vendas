@@ -16,12 +16,14 @@
 --  Prazo para terminar o produto (fim_producao): data de Brasilia de raw->>'manufacturing_ending_date'
 --  (ex.: 2026-12-02T23:30:00-03:00 -> 2026-12-02). Num pacote, vale o menor entre os pedidos do envio.
 --  Prazo usado:
---   despacho, envio lido, nao despachado e status em ('pending','handling','ready_to_ship') e
---     (status 'pending' com substatus 'manufacturing' ou sem prazo_despacho):
+--   despacho, envio lido, nao despachado, status 'pending' com substatus 'manufacturing'
+--     (tela "Aguardando disponibilidade de estoque"; handling e ready_to_ship nao entram):
 --       com fim_producao -> fim_producao, origem 'producao';
---       sem fim_producao e em producao (pending/manufacturing) -> 2 dias uteis antes de prazo_entrega,
+--       sem fim_producao -> 2 dias uteis antes de prazo_entrega,
 --         origem 'estimado' (sem prazo_entrega: prazo nulo -> 'prazo_desconhecido');
---   demais casos -> prazo_despacho (despacho) ou prazo_entrega (entrega), origem 'envio'.
+--   demais casos -> prazo_despacho (despacho) ou prazo_entrega (entrega), origem 'envio'
+--     (sem prazo_despacho: 'prazo_desconhecido').
+--  O campo so e lido com fuso explicito (Z ou +-hh:mm); sem fuso, conta como ausente.
 --  origem_prazo: 'producao' | 'envio' | 'estimado'; nula quando a situacao e 'prazo_desconhecido'.
 -- ---------------------------------------------------------------------
 drop function if exists analytics.alertas_envio(text, date);
@@ -45,7 +47,7 @@ language sql stable security definer set search_path = '' as $$
            ep.status, ep.substatus,
            case when p_tipo = 'despacho' then ep.prazo_despacho else ep.prazo_entrega end as prazo_envio,
            ep.prazo_entrega,
-           case when o.raw->>'manufacturing_ending_date' ~ '^\d{4}-\d{2}-\d{2}T'
+           case when o.raw->>'manufacturing_ending_date' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}(:?\d{2})?)$'
                 then ((o.raw->>'manufacturing_ending_date')::timestamptz at time zone 'America/Sao_Paulo')::date
            end as fim_producao,
            coalesce(ep.despachado_em is not null
@@ -83,18 +85,16 @@ language sql stable security definer set search_path = '' as $$
   pz as (
     select i.*,
            coalesce(p_tipo = 'despacho' and i.lido and not i.despachado
-                    and i.status in ('pending', 'handling', 'ready_to_ship')
-                    and ((i.status = 'pending' and i.substatus = 'manufacturing') or i.prazo_envio is null), false) as producao,
-           coalesce(i.status = 'pending' and i.substatus = 'manufacturing', false) as fabricando
+                    and i.status = 'pending' and i.substatus = 'manufacturing', false) as producao
       from item i
   ),
   prz as (
     select p.*,
            case when p.producao and p.fim_producao is not null then p.fim_producao
-                when p.producao and p.fabricando then core.subtrai_dias_uteis(p.prazo_entrega, 2)
+                when p.producao then core.subtrai_dias_uteis(p.prazo_entrega, 2)
                 else p.prazo_envio end as prazo,
            case when p.producao and p.fim_producao is not null then 'producao'
-                when p.producao and p.fabricando then 'estimado'
+                when p.producao then 'estimado'
                 else 'envio' end as origem
       from pz p
   ),

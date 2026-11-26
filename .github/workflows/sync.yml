@@ -90,3 +90,5 @@ jobs:
           SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
           SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+          # Shopee Ads ligado (Tarefa 5): exige a migration 0021 aplicada no banco
+          SHOPEE_ADS: '1'

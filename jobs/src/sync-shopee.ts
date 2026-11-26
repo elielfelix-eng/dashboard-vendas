@@ -209,18 +209,17 @@ const linhaAds = (m: AdsDailyMetric) => ({
 type AdsShopeeFonte = Pick<ShopeeConnector, 'getAdsConta' | 'getAdsProdutos' | 'avisos'>;
 
 /**
- * Etapa opcional de Ads: só grava com SHOPEE_ADS=1 (padrão DESLIGADO; não está no sync.yml).
- * Motivo: até a Tarefa 5, analytics.dash_ads_periodo só soma o investimento do Mercado Livre; gravar o Ads da
- * Shopee já mudaria a tela Ads no consolidado (vendas por Ads e atribuição da Shopee sem o investimento:
- * ROAS/ACOS inflados, "não atribuído" negativo). A Tarefa 5 deve:
- *  (a) incluir o investimento da Shopee (mkt.ads_campaign_daily, 'conta') em dash_ads_periodo e ads_serie;
- *  (b) tratar campanhas, modelos e "não atribuído" no consolidado (ads_resumo, ads_campanhas, ads_modelos, ads_sugestoes);
- *  (c) só então ligar SHOPEE_ADS=1 (a 1ª execução, sem Ads da Shopee no banco, relê 89 dias e recupera o histórico).
+ * Etapa de Ads: só grava com SHOPEE_ADS=1. LIGADA na produção (SHOPEE_ADS: '1' no job shopee do sync.yml)
+ * desde a Tarefa 5, cuja migration 0021 soma o investimento da conta Shopee (mkt.ads_campaign_daily, 'conta')
+ * em dash_ads_periodo e ads_serie e deixa ads_resumo, ads_campanhas, ads_modelos e ads_sugestoes coerentes no
+ * consolidado (sem ROAS/ACOS inflados nem "não atribuído" negativo). A 0021 precisa estar aplicada no banco
+ * antes de o Ads da Shopee ser gravado. Sem a variável (ou com outro valor) a etapa fica desligada, como
+ * chave de segurança. A 1ª execução, sem Ads da Shopee no banco, relê 89 dias e recupera o histórico.
  * Qualquer erro aqui (API ou banco) fica nas estatísticas; nunca marca a execução da Shopee como falha.
  */
 export async function etapaAdsShopee(sql: Sql, shopee: AdsShopeeFonte, env: Record<string, string | undefined> = process.env): Promise<Record<string, number>> {
   if (env.SHOPEE_ADS !== '1') {
-    console.log('[Shopee] Shopee Ads: desligado até a Tarefa 5');
+    console.log('[Shopee] Shopee Ads: desligado (SHOPEE_ADS diferente de 1)');
     return { ads_desligado: 1 };
   }
   try {

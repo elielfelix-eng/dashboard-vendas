@@ -28,6 +28,11 @@ export function SemDados({ texto = 'Sem vendas no período.' }: { texto?: string
   return <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted">{texto}</p>;
 }
 
+/** Aviso discreto acima dos números (ex.: período em parte sem dados da Shopee). */
+export function AvisoDados({ texto }: { texto: string }) {
+  return <p className="mb-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">{texto}</p>;
+}
+
 export function ErroDados({ mensagem }: { mensagem: string }) {
   return <p className="rounded-xl border border-bad/40 bg-surface p-4 text-sm text-bad">{mensagem}</p>;
 }

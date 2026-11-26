@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { AvisoDados, CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
 import { CartaoOrcamento } from '@/components/ads/cartao-orcamento';
 import { EditarOrcamento } from '@/components/ads/editar-orcamento';
 import { FiltroTopo } from '@/components/filtro-topo';
@@ -11,12 +11,13 @@ import { CartaoDuplo } from '@/components/ads/cartao-duplo';
 import { GradeArrastavel } from '@/components/grade-arrastavel';
 import {
   agregarSeriePorMes,
-  avisoFalhaAds, avisoSemDetalhe, contarSugestoes, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
+  avisoFalhaAds, avisoSemDetalhe, contarSugestoes, ocultarRuidoNaoAtribuido, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
 } from '@/lib/ads-regras';
+import { atualizadoEmCanal, avisoSemDadosShopee, semBaseAnteriorShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, pct as pctTxt, variacao, variacaoPp } from '@/lib/formato';
-import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros } from '@/lib/periodo';
+import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros, type Canal } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -73,18 +74,33 @@ const COL_CAMPANHAS: Coluna<LinhaCampanha>[] = [
   { chave: 'modo', titulo: 'Modo', tipo: 'texto' },
 ];
 
-const EXPLICACOES: [string, string][] = [
-  ['Investimento', 'O que foi gasto no período: Product Ads (como consumido em cada dia) mais Seguidores (cobrança da fatura do Mercado Livre no período). ACOS, ROAS e TACOS usam só o Product Ads.'],
-  ['Vendas por Ads', 'Vendas que o Mercado Livre atribui aos anúncios patrocinados.'],
-  ['ROAS', 'Quanto você vendeu por Ads para cada R$ 1 investido (vendas por Ads ÷ investimento). ROAS 5x significa R$ 5 vendidos por R$ 1 gasto.'],
-  ['ACOS', 'Quanto do valor vendido por Ads foi gasto em Ads (investimento ÷ vendas por Ads). É o inverso do ROAS: ROAS 5x equivale a ACOS de 20%.'],
-  ['TACOS', 'Quanto do total vendido no canal (com e sem Ads) foi gasto em Ads (investimento ÷ vendas brutas do canal). Mostra o peso do Ads no negócio inteiro.'],
-  ['% de vendas via Ads', 'Parte das vendas brutas do canal que veio de anúncios patrocinados.'],
-  ['ACOS de equilíbrio', 'É a margem do modelo antes do Ads dividida pela receita dele. A margem antes do Ads é o que sobra de todas as vendas do modelo no período: receita − custo do produto − tarifas e frete − imposto e embalagem − a parte dele nos custos do período (rateados pela receita), sem contar o Ads. Se o ACOS passa desse número, o Ads dá prejuízo.'],
-  ['Lucro após Ads', 'A margem antes do Ads do modelo (todas as vendas dele no período, depois de custo do produto, tarifas e frete, imposto e embalagem e a parte dele nos custos do período) menos o investimento em Ads atribuído ao modelo.'],
-  ['Não atribuído a anúncio', 'Investimento que não dá para ligar a um modelo: o gasto que o Mercado Livre não ligou a um anúncio e o gasto de anúncios sem modelo identificado. Aparece na última linha para a soma bater com o total.'],
-  ['Não atribuído a campanha', 'Na aba Campanhas, a última linha é o investimento do total que não aparece em nenhuma campanha (por exemplo, cobranças da fatura do Mercado Livre), para a soma bater com o total.'],
-];
+/** Textos de "Como os números são calculados", com o canal certo (Mercado Livre, Shopee ou os dois). */
+function explicacoes(canal: Canal): [string, string][] {
+  const ml = canal === 'mercadolivre';
+  const sh = canal === 'shopee';
+  return [
+    ['Investimento', ml
+      ? 'O que foi gasto no período: Product Ads (como consumido em cada dia) mais Seguidores (cobrança da fatura do Mercado Livre no período). ACOS, ROAS e TACOS usam só o Product Ads.'
+      : sh
+        ? 'O que foi gasto no Shopee Ads no período, dia a dia, como informado pela Shopee para a loja.'
+        : 'O que foi gasto no período: Product Ads do Mercado Livre e Shopee Ads (como consumidos em cada dia) mais Seguidores (cobrança da fatura do Mercado Livre). ACOS, ROAS e TACOS usam só os anúncios patrocinados (sem Seguidores).'],
+    ['Vendas por Ads', ml ? 'Vendas que o Mercado Livre atribui aos anúncios patrocinados.'
+      : sh ? 'Vendas que a Shopee atribui aos anúncios patrocinados.'
+        : 'Vendas que o Mercado Livre e a Shopee atribuem aos anúncios patrocinados.'],
+    ['ROAS', 'Quanto você vendeu por Ads para cada R$ 1 investido (vendas por Ads ÷ investimento). ROAS 5x significa R$ 5 vendidos por R$ 1 gasto.'],
+    ['ACOS', 'Quanto do valor vendido por Ads foi gasto em Ads (investimento ÷ vendas por Ads). É o inverso do ROAS: ROAS 5x equivale a ACOS de 20%.'],
+    ['TACOS', 'Quanto do total vendido no canal (com e sem Ads) foi gasto em Ads (investimento ÷ vendas brutas do canal). Mostra o peso do Ads no negócio inteiro.'],
+    ['% de vendas via Ads', 'Parte das vendas brutas do canal que veio de anúncios patrocinados.'],
+    ['ACOS de equilíbrio', `É a margem do modelo antes do Ads dividida pela receita dele. A margem antes do Ads é o que sobra de todas as vendas do modelo no período: receita − custo do produto − tarifas e frete − imposto e embalagem − a parte dele nos custos do período (rateados pela receita), sem contar o Ads. Se o ACOS passa desse número, o Ads dá prejuízo.${canal === 'consolidado' ? ' No Consolidado, o número junta os dois canais: a margem e a receita do modelo no Mercado Livre e na Shopee somadas. O equilíbrio de cada canal pode ser diferente; para ver um canal só, escolha-o no filtro.' : ''}`],
+    ['Lucro após Ads', 'A margem antes do Ads do modelo (todas as vendas dele no período, depois de custo do produto, tarifas e frete, imposto e embalagem e a parte dele nos custos do período) menos o investimento em Ads atribuído ao modelo.'],
+    ['Não atribuído a anúncio', ml
+      ? 'Investimento que não dá para ligar a um modelo: o gasto que o Mercado Livre não ligou a um anúncio e o gasto de anúncios sem modelo identificado. Aparece na última linha para a soma bater com o total.'
+      : `Investimento que não dá para ligar a um modelo: o gasto que ${sh ? 'a Shopee não ligou' : 'o Mercado Livre e a Shopee não ligaram'} a um anúncio (na Shopee, a sobra da conta, como o Ads da loja) e o gasto de anúncios sem modelo identificado. Aparece na última linha para a soma bater com o total; diferenças de centavos da Shopee (menos de R$ 0,05) não aparecem.`],
+    ['Não atribuído a campanha', ml
+      ? 'Na aba Campanhas, a última linha é o investimento do total que não aparece em nenhuma campanha (por exemplo, cobranças da fatura do Mercado Livre), para a soma bater com o total.'
+      : `Na aba Campanhas, a última linha é o investimento do total que não aparece em nenhuma campanha${sh ? '' : ' (por exemplo, cobranças da fatura do Mercado Livre)'}, para a soma bater com o total. A linha "Shopee Ads (sobra da conta)" é o gasto da Shopee que não está em nenhuma campanha de produto.`],
+  ];
+}
 
 export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const perms = await exigirPermissao('ads');
@@ -128,26 +144,28 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   let d;
   try {
     // Os cartões não usam nao_atribuido (a tabela tem a linha própria): detalhe = false pula a atribuição
-    // por modelo nas duas chamadas. Tabelas só da aba aberta; nada na Shopee (tela sem dados).
-    const [atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc] = await Promise.all([
+    // por modelo nas duas chamadas. Tabelas só da aba aberta. Seguidores só existem no Mercado Livre.
+    const [atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, { sinc, shopee }] = await Promise.all([
       ads.adsResumo(canal, periodo.de, periodo.ate, false),
       ads.adsResumo(canal, periodo.anteriorDe, periodo.anteriorAte, false),
       canal !== 'shopee' ? ads.adsSeguidores(canal, periodo.de, periodo.ate) : Promise.resolve(0),
       canal !== 'shopee' ? ads.adsSeguidores(canal, periodo.anteriorDe, periodo.anteriorAte) : Promise.resolve(0),
       ads.adsSerie(canal, periodo.de, periodo.ate),
-      aba === 'modelos' && canal !== 'shopee' ? ads.adsModelos(canal, periodo.de, periodo.ate) : Promise.resolve([]),
-      aba === 'campanhas' && canal !== 'shopee' ? ads.adsCampanhas(canal, periodo.de, periodo.ate) : Promise.resolve([]),
-      dash.sincronizacoes(),
+      aba === 'modelos' ? ads.adsModelos(canal, periodo.de, periodo.ate) : Promise.resolve([]),
+      aba === 'campanhas' ? ads.adsCampanhas(canal, periodo.de, periodo.ate) : Promise.resolve([]),
+      dash.sincEShopee(),
     ]);
     // Orçamento: só com a aba aberta; sempre do mês corrente.
-    const [orcamento, vigencias] = aba === 'orcamento' && canal !== 'shopee'
+    const [orcamento, vigencias] = aba === 'orcamento'
       ? await Promise.all([ads.adsOrcamento(canal), podeEditarOrcamento ? ads.orcamentoVigencias() : Promise.resolve([])])
       : [[], []];
-    d = { atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc, orcamento, vigencias };
+    d = { atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc, orcamento, vigencias, shopee };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const { atual: a, anterior: p, segAtual, segAnterior } = d;
+  const { atual: a, segAtual, segAnterior } = d;
+  // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
+  const p = semBaseAnteriorShopee(canal, periodo, d.shopee.cob) ? undefined : d.anterior;
   // Cartão Investimento = Product Ads + Seguidores. ACOS, ROAS e TACOS continuam só com Product Ads.
   const investimentoTotal = a ? Math.round((a.investimento + segAtual) * 100) / 100 : 0;
   const investimentoAnterior = p ? Math.round((p.investimento + segAnterior) * 100) / 100 : undefined;
@@ -155,11 +173,15 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const orgVendas = a ? Math.max(0, Math.round((a.vendas_brutas_canal - a.vendas_ads) * 100) / 100) : 0;
   const orgAnterior = p ? Math.max(0, Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100) : undefined;
   const pctOrg = a && a.pct_vendas_ads != null ? Math.round((100 - a.pct_vendas_ads) * 100) / 100 : null;
-  const semShopee = canal === 'shopee';
+  const soShopee = canal === 'shopee';
+  const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
-  const statsMl = d.sinc.mercadolivre?.stats ?? null;
-  const falhaAds = semShopee ? null : avisoFalhaAds(statsMl);
-  const semDetalhe = a ? avisoSemDetalhe(a.tem_detalhe) : null;
+  const falhas = [
+    canal !== 'shopee' ? avisoFalhaAds(d.sinc.mercadolivre?.stats ?? null, 'mercadolivre') : null,
+    canal !== 'mercadolivre' && d.shopee.cob.conectada && d.shopee.cob.visivel ? avisoFalhaAds(d.sinc.shopee?.stats ?? null, 'shopee') : null,
+  ].filter((x): x is string => !!x);
+  const semDetalhe = a ? avisoSemDetalhe(a.tem_detalhe, canal) : null;
+  const EXPLICACOES = explicacoes(canal);
 
   const contagem = contarSugestoes(d.modelos);
   const celulaSugestao = (s: SugestaoAds | null, motivo: string | null, pausado: boolean | null): CelulaSugestao | null =>
@@ -173,7 +195,9 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
       acos_equilibrio: m.acos_equilibrio, lucro_pos_ads: m.lucro_pos_ads, sugestao: celulaSugestao(m.sugestao, m.motivo, m.pausado), modo: rotuloModo(m.modo),
       href: verVendas && m.modelo ? `/vendas/${encodeURIComponent(m.modelo)}${qs}` : undefined,
     }));
-  const nao = d.modelos.find((m) => m.modelo == null);
+  // Ruído de centavos da Shopee (< R$ 0,05 ou negativo) não aparece na Shopee e no consolidado; o ML não muda.
+  const naoBruto = d.modelos.find((m) => m.modelo == null);
+  const nao = naoBruto ? ocultarRuidoNaoAtribuido(canal, naoBruto) : null;
   if (nao && !sug) {
     linhasModelos.push({
       modelo: ROTULO_NAO_ATRIBUIDO, foto: null, produto: null, situacao: '', investimento: nao.investimento, impressoes: nao.impressoes,
@@ -190,7 +214,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
       vendas_ads: c.vendas_ads, acos: c.acos, roas: c.roas, modelos: c.modelos, modo: rotuloModo(c.modo),
     }));
   // Linha final da aba (campanha nula): o que o cartão tem a mais que as campanhas; a soma bate com o cartão.
-  const semCampanha = d.campanhas.find((c) => c.campanha_id == null);
+  const semCampanhaBruta = d.campanhas.find((c) => c.campanha_id == null);
+  const semCampanha = semCampanhaBruta ? ocultarRuidoNaoAtribuido(canal, semCampanhaBruta) : null;
   if (semCampanha) {
     linhasCampanhas.push({
       nome: ROTULO_SEM_CAMPANHA, status: '—', automatica: '—', orcamento_diario: null, roas_target: null, acos_equivalente: null,
@@ -201,14 +226,16 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-semibold">Ads</h1>
-      <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva atualizadoEm={d.sinc.mercadolivre?.ultimoSucesso ?? null} />
+      <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
+        atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
 
-      {falhaAds && (
-        <div role="alert" className="mb-4 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">{falhaAds}</div>
-      )}
+      {falhas.map((f) => (
+        <div key={f} role="alert" className="mb-4 rounded-lg border border-bad/40 bg-surface px-4 py-2 text-sm text-bad">{f}</div>
+      ))}
+      {aviso && !aviso.semDados && <AvisoDados texto={aviso.texto} />}
 
-      {semShopee ? (
-        <SemDados texto="A Shopee ainda não está conectada ao painel; assim que os dados chegarem, aparecem aqui." />
+      {aviso?.semDados ? (
+        <SemDados texto={aviso.texto} />
       ) : (
         <>
           {semInvestimento && <div className="mb-4"><SemDados texto="Sem investimento em Ads no período." /></div>}
@@ -216,14 +243,18 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             <>
           <GradeArrastavel id="ads" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" itens={[
             { chave: 'investimento', node: <CartaoIndicador titulo="Investimento" valor={brl(investimentoTotal)} variacao={variacao(investimentoTotal, investimentoAnterior)} inverterCores
-              ajuda={`Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} /> },
-            { chave: 'product-ads-seguidores', node: <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
+              ajuda={soShopee ? 'Shopee Ads no período.' : canal === 'consolidado'
+                ? `Product Ads e Shopee Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`
+                : `Product Ads ${brl(a.investimento)} + Seguidores ${brl(segAtual)}.`} /> },
+            ...(soShopee ? [] : [{ chave: 'product-ads-seguidores', node: <CartaoDuplo ajuda="Investimento separado: Product Ads (anúncios patrocinados) e Seguidores (cobrança da fatura do Mercado Livre). O total está no card Investimento."
               esquerda={{ titulo: 'Product Ads', valor: brl(a.investimento), variacao: variacao(a.investimento, p?.investimento),
                 participacao: pctTxt(investimentoTotal > 0 ? (a.investimento / investimentoTotal) * 100 : null), rotulo: '' }}
               direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
-                participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null), rotulo: '' }} /> },
+                participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null), rotulo: '' }} /> }]),
             { chave: 'vendas-ads-organicas', node: <CartaoDuplo inverterCores={false}
-              ajuda="Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo atual: Mercado Livre). A participação é sobre as vendas brutas do canal."
+              ajuda={canal === 'mercadolivre'
+                ? 'Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo atual: Mercado Livre). A participação é sobre as vendas brutas do canal.'
+                : `Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo: ${canal === 'shopee' ? 'Shopee' : 'Mercado Livre e Shopee'}). A participação é sobre as vendas brutas do canal.`}
               esquerda={{ titulo: 'Vendas por Ads', valor: brl(a.vendas_ads), variacao: variacao(a.vendas_ads, p?.vendas_ads),
                 participacao: pctTxt(a.pct_vendas_ads), rotulo: '' }}
               direita={{ titulo: 'Vendas orgânicas', valor: brl(orgVendas), variacao: variacao(orgVendas, orgAnterior),
@@ -277,7 +308,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
             ) : aba === 'campanhas' ? (
               <TabelaDados colunas={COL_CAMPANHAS} linhas={linhasCampanhas} busca="nome" nomeArquivo={`ads-campanhas_${periodo.de}_${periodo.ate}`}
                 titulo="Campanhas" vazio="Sem campanhas com Ads no período."
-                descricao="ROAS objetivo é a meta configurada no Mercado Livre; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS). A última linha reúne o investimento que não aparece em nenhuma campanha." />
+                descricao={`ROAS objetivo é a meta configurada ${canal === 'mercadolivre' ? 'no Mercado Livre' : canal === 'shopee' ? 'na Shopee' : 'no canal da campanha'}; o ACOS equivalente é o mesmo número visto como percentual (1 ÷ ROAS). A última linha reúne o investimento que não aparece em nenhuma campanha.`} />
             ) : (
               <>
               <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs" aria-label="Filtrar por sugestão">
@@ -294,7 +325,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               </div>
               <TabelaDados colunas={COL_MODELOS} linhas={linhasModelos} busca="modelo" nomeArquivo={`ads-modelos_${periodo.de}_${periodo.ate}`}
                 titulo="Resultado do Ads por modelo" vazio={sug ? 'Nenhum modelo com essa sugestão no período.' : 'Sem investimento por modelo no período.'}
-                descricao={`${verCustos ? 'Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo. ' : ''}A última linha reúne o que não dá para ligar a um modelo (gasto sem anúncio e anúncios sem modelo).`} />
+                descricao={`${verCustos ? `Compare o ACOS com o ACOS de equilíbrio: acima dele, a venda por Ads dá prejuízo.${canal === 'consolidado' ? ' No Consolidado, o ACOS de equilíbrio junta o Mercado Livre e a Shopee.' : ''} ` : ''}A última linha reúne o que não dá para ligar a um modelo (gasto sem anúncio e anúncios sem modelo).`} />
               </>
             )}
           </section>

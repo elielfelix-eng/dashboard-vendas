@@ -1,9 +1,10 @@
-import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { AvisoDados, CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
 import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { lerGrao, queryFiltros, SeletorGrao } from '@/components/seletor-grao';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
+import { atualizadoEmCanal, avisoSemDadosShopee, semBaseAnteriorShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, num, pct, variacao } from '@/lib/formato';
 import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -38,20 +39,24 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
 
   let d;
   try {
-    const [atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc] = await Promise.all([
+    const [atual, anterior, sAtual, sAnterior, mAtual, mAnterior, { sinc, shopee }] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
       dash.serie(canal, periodo.de, periodo.ate, grao),
       dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, grao),
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.modelos(canal, periodo.anteriorDe, periodo.anteriorAte),
-      dash.sincronizacoes(),
+      dash.sincEShopee(),
     ]);
-    d = { atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc };
+    d = { atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc, shopee };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Vendas</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const { atual: a, anterior: p } = d;
+  const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
+  // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
+  const semBase = semBaseAnteriorShopee(canal, periodo, d.shopee.cob);
+  const a = d.atual;
+  const p = semBase ? null : d.anterior;
   const anteriorPorModelo = new Map(d.mAnterior.map((m) => [m.modelo, m.vendas_brutas]));
   const linhas: LinhaVendas[] = d.mAtual
     .filter((m) => m.pedidos > 0)
@@ -60,7 +65,7 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
       href: m.modelo ? `/vendas/${encodeURIComponent(m.modelo)}${qs}` : undefined,
       foto: m.foto,
       pedidos: m.pedidos, unidades: m.unidades, vendas_brutas: m.vendas_brutas,
-      variacao: variacao(m.vendas_brutas, anteriorPorModelo.get(m.modelo) ?? 0),
+      variacao: variacao(m.vendas_brutas, semBase ? null : anteriorPorModelo.get(m.modelo) ?? 0),
       participacao: a.vendas_brutas > 0 ? (m.vendas_brutas / a.vendas_brutas) * 100 : 0,
       ticket_medio: m.ticket_medio, pct_cancel_devol: m.pct_cancel_devol,
     }));
@@ -68,25 +73,29 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-semibold">Vendas</h1>
-      <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={d.sinc.mercadolivre?.ultimoSucesso ?? null} />
-      {a.pedidos === 0 ? <SemDados /> : (
+      <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
+        atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
+      {aviso && !aviso.semDados && <AvisoDados texto={aviso.texto} />}
+      {aviso?.semDados ? <SemDados texto={aviso.texto} /> : a.pedidos === 0 ? <SemDados /> : (
         <>
           <p className="mb-3 text-xs text-muted">
-            Como nas Métricas do Mercado Livre: vendas brutas e quantidade de vendas incluem as canceladas e as devolvidas;
-            pedidos cancelados porque o carrinho foi dividido não contam. Vendas líquidas são só os pedidos pagos.
+            {canal !== 'shopee' && <>{canal === 'consolidado' ? 'Mercado Livre, como' : 'Como'} nas Métricas do Mercado Livre: vendas brutas e quantidade de vendas incluem as canceladas e as devolvidas;
+            pedidos cancelados porque o carrinho foi dividido não contam. </>}
+            {canal !== 'mercadolivre' && <>Shopee: vendas brutas incluem os pedidos pagos e os cancelados depois do pagamento; cancelados sem pagamento não contam. </>}
+            Vendas líquidas são só os pedidos pagos.
           </p>
           <GradeArrastavel id="vendas" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" itens={[
-            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)} /> },
-            { chave: 'quantidade', node: <CartaoIndicador titulo="Quantidade de vendas" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} /> },
-            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades vendidas" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} /> },
-            { chave: 'preco-venda', node: <CartaoIndicador titulo="Preço médio por venda" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} /> },
+            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p?.vendas_brutas)} /> },
+            { chave: 'quantidade', node: <CartaoIndicador titulo="Quantidade de vendas" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p?.pedidos)} /> },
+            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades vendidas" valor={num(a.unidades)} variacao={variacao(a.unidades, p?.unidades)} /> },
+            { chave: 'preco-venda', node: <CartaoIndicador titulo="Preço médio por venda" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p?.ticket_medio)} /> },
             { chave: 'preco-unidade', node: <CartaoIndicador titulo="Preço médio por unidade" valor={brl(a.unidades ? a.vendas_brutas / a.unidades : null)}
-              variacao={variacao(a.unidades ? a.vendas_brutas / a.unidades : null, p.unidades ? p.vendas_brutas / p.unidades : null)} /> },
+              variacao={variacao(a.unidades ? a.vendas_brutas / a.unidades : null, p?.unidades ? p.vendas_brutas / p.unidades : null)} /> },
             { chave: 'canceladas', node: <CartaoIndicador titulo="Vendas canceladas" valor={brl(a.canceladas_valor)} inverterCores
-              variacao={variacao(a.canceladas_valor, p.canceladas_valor)} detalhe={`${num(a.cancelados)} vendas`} /> },
+              variacao={variacao(a.canceladas_valor, p?.canceladas_valor)} detalhe={`${num(a.cancelados)} vendas`} /> },
             { chave: 'devolvidas', node: <CartaoIndicador titulo="Vendas devolvidas" valor={brl(a.devolvidas_valor)} inverterCores
-              variacao={variacao(a.devolvidas_valor, p.devolvidas_valor)} detalhe={`${num(a.devolvidos)} vendas`} /> },
-            { chave: 'liquidas', node: <CartaoIndicador titulo="Vendas líquidas" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)}
+              variacao={variacao(a.devolvidas_valor, p?.devolvidas_valor)} detalhe={`${num(a.devolvidos)} vendas`} /> },
+            { chave: 'liquidas', node: <CartaoIndicador titulo="Vendas líquidas" valor={brl(a.receita)} variacao={variacao(a.receita, p?.receita)}
               detalhe={`${pct(a.pct_cancel_devol)} canceladas ou devolvidas`} ajuda="Só os pedidos pagos: é a base da margem." /> },
           ]} />
           <section className="mt-6 rounded-xl border border-border bg-surface p-4">
@@ -94,7 +103,7 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
               <h2 className="text-sm font-semibold">Vendas brutas</h2>
               <SeletorGrao atual={grao} params={params} caminho="/vendas" />
             </div>
-            <GraficoSerie atual={d.sAtual} anterior={d.sAnterior} grao={grao} />
+            <GraficoSerie atual={d.sAtual} anterior={semBase ? [] : d.sAnterior} grao={grao} />
           </section>
           <section className="mt-6">
             <TabelaDados colunas={COLUNAS} linhas={linhas} busca="modelo" nomeArquivo={`vendas-por-modelo_${periodo.de}_${periodo.ate}`}

@@ -1,6 +1,6 @@
 # Shopee: cobertura real da API (Tarefa 2)
 
-Data: 26/11/2026. Fonte: sonda somente leitura rodada no GitHub Actions com a loja conectada. Status: **para aprovação do dono**.
+Data: 26/11/2026. Fonte: sonda somente leitura rodada no GitHub Actions com a loja conectada. Status: **aprovado pelo dono em 26/11/2026**, com as três decisões abaixo aceitas como propostas.
 
 ## Resumo
 - A Shopee oferece quase tudo o que o painel usa do Mercado Livre: pedidos, itens, variações, SKU, tarifas e frete reais por pedido, Ads da conta e avaliações.

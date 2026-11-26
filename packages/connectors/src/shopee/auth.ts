@@ -13,9 +13,12 @@ export const SHOPEE_AUTH_EXPIRED = 'Autorização da Shopee vencida: reconecte e
 
 /** Autorização vencida ou recusada: o admin precisa reconectar a loja. */
 export class ShopeeAuthError extends Error {
-  constructor() {
+  /** Código de erro devolvido pela Shopee (ex.: error_sign), ou http_<status>. Nunca leva token nem código de autorização. */
+  readonly codigo: string;
+  constructor(codigo = '') {
     super(SHOPEE_AUTH_EXPIRED);
     this.name = 'ShopeeAuthError';
+    this.codigo = codigo;
   }
 }
 
@@ -78,12 +81,12 @@ async function tokenRequest(
     try {
       code = errorCode((JSON.parse(err.body) as ShopeeTokenResponse).error);
     } catch { /* corpo não-JSON */ }
-    if (err.status === 401 || err.status === 403 || AUTH_ERRORS.has(code)) throw new ShopeeAuthError();
+    if (err.status === 401 || err.status === 403 || AUTH_ERRORS.has(code)) throw new ShopeeAuthError(code || `http_${err.status}`);
     throw new Error(`HTTP ${err.status} em ${label}${code ? `: ${code}` : ''}`);
   }
 
   const code = errorCode(data.error);
-  if (AUTH_ERRORS.has(code)) throw new ShopeeAuthError();
+  if (AUTH_ERRORS.has(code)) throw new ShopeeAuthError(code);
   if (code) throw new Error(`Erro da Shopee em ${label}: ${code}`);
   if (!data.access_token || !data.refresh_token || !data.expire_in) {
     throw new Error(`Resposta incompleta da Shopee em ${label} (sem token ou validade).`);

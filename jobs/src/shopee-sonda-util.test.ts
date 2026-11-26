@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { urlDaLoja, caminhosDeCampos, janelasPorMes, dataAds } from './shopee-sonda-util.ts';
+import { urlDaLoja, caminhosDeCampos, janelasPorMes, dataAds, deveRenovar } from './shopee-sonda-util.ts';
 
 // Valores FICTÍCIOS.
 const app = { partnerId: 1000001, partnerKey: 'chave-ficticia' };
@@ -41,4 +41,12 @@ test('janelasPorMes: no máximo 15 dias, sem atravessar mês, cobre tudo sem sob
 
 test('dataAds usa dd-mm-yyyy', () => {
   assert.equal(dataAds(Date.UTC(2026, 0, 5, 12)), '05-01-2026');
+});
+
+test('deveRenovar: uma vez só, e nunca depois de um sucesso', () => {
+  assert.equal(deveRenovar(false, false, 'error_auth'), true);
+  assert.equal(deveRenovar(false, false, 'invalid_access_token'), true);
+  assert.equal(deveRenovar(true, false, 'error_auth'), false);
+  assert.equal(deveRenovar(false, true, 'error_auth'), false);
+  assert.equal(deveRenovar(false, false, 'error_param'), false);
 });

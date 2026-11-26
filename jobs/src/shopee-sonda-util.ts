@@ -83,3 +83,12 @@ export function dataAds(ms: number): string {
   const d = new Date(ms - OFFSET_SP_MS);
   return `${String(d.getUTCDate()).padStart(2, '0')}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${d.getUTCFullYear()}`;
 }
+
+/**
+ * Renovar o token à força só se: ainda não renovou nesta rodada, nenhuma chamada deu certo com o token atual
+ * (se algo deu certo, o token vale e error_auth é falta de permissão do endpoint) e o erro é de autorização.
+ */
+export function deveRenovar(jaRenovou: boolean, houveSucesso: boolean, codigo: string): boolean {
+  if (jaRenovou || houveSucesso) return false;
+  return codigo === 'error_auth' || codigo.startsWith('invalid_acc');
+}

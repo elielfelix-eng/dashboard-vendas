@@ -11,7 +11,7 @@
 import { refreshShopeeTokens, ShopeeAuthError, type ShopeeAppCredentials } from '@dash/connectors';
 import { connect, requireEnv } from './db.ts';
 import { createTokenProvider } from './token-store.ts';
-import { caminhosDeCampos, dataAds, janelasPorMes, urlDaLoja } from './shopee-sonda-util.ts';
+import { caminhosDeCampos, dataAds, deveRenovar, janelasPorMes, urlDaLoja } from './shopee-sonda-util.ts';
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -54,6 +54,8 @@ async function main() {
       return;
     }
     const shopId = Number(acc.external_id);
+    let jaRenovou = false; // no máximo UMA renovação forçada por rodada (refresh token é de uso único)
+    let houveSucesso = false;
     const getToken = createTokenProvider(sql, acc.id, (rt) => refreshShopeeTokens(app, shopId, rt));
 
     /** Uma chamada assinada. Nunca lança por erro de endpoint; devolve http/erro. Renova o token 1 vez se for erro de autorização. */
@@ -63,10 +65,11 @@ async function main() {
       params: Record<string, string | number> = {},
       post?: Obj,
     ): Promise<Resultado> {
+      let forcar = false;
       for (let tentativa = 0; tentativa < 3; tentativa++) {
         let token: string;
         try {
-          token = await getToken(tentativa === 1);
+          token = await getToken(forcar);
         } catch (err) {
           const c = err instanceof ShopeeAuthError ? `auth:${err.codigo}` : 'token_falhou';
           return { http: 0, erro: c, corpo: null, ms: 0 };
@@ -94,7 +97,16 @@ async function main() {
         const ms = Date.now() - t0;
         medir(rotulo, ms);
         const erro = codigo(corpo?.error);
-        if (tentativa === 0 && (erro === 'error_auth' || erro.startsWith('invalid_acc'))) continue; // renova e tenta de novo
+        if (http === 200 && !erro) houveSucesso = true;
+        if (erro === 'error_auth' || erro.startsWith('invalid_acc')) {
+          if (deveRenovar(jaRenovou, houveSucesso, erro)) {
+            jaRenovou = true;
+            forcar = true;
+            continue; // renova uma única vez na rodada e tenta de novo
+          }
+          console.log(`  ${rotulo}: sem permissão (error_auth)`);
+          return { http, erro, corpo, ms };
+        }
         if (http === 429 || erro === 'error_rate_limit') {
           await dormir(2000 * (tentativa + 1));
           continue;
@@ -114,7 +126,7 @@ async function main() {
     const resp = (r: Resultado): Obj => (isObj(r.corpo?.response) ? (r.corpo!.response as Obj) : {});
 
     const agora = Math.floor(Date.now() / 1000);
-    console.log(`=== SONDA SHOPEE (shop ${shopId}) ===`);
+    console.log('=== SONDA SHOPEE (loja conectada) ===');
 
     // ---------- Pedidos ----------
     console.log('\n=== PEDIDOS ===');
@@ -227,7 +239,12 @@ async function main() {
     let falhas = 0;
     for (const j of janelas) {
       let cursor = '';
+      let paginas = 0;
       for (;;) {
+        if (++paginas > 1000) {
+          console.log(`  janela ${j.mes}: paginação interrompida (mais de 1000 páginas)`);
+          break;
+        }
         const r = await chamar('hist_lista', P, {
           time_range_field: 'create_time', time_from: j.de, time_to: j.ate, page_size: 100, ...(cursor ? { cursor } : {}),
         });
@@ -245,8 +262,14 @@ async function main() {
           porStatus.set(s, (porStatus.get(s) ?? 0) + 1);
         }
         await dormir(PAUSA_MS);
-        if (resp(r).more === true && typeof resp(r).next_cursor === 'string') cursor = resp(r).next_cursor as string;
-        else break;
+        if (resp(r).more === true && typeof resp(r).next_cursor === 'string') {
+          const prox = resp(r).next_cursor as string;
+          if (prox === cursor) {
+            console.log(`  janela ${j.mes}: paginação interrompida (cursor repetido)`);
+            break;
+          }
+          cursor = prox;
+        } else break;
       }
     }
     console.log(`  janelas: ${janelas.length} | chamadas de lista: ${chamadasLista} | janelas com falha: ${falhas}`);

@@ -1,6 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { textoFaltam, corDoNivel, rotuloOrigem, separarProducao } from './alertas-formato.ts';
+import { textoFaltam, corDoNivel, rotuloOrigem, rotuloStatusEnvio, separarProducao } from './alertas-formato.ts';
+
+test('rotuloStatusEnvio: ready_to_ship postado, coletado ou no centro', () => {
+  assert.equal(rotuloStatusEnvio('ready_to_ship', 'dropped_off'), 'Postado');
+  assert.equal(rotuloStatusEnvio('ready_to_ship', 'picked_up'), 'Coletado');
+  assert.equal(rotuloStatusEnvio('ready_to_ship', 'in_hub'), 'No centro de distribuição');
+});
+test('rotuloStatusEnvio: demais casos sem mudança', () => {
+  assert.equal(rotuloStatusEnvio('ready_to_ship', 'ready_to_print'), 'Pronto para envio');
+  assert.equal(rotuloStatusEnvio('ready_to_ship', null), 'Pronto para envio');
+  assert.equal(rotuloStatusEnvio('pending', 'manufacturing'), 'Pendente');
+  assert.equal(rotuloStatusEnvio('shipped', 'picked_up'), 'A caminho');
+  assert.equal(rotuloStatusEnvio('outro', null), 'outro');
+  assert.equal(rotuloStatusEnvio(null, null), '—');
+});
 
 test('separarProducao: em_producao fora dos riscos, ordenado pelo prazo', () => {
   const l = [

@@ -18,6 +18,22 @@ export function separarProducao<T extends { situacao: string; prazo: string | nu
   return { riscos: linhas.filter((l) => l.situacao !== 'em_producao'), emProducao };
 }
 
+const STATUS_ENVIO: Record<string, string> = {
+  pending: 'Pendente', handling: 'Em preparação', ready_to_ship: 'Pronto para envio', shipped: 'A caminho',
+  delivered: 'Entregue', not_delivered: 'Não entregue', cancelled: 'Cancelado',
+};
+// ready_to_ship já postado ou coletado (o Mercado Livre mostra "A caminho"; o painel conta como despachado).
+const SUBSTATUS_PRONTO: Record<string, string> = {
+  dropped_off: 'Postado', picked_up: 'Coletado', in_hub: 'No centro de distribuição',
+};
+
+/** Rótulo do status do envio; em ready_to_ship usa o substatus quando já foi postado ou coletado. */
+export function rotuloStatusEnvio(status: string | null, substatus: string | null): string {
+  if (!status) return '—';
+  if (status === 'ready_to_ship' && substatus && SUBSTATUS_PRONTO[substatus]) return SUBSTATUS_PRONTO[substatus];
+  return STATUS_ENVIO[status] ?? status;
+}
+
 const ORIGENS: Record<string, string> = { producao: 'Terminar produto', envio: 'Despacho', estimado: 'Estimado' };
 
 /** Rótulo da origem do prazo na lista de despacho ('—' quando não há). */

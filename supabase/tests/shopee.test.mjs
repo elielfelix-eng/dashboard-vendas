@@ -23,10 +23,11 @@ const rows = async (sql, p = []) => (await db.query(sql, p)).rows;
 const val = async (sql, p = []) => Object.values((await rows(sql, p))[0])[0];
 
 await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
-for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0020_shopee_pagamentos.sql', '0030_shopee_escrow_campos.sql']) await db.exec(mig(f));
+for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0020_shopee_pagamentos.sql', '0030_shopee_escrow_campos.sql', '0031_shopee_categorias.sql']) await db.exec(mig(f));
 await db.exec(mig('0020_shopee_pagamentos.sql')); // reexecutavel
 await db.exec(mig('0030_shopee_escrow_campos.sql')); // reexecutavel (e de novo depois da 0020)
-console.log('Migrations 0002, 0003, 0020 (2x) e 0030 (2x) aplicadas');
+await db.exec(mig('0031_shopee_categorias.sql')); // reexecutavel
+console.log('Migrations 0002, 0003, 0020 (2x), 0030 (2x) e 0031 (2x) aplicadas');
 
 // Permissoes controladas pelo teste
 await db.exec(`
@@ -185,6 +186,29 @@ eq('0020 + 0030 reaplicadas: pendentes com a regra da 0030', (await rows(`select
 // ---------------- Reexecucao preserva dados ----------------
 await db.exec(mig('0020_shopee_pagamentos.sql'));
 eq('0020 reexecutada preserva o escrow', await val(`select count(*)::int from mkt.shopee_escrow`), 6);
+
+// ---------------- 0031: protecao do frete, reembolso e pedidos reais ----------------
+// A secao anterior reaplicou a 0020 (que redefine os pendentes): reaplica a 0030 e a 0031, na ordem documentada
+await db.exec(mig('0030_shopee_escrow_campos.sql'));
+await db.exec(mig('0031_shopee_categorias.sql'));
+// Mesmas fixtures do teste do conector (as linhas esperadas la conferem com tarifasDoEscrow)
+const reais = JSON.parse(readFileSync(`${repo}/packages/connectors/src/shopee/fixtures/escrow-reais.json`, 'utf8')).pedidos;
+for (const f of reais) {
+  await db.query(`insert into mkt.orders (channel, order_id, status, date_created, raw) values ('shopee', $1, 'paid', '2026-11-10 10:00-03', '{"order_status":"COMPLETED"}')`, [f.order_sn]);
+  await db.query(`insert into mkt.order_items (channel, order_id, line_no, quantity, unit_price) values ('shopee', $1, 1, 1, $2)`, [f.order_sn, f.itens]);
+  await gravarEscrow([f.order_sn], JSON.stringify(f.linhas.map((l) => ({ ...l, order_id: f.order_sn, data_ref: '2026-11-10' }))));
+  eq(`conciliacao real ${f.order_sn}: diferenca 0,00`, await val(`select diferenca::text from analytics.shopee_conciliacao where order_id = $1`, [f.order_sn]), '0.00');
+}
+eq('categorias novas gravam (protecao_frete, reembolso)', await rows(`select categoria, valor::text as v from mkt.shopee_escrow where order_id = '260918B8KJMYJP' order by categoria`),
+  [{ categoria: 'liquido', v: '-0.49' }, { categoria: 'protecao_frete', v: '0.49' }, { categoria: 'reembolso', v: '157.89' }]);
+await erro('categoria invalida continua recusada', `select mkt.shopee_gravar_escrow(array['P1'], '[{"order_id":"P1","categoria":"inventada","valor":1,"data_ref":"2026-11-10"}]'::jsonb)`, /check/i);
+// 0031 apaga os campos: todo pedido concluido volta a ser pendente e e regravado com o mapeamento novo
+await gravarCampos(['P1'], camposP1);
+eq('antes da 0031: P1 com campos', await val(`select count(*)::int from mkt.shopee_escrow_campos`), 1);
+await db.exec(mig('0031_shopee_categorias.sql'));
+eq('0031 reexecutada: campos apagados', await val(`select count(*)::int from mkt.shopee_escrow_campos`), 0);
+eq('0031 reexecutada: escrow preservado', await val(`select count(*)::int from mkt.shopee_escrow where order_id = '260918B8KJMYJP'`), 3);
+eq('0031: P1 e os pedidos reais voltam a ser pendentes', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p`)).length, 3 + reais.length);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

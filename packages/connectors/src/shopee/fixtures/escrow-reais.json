@@ -1,0 +1,76 @@
+{
+  "_sobre": "Pagamentos (order_income) da Shopee usados na conferência. Só campos em dinheiro, sem dado de comprador. 'origem' diz o que veio dos dados reais (rodada 3 da revisão) e o que foi completado à mão para o pedido fechar.",
+  "pedidos": [
+    {
+      "order_sn": "260821UJHT4HEC",
+      "origem": "real: itens, comissão, serviço, frete, taxa de cartão (não descontada) e líquido",
+      "itens": 157.89,
+      "income": {
+        "escrow_amount": 115.78, "commission_fee": 18.95, "service_fee": 23.16,
+        "actual_shipping_fee": 57.9, "shopee_shipping_rebate": 30, "buyer_paid_shipping_fee": 27.9,
+        "credit_card_transaction_fee": 30.54
+      },
+      "linhas": [
+        { "categoria": "comissao", "valor": 18.95 },
+        { "categoria": "taxa_servico", "valor": 23.16 },
+        { "categoria": "liquido", "valor": 115.78 }
+      ]
+    },
+    {
+      "order_sn": "260918B8KJMYJP",
+      "origem": "real: reembolso, líquido e proteção do frete; itens = valor reembolsado (sem outras tarifas informadas)",
+      "itens": 157.89,
+      "income": {
+        "escrow_amount": -0.49, "seller_return_refund": -157.89, "shipping_seller_protection_fee_amount": 0.49
+      },
+      "linhas": [
+        { "categoria": "protecao_frete", "valor": 0.49 },
+        { "categoria": "reembolso", "valor": 157.89 },
+        { "categoria": "liquido", "valor": -0.49 }
+      ]
+    },
+    {
+      "order_sn": "2611123FRRAX7H",
+      "origem": "real: commission_fee 37.72 e net_commission_fee 21.05; itens e líquido completados à mão",
+      "itens": 300,
+      "income": {
+        "escrow_amount": 262.28, "commission_fee": 37.72, "net_commission_fee": 21.05
+      },
+      "linhas": [
+        { "categoria": "comissao", "valor": 37.72 },
+        { "categoria": "liquido", "valor": 262.28 }
+      ]
+    },
+    {
+      "order_sn": "NORMAL-PROTECAO",
+      "origem": "pedido normal com a proteção de 0,49 (padrão de 187 pedidos reais); valores do exemplo da revisão",
+      "itens": 59.9,
+      "income": {
+        "escrow_amount": 46.21, "commission_fee": 8.5, "service_fee": 3.2, "seller_transaction_fee": 1.5,
+        "actual_shipping_fee": 20, "shopee_shipping_rebate": 15, "buyer_paid_shipping_fee": 5,
+        "shipping_seller_protection_fee_amount": 0.49
+      },
+      "linhas": [
+        { "categoria": "comissao", "valor": 8.5 },
+        { "categoria": "taxa_servico", "valor": 3.2 },
+        { "categoria": "taxa_transacao", "valor": 1.5 },
+        { "categoria": "protecao_frete", "valor": 0.49 },
+        { "categoria": "liquido", "valor": 46.21 }
+      ]
+    },
+    {
+      "order_sn": "PROTECAO-PREMIUM",
+      "origem": "sintético: proteção do frete + adicional premium",
+      "itens": 100,
+      "income": {
+        "escrow_amount": 86.51, "commission_fee": 12,
+        "shipping_seller_protection_fee_amount": 0.49, "delivery_seller_protection_fee_premium_amount": 1
+      },
+      "linhas": [
+        { "categoria": "comissao", "valor": 12 },
+        { "categoria": "protecao_frete", "valor": 1.49 },
+        { "categoria": "liquido", "valor": 86.51 }
+      ]
+    }
+  ]
+}

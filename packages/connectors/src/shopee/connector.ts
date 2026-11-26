@@ -146,9 +146,10 @@ export function toShopeeOrder(o: ShopeeOrderDetail): Order {
  * buyer_paid_shipping_fee é um VALOR (frete pago pelo comprador), não dado pessoal.
  */
 export const CAMPOS_ESCROW = [
-  'escrow_amount', 'commission_fee', 'service_fee', 'seller_transaction_fee', 'credit_card_transaction_fee',
+  'escrow_amount', 'commission_fee', 'service_fee', 'seller_transaction_fee',
   'actual_shipping_fee', 'shopee_shipping_rebate', 'buyer_paid_shipping_fee', 'voucher_from_seller', 'seller_voucher',
   'campaign_fee', 'seller_order_processing_fee', 'return_handling_fee', 'reverse_shipping_fee',
+  'shipping_seller_protection_fee_amount', 'delivery_seller_protection_fee_premium_amount', 'seller_return_refund',
 ] as const;
 
 function soDinheiro(inc: Record<string, unknown>): Record<string, number> {
@@ -192,7 +193,7 @@ export function camposNumericos(inc: unknown): Record<string, number> {
 
 export type ShopeeCategoria =
   | 'comissao' | 'taxa_servico' | 'taxa_transacao' | 'frete' | 'cupom_vendedor'
-  | 'campanha' | 'processamento' | 'devolucao' | 'liquido';
+  | 'campanha' | 'processamento' | 'devolucao' | 'protecao_frete' | 'reembolso' | 'liquido';
 
 export interface ShopeeTarifa { categoria: ShopeeCategoria; valor: number }
 
@@ -202,9 +203,10 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
  * Tarifas do pagamento, uma linha por categoria com valor diferente de zero.
  * Convenção igual à de analytics.ml_fatura: custo POSITIVO, crédito negativo. Cada campo entra com o
  * SINAL que a Shopee manda (tarifa positiva = custo; ajuste negativo = crédito); nada de abs().
- *  - comissao        = commission_fee
- *  - taxa_servico    = service_fee
- *  - taxa_transacao  = seller_transaction_fee + credit_card_transaction_fee
+ *  - comissao        = commission_fee (não net_commission_fee: o descontado é o commission_fee)
+ *  - taxa_servico    = service_fee (não net_service_fee)
+ *  - taxa_transacao  = seller_transaction_fee. credit_card_transaction_fee NÃO entra: os dados reais
+ *                      mostram que ela não é descontada do escrow_amount (pedido 260821UJHT4HEC).
  *  - frete           = actual_shipping_fee - shopee_shipping_rebate - buyer_paid_shipping_fee
  *                      (negativo = crédito, quando subsídio + frete pago pelo comprador passam do frete real)
  *  - cupom_vendedor  = voucher_from_seller (ou seller_voucher). seller_discount NÃO entra: já está no
@@ -212,6 +214,8 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
  *  - campanha        = campaign_fee
  *  - processamento   = seller_order_processing_fee
  *  - devolucao       = return_handling_fee + reverse_shipping_fee
+ *  - protecao_frete  = shipping_seller_protection_fee_amount + delivery_seller_protection_fee_premium_amount
+ *  - reembolso       = -seller_return_refund (a Shopee manda negativo; vira custo positivo)
  *  - liquido         = escrow_amount (valor que a loja recebe; positivo). Não é tarifa: fica fora da view.
  * Sem escrow (ou sem escrow_amount numérico) devolve null: nenhuma linha, e o pedido é buscado de novo.
  */
@@ -223,12 +227,14 @@ export function tarifasDoEscrow(e: ShopeeEscrow | undefined | null): ShopeeTarif
   const valores: [ShopeeCategoria, number][] = [
     ['comissao', a('commission_fee')],
     ['taxa_servico', a('service_fee')],
-    ['taxa_transacao', a('seller_transaction_fee') + a('credit_card_transaction_fee')],
+    ['taxa_transacao', a('seller_transaction_fee')],
     ['frete', a('actual_shipping_fee') - a('shopee_shipping_rebate') - a('buyer_paid_shipping_fee')],
     ['cupom_vendedor', cupom],
     ['campanha', a('campaign_fee')],
     ['processamento', a('seller_order_processing_fee')],
     ['devolucao', a('return_handling_fee') + a('reverse_shipping_fee')],
+    ['protecao_frete', a('shipping_seller_protection_fee_amount') + a('delivery_seller_protection_fee_premium_amount')],
+    ['reembolso', -a('seller_return_refund')],
     ['liquido', num(inc.escrow_amount)!],
   ];
   return valores.map(([categoria, v]) => ({ categoria, valor: r2(v) })).filter((t) => t.valor !== 0);

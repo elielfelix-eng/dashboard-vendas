@@ -27,9 +27,10 @@ for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_
   '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
   '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql', '0023_alertas_tabelas.sql',
   '0024_alertas_funcoes.sql', '0025_alertas_producao.sql', '0026_grupos_conta.sql',
-  '0027_entrega_sem_producao.sql', '0028_producao_visivel.sql'])
+  '0027_entrega_sem_producao.sql', '0028_producao_visivel.sql',
+  '0029_despachado_por_substatus.sql'])
   await db.exec(mig(f));
-console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 + 0027 + 0028 aplicadas');
+console.log('Migrations 0002..0013 + 0018 + 0019 + 0023 + 0024 + 0025 + 0026 + 0027 + 0028 + 0029 aplicadas');
 
 // Perfil, usuario e canais controlados pelo teste
 await db.exec(`
@@ -329,6 +330,32 @@ await db.exec(`
   delete from mkt.envios_prazos where shipment_id in ('SR1', 'SR2', 'SR3');
   delete from mkt.orders where order_id in ('OR1', 'OR2', 'OR3');`);
 
+// ---------------- Postado ou coletado conta como despachado (0029) ----------------
+// Todos ready_to_ship com despacho 24/11 (passado) e entrega 30/11. T1 picked_up, T2 dropped_off, T5 in_hub:
+// despachados (fora do despacho, na entrega com despachado = true). T3 ready_to_print e T4 sem substatus: nao despachados.
+await db.exec(`
+  insert into mkt.orders (channel, order_id, status, shipment_id, date_created) values
+    ('mercadolivre', 'OT1', 'paid', 'ST1', '2026-11-20 10:00-03'), ('mercadolivre', 'OT2', 'paid', 'ST2', '2026-11-20 10:00-03'),
+    ('mercadolivre', 'OT3', 'paid', 'ST3', '2026-11-20 10:00-03'), ('mercadolivre', 'OT4', 'paid', 'ST4', '2026-11-20 10:00-03'),
+    ('mercadolivre', 'OT5', 'paid', 'ST5', '2026-11-20 10:00-03');
+  insert into mkt.envios_prazos (channel, shipment_id, status, substatus, prazo_despacho, prazo_entrega) values
+    ('mercadolivre', 'ST1', 'ready_to_ship', 'picked_up', '2026-11-24', '2026-11-30'),
+    ('mercadolivre', 'ST2', 'ready_to_ship', 'dropped_off', '2026-11-24', '2026-11-30'),
+    ('mercadolivre', 'ST3', 'ready_to_ship', 'ready_to_print', '2026-11-24', '2026-11-30'),
+    ('mercadolivre', 'ST4', 'ready_to_ship', null, '2026-11-24', '2026-11-30'),
+    ('mercadolivre', 'ST5', 'ready_to_ship', 'in_hub', '2026-11-24', '2026-11-30');`);
+const t26d = await rows(`select shipment_id, situacao, despachado from analytics.alertas_envio('despacho', '2026-11-26') where shipment_id like 'ST%' order by shipment_id`);
+const t26e = await rows(`select shipment_id, situacao, despachado from analytics.alertas_envio('entrega', '2026-11-26') where shipment_id like 'ST%'`);
+eq('picked_up, dropped_off e in_hub: fora do despacho; ready_to_print e sem substatus continuam atrasados',
+  t26d.map((r) => [r.shipment_id, r.situacao, r.despachado]), [['ST3', 'atrasada', false], ['ST4', 'atrasada', false]]);
+eq('entrega: nao despachados primeiro, postado/coletado depois com despachado = true',
+  [t26e.map((r) => r.despachado), t26e.slice(0, 2).map((r) => r.shipment_id).sort(), t26e.slice(2).map((r) => r.shipment_id).sort()],
+  [[false, false, true, true, true], ['ST3', 'ST4'], ['ST1', 'ST2', 'ST5']]);
+eq('entrega: todos em_risco', t26e.every((r) => r.situacao === 'em_risco'), true);
+await db.exec(`
+  delete from mkt.envios_prazos where shipment_id like 'ST%';
+  delete from mkt.orders where order_id like 'OT%';`);
+
 await perfil('comercial');
 eq('comercial (operacao) ve a lista', await comoAuth(async () => (await lista('despacho', '2026-11-26')).length), 3);
 await db.exec(`set teste.canais = 'shopee'`);
@@ -385,8 +412,10 @@ await db.exec(mig('0027_entrega_sem_producao.sql'));
 await db.exec(mig('0027_entrega_sem_producao.sql'));
 await db.exec(mig('0028_producao_visivel.sql'));
 await db.exec(mig('0028_producao_visivel.sql'));
-eq('reexecucao da 0025, 0027 e 0028: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
-eq('0028: grants de alertas_envio mantidos', await rows(`select has_function_privilege('anon', 'analytics.alertas_envio(text, date)', 'execute') as a,
+await db.exec(mig('0029_despachado_por_substatus.sql'));
+await db.exec(mig('0029_despachado_por_substatus.sql'));
+eq('reexecucao da 0025, 0027, 0028 e 0029: contagem igual', await val(`select analytics.alertas_contagem('2026-11-26')`), 4);
+eq('0029: grants de alertas_envio mantidos', await rows(`select has_function_privilege('anon', 'analytics.alertas_envio(text, date)', 'execute') as a,
     has_function_privilege('authenticated', 'analytics.alertas_envio(text, date)', 'execute') as u`), [{ a: false, u: true }]);
 eq('reexecucao preserva permissao alterada', await val(`select allowed from core.role_permissions where role = 'comercial' and permission = 'editar_grupos'`), true);
 eq('reexecucao preserva parametros alterados', await val(`select antecedencia_padrao from core.parametros_alertas`), 6);

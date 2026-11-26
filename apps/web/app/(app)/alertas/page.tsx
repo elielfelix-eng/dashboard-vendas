@@ -1,16 +1,12 @@
 import Link from 'next/link';
 import { ErroDados, SemDados } from '@/components/cartao-indicador';
 import * as alertas from '@/lib/alertas';
-import { corDoNivel, rotuloOrigem, separarProducao, textoFaltam } from '@/lib/alertas-formato';
+import { corDoNivel, rotuloOrigem, rotuloStatusEnvio, separarProducao, textoFaltam } from '@/lib/alertas-formato';
 import { exigirPermissao } from '@/lib/permissoes';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
 
 const ROTULO_INDICADOR: Record<string, string> = { reclamacoes: 'Reclamações', cancelamentos: 'Cancelamentos', atrasos: 'Atrasos' };
-const STATUS_ENVIO: Record<string, string> = {
-  pending: 'Pendente', handling: 'Em preparação', ready_to_ship: 'Pronto para envio', shipped: 'A caminho',
-  delivered: 'Entregue', not_delivered: 'Não entregue', cancelled: 'Cancelado',
-};
 const LINHAS = [
   { chave: 'reclamacoes', rotulo: 'Reclamações', cor: '#b91c1c' },
   { chave: 'cancelamentos', rotulo: 'Cancelamentos', cor: '#2563eb' },
@@ -70,7 +66,7 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
       <td className="px-3 py-2">{ddmm(a.prazo)}</td>
       {aba === 'despacho' && <td className="px-3 py-2">{rotuloOrigem(a.origem_prazo)}</td>}
       <td className="px-3 py-2">{textoFaltam(a.faltam, a.situacao)}</td>
-      <td className="px-3 py-2">{a.status_envio ? (STATUS_ENVIO[a.status_envio] ?? a.status_envio) : '—'}</td>
+      <td className="px-3 py-2">{rotuloStatusEnvio(a.status_envio, a.substatus)}</td>
     </>
   );
   const colunas = ['Venda', 'Anúncio', 'Grupo', 'Prazo', ...(aba === 'despacho' ? ['Origem'] : []), 'Faltam', 'Status do envio'];
@@ -121,7 +117,7 @@ function TabelaProducao({ linhas }: { linhas: alertas.AlertaEnvio[] }) {
                 {a.origem_prazo === 'estimado' && <span className="ml-1 text-xs text-muted">(estimado)</span>}
               </td>
               <td className="px-3 py-2">{textoFaltam(a.faltam, a.situacao)}</td>
-              <td className="px-3 py-2">{a.status_envio ? (STATUS_ENVIO[a.status_envio] ?? a.status_envio) : '—'}</td>
+              <td className="px-3 py-2">{rotuloStatusEnvio(a.status_envio, a.substatus)}</td>
             </tr>
           ))}
         </tbody>

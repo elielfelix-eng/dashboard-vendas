@@ -20,6 +20,7 @@ export {
   shopeeAuthUrl,
   mapShopeeStatus,
   tarifasDoEscrow,
+  camposNumericos,
   toShopeeOrder,
 } from './shopee/connector.ts';
 export type { ShopeeAppCredentials, ShopeeCategoria, ShopeeEscrow, ShopeeTarifa } from './shopee/connector.ts';

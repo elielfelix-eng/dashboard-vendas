@@ -23,9 +23,10 @@ const rows = async (sql, p = []) => (await db.query(sql, p)).rows;
 const val = async (sql, p = []) => Object.values((await rows(sql, p))[0])[0];
 
 await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
-for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0020_shopee_pagamentos.sql']) await db.exec(mig(f));
+for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0020_shopee_pagamentos.sql', '0030_shopee_escrow_campos.sql']) await db.exec(mig(f));
 await db.exec(mig('0020_shopee_pagamentos.sql')); // reexecutavel
-console.log('Migrations 0002, 0003 e 0020 (2x) aplicadas');
+await db.exec(mig('0030_shopee_escrow_campos.sql')); // reexecutavel (e de novo depois da 0020)
+console.log('Migrations 0002, 0003, 0020 (2x) e 0030 (2x) aplicadas');
 
 // Permissoes controladas pelo teste
 await db.exec(`
@@ -91,8 +92,8 @@ await gravarPedido('P4', 'cancelled', { order_status: 'CANCELLED' });         //
 await gravarPedido('P5', 'unpaid', { order_status: 'UNPAID' });               // nao pago
 await gravarPedido('P6', 'paid', { order_status: 'COMPLETED' }, '2025-06-01 10:00-03'); // fora dos 12 meses
 await db.exec(`insert into mkt.orders (channel, order_id, status, date_created) values ('mercadolivre', 'ML1', 'paid', now())`);
-eq('pendentes: pagos sem escrow ou ainda nao concluidos', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p order by 1`)).map((r) => Object.values(r)[0]),
-  ['P2', 'P3']);
+eq('pendentes: pagos sem escrow ou ainda nao concluidos (P1: concluido, mas sem os campos da 0030)', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p order by 1`)).map((r) => Object.values(r)[0]),
+  ['P1', 'P2', 'P3']);
 eq('pedido sem escrow nao tem tarifa zero', await val(`select count(*)::int from mkt.shopee_escrow where order_id = 'P2'`), 0);
 eq('pendentes: limite respeitado', (await rows(`select * from mkt.shopee_pedidos_pendentes(1)`)).length, 1);
 
@@ -134,6 +135,52 @@ await db.exec(`set teste.custos = 'false'`);
 eq('RLS conciliacao: sem custos nao ve', await comoAuth(() => val(`select count(*)::int from analytics.shopee_conciliacao`)), 0);
 await db.exec(`set teste.custos = 'true'`);
 await db.exec(`delete from mkt.orders where order_id = 'R1'`);
+
+// ---------------- 0030: todos os campos em dinheiro do pagamento ----------------
+const gravarCampos = (ids, c) => val(`select mkt.shopee_gravar_escrow_campos($1::text[], $2::jsonb)`, [ids, c]);
+// Antes de gravar os campos: P1 (concluido, com escrow) volta para a lista de pendentes (carga unica)
+eq('pendentes: pago com escrow e sem campos volta (carga unica)', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p order by 1`)).map((r) => Object.values(r)[0]),
+  ['P1', 'P2', 'P3']);
+const camposP1 = JSON.stringify({ P1: {
+  escrow_amount: 40.12, commission_fee: 8.5, taxa_nova: 0.49, seller_return_refund: -12.3, buyer_paid_shipping_fee: 5,
+  buyer_user_name: 'comprador-ficticio', buyer_total_amount: 64.9, order_sn: 'P1', codigo: '12.5', zero: 0, lista: [1], obj: { a: 1 }, seller_id: 9,
+} });
+eq('campos: grava um pedido', await gravarCampos(['P1'], camposP1), 1);
+eq('campos: 2a gravacao igual', await gravarCampos(['P1'], camposP1), 1);
+eq('campos: gravado 2x nao duplica', await val(`select count(*)::int from mkt.shopee_escrow_campos where order_id = 'P1'`), 1);
+eq('campos: so numeros, sem texto, comprador, zero, listas ou ids', await val(`select campos from mkt.shopee_escrow_campos where order_id = 'P1'`),
+  { taxa_nova: 0.49, escrow_amount: 40.12, commission_fee: 8.5, seller_return_refund: -12.3, buyer_paid_shipping_fee: 5 });
+eq('campos: nenhum texto do comprador no banco', await val(`select count(*)::int from mkt.shopee_escrow_campos where campos::text ~ 'comprador|buyer_user_name|buyer_total'`), 0);
+await gravarCampos(['P1'], JSON.stringify({ P1: { escrow_amount: 41 } }));
+eq('campos: releitura substitui', await val(`select campos from mkt.shopee_escrow_campos where order_id = 'P1'`), { escrow_amount: 41 });
+await gravarCampos(['P1'], camposP1);
+eq('campos: pedido fora da lista e ignorado', await gravarCampos(['P1'], JSON.stringify({ P1: { a: 1 }, P3: { a: 2 } })), 1);
+eq('campos: P3 nao gravado', await val(`select count(*)::int from mkt.shopee_escrow_campos where order_id = 'P3'`), 0);
+await gravarCampos(['P1'], camposP1);
+eq('campos: pedido sem nenhum numero nao vira linha', await gravarCampos(['P3'], JSON.stringify({ P3: { order_sn: 'P3' } })), 0);
+await erro('campos: pedido inexistente recusado', `select mkt.shopee_gravar_escrow_campos(array['NAO'], '{"NAO":{"a":1}}'::jsonb)`, /foreign key/i);
+eq('pendentes: P1 sai depois de ter os campos', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p order by 1`)).map((r) => Object.values(r)[0]),
+  ['P2', 'P3']);
+eq('view longa: um campo por linha', await rows(`select campo, valor::float as v from analytics.shopee_escrow_campos_longo where order_id = 'P1' order by campo`), [
+  { campo: 'buyer_paid_shipping_fee', v: 5 }, { campo: 'commission_fee', v: 8.5 }, { campo: 'escrow_amount', v: 40.12 },
+  { campo: 'seller_return_refund', v: -12.3 }, { campo: 'taxa_nova', v: 0.49 },
+]);
+eq('RLS campos: com custos ve', await comoAuth(() => val(`select count(*)::int from analytics.shopee_escrow_campos_longo`)), 5);
+await db.exec(`set teste.custos = 'false'`);
+eq('RLS campos: sem custos nao ve a view', await comoAuth(() => val(`select count(*)::int from analytics.shopee_escrow_campos_longo`)), 0);
+eq('RLS campos: sem custos nao ve a tabela', await comoAuth(() => val(`select count(*)::int from mkt.shopee_escrow_campos`)), 0);
+await db.exec(`set teste.custos = 'true'`);
+await db.exec(`set teste.canais = 'mercadolivre'`);
+eq('RLS campos: sem o canal Shopee nao ve', await comoAuth(() => val(`select count(*)::int from analytics.shopee_escrow_campos_longo`)), 0);
+await db.exec(`set teste.canais = 'mercadolivre,shopee,crm'`);
+eq('RLS campos: sem escrita para authenticated', await comoAuth(() => tenta(`insert into mkt.shopee_escrow_campos (order_id, campos) values ('P3', '{}')`)), 'negado');
+eq('RLS campos: authenticated nao executa a gravacao', await comoAuth(() => tenta(`select mkt.shopee_gravar_escrow_campos(array['P1'], '{}'::jsonb)`)), 'negado');
+await db.exec(mig('0030_shopee_escrow_campos.sql'));
+eq('0030 reexecutada preserva os campos', await val(`select count(*)::int from mkt.shopee_escrow_campos`), 1);
+await db.exec(mig('0020_shopee_pagamentos.sql'));
+await db.exec(mig('0030_shopee_escrow_campos.sql'));
+eq('0020 + 0030 reaplicadas: pendentes com a regra da 0030', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p order by 1`)).map((r) => Object.values(r)[0]),
+  ['P2', 'P3']);
 
 // ---------------- Reexecucao preserva dados ----------------
 await db.exec(mig('0020_shopee_pagamentos.sql'));

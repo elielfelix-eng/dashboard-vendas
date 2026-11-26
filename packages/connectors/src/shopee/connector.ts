@@ -163,7 +163,31 @@ function soDinheiro(inc: Record<string, unknown>): Record<string, number> {
 /** Pagamento de um pedido: só os campos de CAMPOS_ESCROW do order_income. */
 export interface ShopeeEscrow {
   orderSn: string;
+  /** Campos de CAMPOS_ESCROW (base do mapeamento das tarifas). */
   income: Record<string, unknown>;
+  /** Todos os valores em dinheiro do order_income (para conferência; ver camposNumericos). */
+  campos?: Record<string, number>;
+}
+
+/** Únicos campos buyer_* aceitos na conferência: são valores, não dados pessoais. */
+const BUYER_DINHEIRO = new Set(['buyer_paid_shipping_fee']);
+
+/**
+ * Valores em dinheiro do order_income, para conferência (genérico: não depende de conhecer os campos).
+ * Entra todo campo do nível de cima cujo valor é um número finito e diferente de zero.
+ * Ficam fora: textos (order_sn, códigos de cupom, nomes), listas e objetos (itens), zeros,
+ * campos buyer_* (exceto buyer_paid_shipping_fee) e identificadores (nome "id" ou terminado em "_id").
+ */
+export function camposNumericos(inc: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!inc || typeof inc !== 'object' || Array.isArray(inc)) return out;
+  for (const [k, v] of Object.entries(inc as Record<string, unknown>)) {
+    if (typeof v !== 'number' || !Number.isFinite(v) || v === 0) continue;
+    if (k.startsWith('buyer_') && !BUYER_DINHEIRO.has(k)) continue;
+    if (k === 'id' || k.endsWith('_id')) continue;
+    out[k] = v;
+  }
+  return out;
 }
 
 export type ShopeeCategoria =
@@ -356,7 +380,7 @@ export class ShopeeConnector implements MarketplaceConnector {
       for (const x of Array.isArray(r) ? r : []) {
         const d = x?.escrow_detail;
         if (d?.order_sn && d.order_income && typeof d.order_income === 'object') {
-          out.push({ orderSn: d.order_sn, income: soDinheiro(d.order_income) });
+          out.push({ orderSn: d.order_sn, income: soDinheiro(d.order_income), campos: camposNumericos(d.order_income) });
         }
       }
     }

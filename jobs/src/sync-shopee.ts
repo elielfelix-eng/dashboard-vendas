@@ -55,7 +55,7 @@ export async function syncShopee(sql: Sql): Promise<number> {
     const nome = acc.nickname ?? `loja ${acc.external_id}`;
     const [run] = await sql<{ id: number }[]>`
       insert into core.sync_runs (source, account_id) values ('shopee', ${acc.id}) returning id`;
-    const stats: Record<string, number> = { pedidos: 0, pendentes: 0, status_desconhecido: 0, escrow_pedidos: 0, escrow_linhas: 0, sem_escrow: 0 };
+    const stats: Record<string, number> = { pedidos: 0, pendentes: 0, status_desconhecido: 0, escrow_pedidos: 0, escrow_linhas: 0, escrow_campos: 0, sem_escrow: 0 };
     try {
       const app: ShopeeAppCredentials = {
         partnerId: Number(requireEnv('SHOPEE_PARTNER_ID')),
@@ -114,9 +114,17 @@ export async function syncShopee(sql: Sql): Promise<number> {
         for (const t of tarifas) linhas.push({ order_id: o.orderId, categoria: t.categoria, valor: t.valor, data_ref: dataRef });
       }
       if (comEscrow.length) {
-        const [{ n }] = await sql<{ n: number }[]>`
-          select mkt.shopee_gravar_escrow(${sql.array(comEscrow)}::text[], ${sql.json(linhas)}::jsonb) as n`;
-        stats.escrow_linhas = n;
+        // Todos os campos em dinheiro do pagamento (conferência), gravados junto com as tarifas
+        const campos = Object.fromEntries(comEscrow.map((id) => [id, escrows.get(id)?.campos ?? {}]));
+        await sql.begin(async (tx) => {
+          const t = tx as unknown as Sql;
+          const [{ n }] = await t<{ n: number }[]>`
+            select mkt.shopee_gravar_escrow(${t.array(comEscrow)}::text[], ${t.json(linhas)}::jsonb) as n`;
+          stats.escrow_linhas = n;
+          const [{ c }] = await t<{ c: number }[]>`
+            select mkt.shopee_gravar_escrow_campos(${t.array(comEscrow)}::text[], ${t.json(campos)}::jsonb) as c`;
+          stats.escrow_campos = c;
+        });
       }
       stats.escrow_pedidos = comEscrow.length;
 

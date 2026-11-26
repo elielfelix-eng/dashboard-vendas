@@ -6,6 +6,7 @@ import {
   SHOPEE_AUTH_EXPIRED,
   ShopeeAuthError,
   ShopeeConnector,
+  camposNumericos,
   mapShopeeStatus,
   shopeeSign,
   tarifasDoEscrow,
@@ -255,6 +256,7 @@ test('getEscrowBatch: POST assinado, 50 por chamada, sem comprador; pedido sem e
   assert.ok(!JSON.stringify(res).includes('buyer_payment_info'));
   assert.ok(!JSON.stringify(res).includes('buyer_total_amount'));
   assert.deepEqual(res[0].income, { escrow_amount: 40, commission_fee: 5, buyer_paid_shipping_fee: 3 });
+  assert.deepEqual(res[0].campos, { escrow_amount: 40, commission_fee: 5, buyer_paid_shipping_fee: 3 });
   const u = chamadas[0].url;
   const ts = Number(u.searchParams.get('timestamp'));
   assert.equal(u.searchParams.get('sign'), shopeeSign(app, '/api/v2/payment/get_escrow_detail_batch', ts, 'acc-1', SHOP_ID));
@@ -488,4 +490,51 @@ test(`cursor que nunca termina para em ${MAX_PAGINAS} páginas`, async () => {
   const { provider } = tokens();
   await varrer(new ShopeeConnector(app, SHOP_ID, provider));
   assert.equal(n, MAX_PAGINAS);
+});
+
+// ------------------------------------------------------------------------
+// Rodada 2: todos os campos em dinheiro do pagamento (conferência)
+// ------------------------------------------------------------------------
+
+test('campos numéricos: guarda todo número do order_income; nunca textos, comprador, listas, zeros ou ids', () => {
+  const campos = camposNumericos({
+    escrow_amount: 41.21,
+    commission_fee: 8.5,
+    taxa_fixa_nova: 0.49,              // campo ainda não mapeado: entra
+    seller_return_refund: -12.3,       // negativo: entra com o sinal
+    buyer_paid_shipping_fee: 5,        // dinheiro: entra
+    buyer_user_name: 'comprador-ficticio',
+    buyer_total_amount: 64.9,          // buyer_*: fica fora
+    buyer_transaction_fee: 1,
+    seller_voucher_code: ['CUPOM10'],
+    order_sn: '2611ABC',
+    some_text: '12.5',                 // número em texto: fica fora
+    shopee_discount: 0,                // zero: fica fora
+    infinito: Infinity,
+    nan: NaN,
+    seller_id: 999,
+    id: 1,
+    items: [{ item_id: 1, discounted_price: 10 }],
+    detalhe: { valor: 3 },
+    flag: true,
+  });
+  assert.deepEqual(campos, {
+    escrow_amount: 41.21, commission_fee: 8.5, taxa_fixa_nova: 0.49, seller_return_refund: -12.3, buyer_paid_shipping_fee: 5,
+  });
+  assert.ok(!JSON.stringify(campos).includes('comprador'));
+});
+
+test('campos numéricos: entrada vazia ou inválida devolve objeto vazio', () => {
+  assert.deepEqual(camposNumericos(undefined), {});
+  assert.deepEqual(camposNumericos(null), {});
+  assert.deepEqual(camposNumericos([1, 2]), {});
+  assert.deepEqual(camposNumericos('x'), {});
+});
+
+test('campos numéricos não mudam o mapeamento das tarifas', () => {
+  const income = { escrow_amount: 41.21, commission_fee: 8.5, taxa_fixa_nova: 0.49 };
+  assert.deepEqual(tarifasDoEscrow({ orderSn: 'X', income, campos: camposNumericos(income) }), [
+    { categoria: 'comissao', valor: 8.5 },
+    { categoria: 'liquido', valor: 41.21 },
+  ]);
 });

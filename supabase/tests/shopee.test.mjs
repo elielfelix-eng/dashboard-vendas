@@ -729,5 +729,35 @@ await db.exec(mig('0021_shopee_funcoes.sql'));
 await db.exec(mig('0033_shopee_ads_produto.sql'));
 eq('0019 + 0021 + 0033 reaplicadas: sugestoes da Shopee de volta', (await rows(SG, ['shopee'])).map((x) => x.modelo), ['AAA11', 'GGG77', 'SHP01']);
 
+// ---------------- ads_campanhas (fix da 5b): campanha real da Shopee com o proprio investimento; 'conta' = sobra ----------------
+// SH1 e SH3 na campanha k1 (12 + 70 = 82, vendas 60), SH2 na k2 (20, vendas 40), sobra da conta 8 (vendas 40). Cartao 110.
+const K = (m, k) => ({ ...m, campaign_id: k });
+const adsCampanhas = (sh2dia15, sobra) => gravarAds(DIAS33, JSON.stringify([
+  K(MP('SH1', '2026-10-15', 12, 20, 60, 1), 'k1'), K(MP('SH2', '2026-10-15', sh2dia15, 10, 20, 1), 'k2'),
+  ...(sobra ? [MP('conta', '2026-10-15', sobra, 5, 40, 0)] : []),
+  K(MP('SH2', '2026-10-16', 10, 10, 20, 1), 'k2'),
+  ...DIAS33.slice(2).map((d) => K(MP('SH3', d, 10, 3, 0, 0), 'k1'))]),
+JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }, { day: '2026-10-16', cost: 10, raw: {} }, ...DIAS33.slice(2).map((d) => ({ day: d, cost: 10, raw: {} }))]));
+await adsCampanhas(10, 8);
+await db.exec(`insert into mkt.ads_campaigns (channel, campaign_id, name, status) values ('shopee','k1','Shopee 1','active'), ('shopee','k2','Shopee 2','active')`);
+const CA = `select campanha_id, nome, investimento::float as i, vendas_ads::float as v, roas::float, acos::float from analytics.ads_campanhas($1, ${OUT21})`;
+const caSh = await rows(CA, ['shopee']);
+eq('ads_campanhas shopee: investimento por campanha (metricas por anuncio), ROAS e ACOS; conta = sobra', caSh, [
+  { campanha_id: 'k1', nome: 'Shopee 1', i: 82, v: 60, roas: 0.73, acos: 136.67 },
+  { campanha_id: 'k2', nome: 'Shopee 2', i: 20, v: 40, roas: 2, acos: 50 },
+  { campanha_id: 'conta', nome: 'Shopee Ads (conta inteira)', i: 8, v: 40, roas: 5, acos: 20 }]);
+eq('ads_campanhas shopee: soma = cartao (dash_ads_periodo)', r2(caSh.reduce((s, x) => s + x.i, 0)), await adsP('shopee'));
+// Sem sobra (por anuncio cobre a conta): a linha 'conta' some
+await adsCampanhas(18, 0);
+eq('ads_campanhas shopee: sem sobra, sem linha "conta"; soma = cartao', (await rows(CA, ['shopee'])).map((x) => [x.campanha_id, x.i]), [['k1', 82], ['k2', 28]]);
+await adsCampanhas(10, 8);
+// Consolidado: ML como antes + Shopee, sem contar duas vezes
+const caMl = await rows(CA, ['mercadolivre']);
+const caCo = await rows(CA, ['consolidado']);
+eq('ads_campanhas consolidado: soma = cartao (ML + Shopee)', r2(caCo.reduce((s, x) => s + x.i, 0)), r2(adsMl + 110));
+const chave = (x) => JSON.stringify(x);
+eq('ads_campanhas consolidado: linhas = as do ML + as da Shopee (cada uma uma vez)',
+  caCo.map(chave).sort(), [...caMl, ...caSh].map(chave).sort());
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

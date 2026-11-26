@@ -22,6 +22,8 @@
 --     Nao atribuido = investimento do cartao (dash_ads_periodo, ads_campaign_daily 'conta') - atribuido.
 --     A sincronizacao (combinarAdsShopee) grava em 'conta' so a SOBRA do dia (conta - soma dos anuncios,
 --     nunca negativa) quando ha linhas por anuncio, entao nada conta duas vezes.
+--   * Por campanha (ads_campanhas): campanha real da Shopee = gasto das metricas por anuncio dela; a linha
+--     'conta' = so a sobra (cartao da Shopee - campanhas reais). Soma das linhas da Shopee = cartao.
 --   * Limites: core.parametros_ads da Shopee. Sem nenhuma linha da Shopee, copia as do ML (todas as
 --     vigencias). Uma linha da Shopee que ja exista (ou editada) nunca e sobrescrita.
 -- =====================================================================
@@ -589,6 +591,132 @@ begin
     ) r
    order by r.ordem, r.investimento desc, r.modelo;
 end $$;
+
+-- ---------------------------------------------------------------------
+-- Por campanha: igual a 0019 para o Mercado Livre (investimento de mkt.ads_campaign_daily).
+-- Shopee: o investimento da conta inteira fica em ads_campaign_daily ('conta'), mas cada campanha real
+-- tem o proprio gasto nas metricas por anuncio. Entao, na Shopee:
+--   campanha real  = soma de mkt.ads_metrics_daily.cost da campanha (do anuncio; sem campanha na linha, a do
+--                    cadastro do anuncio) no periodo; vendas por Ads das mesmas linhas -> ROAS/ACOS certos;
+--   'conta'        = so a sobra: Ads da Shopee do cartao (dash_ads_periodo('shopee')) - soma das campanhas
+--                    reais; vendas = as das linhas 'conta' (sobra). Sem investimento e sem vendas: some.
+-- A soma das linhas da Shopee continua = cartao da Shopee. Consolidado = ML (como antes) + Shopee.
+-- ---------------------------------------------------------------------
+create or replace function analytics.ads_campanhas(p_canal text, p_de date, p_ate date)
+returns table (campanha_id text, nome text, status text, automatica boolean, orcamento_diario numeric,
+               roas_target numeric, acos_equivalente numeric, investimento numeric, vendas_ads numeric,
+               acos numeric, roas numeric, modelos integer, modo text)
+language plpgsql stable security invoker set search_path = '' as $$
+#variable_conflict use_column
+declare
+  v_inv numeric;
+begin
+  if not core.has_perm('ads') or coalesce(p_canal, '') not in ('consolidado', 'mercadolivre', 'shopee') then
+    return;
+  end if;
+  v_inv := coalesce(analytics.dash_ads_periodo(p_canal, p_de, p_ate), 0);
+
+  return query
+  with met as materialized (
+    select m.channel, m.item_id, coalesce(m.campaign_id, an.campaign_id) as campaign_id,
+           sum(coalesce(m.cost, 0)) as inv,
+           sum(coalesce(m.direct_amount, 0) + coalesce(m.indirect_amount, 0)) as vend
+      from mkt.ads_metrics_daily m
+      left join mkt.ads_anuncios an on an.channel = m.channel and an.item_id = m.item_id
+     where m.day between p_de and p_ate
+       and (p_canal = 'consolidado' and m.channel in ('mercadolivre', 'shopee') or m.channel = p_canal)
+     group by m.channel, m.item_id, coalesce(m.campaign_id, an.campaign_id)
+  ),
+  -- campanhas reais da Shopee: investimento das metricas por anuncio
+  ci_sh as materialized (
+    select met.campaign_id, sum(met.inv) as inv
+      from met
+     where met.channel = 'shopee' and met.campaign_id is not null and met.campaign_id <> 'conta'
+     group by met.campaign_id
+  ),
+  ci as materialized (
+    select a.channel, a.campaign_id, sum(a.cost) as inv
+      from mkt.ads_campaign_daily a
+     where a.day between p_de and p_ate
+       and a.channel = 'mercadolivre' and p_canal in ('consolidado', 'mercadolivre')
+     group by a.channel, a.campaign_id
+    union all
+    select 'shopee'::text, c.campaign_id, c.inv from ci_sh c
+    union all
+    -- sobra da conta Shopee: cartao da Shopee - campanhas reais
+    select 'shopee'::text, 'conta'::text,
+           analytics.dash_ads_periodo('shopee', p_de, p_ate) - coalesce((select sum(c.inv) from ci_sh c), 0)
+     where p_canal in ('consolidado', 'shopee')
+  ),
+  vc as (
+    select met.channel, met.campaign_id, sum(met.vend) as vend
+      from met where met.campaign_id is not null
+     group by met.channel, met.campaign_id
+  ),
+  pesos as materialized (
+    select * from analytics.ads_peso_modelo(p_canal, p_de, p_ate)
+  ),
+  mc as (
+    select met.channel, met.campaign_id, count(distinct p.modelo) as n
+      from met
+      join pesos p on p.channel = met.channel and p.item_id = met.item_id
+     where met.campaign_id is not null and p.modelo is not null
+     group by met.channel, met.campaign_id
+  ),
+  k as (
+    select ci.channel, ci.campaign_id from ci
+    union
+    select vc.channel, vc.campaign_id from vc
+    union
+    select c.channel, c.campaign_id
+      from mkt.ads_campaigns c
+     where lower(c.status) = 'active'
+       and (p_canal = 'consolidado' and c.channel in ('mercadolivre', 'shopee') or c.channel = p_canal)
+  )
+  ,
+  linhas as (
+    select k.campaign_id,
+           coalesce(nullif(c.name, ''), k.campaign_id) as nome,
+           c.status,
+           c.automatica,
+           c.budget::numeric as orc,
+           c.roas_target,
+           case when c.roas_target > 0 then round(100 / c.roas_target, 2) end as acos_eq,
+           round(coalesce(ci.inv, 0), 2) as inv,
+           round(coalesce(vc.vend, 0), 2) as vend,
+           case when vc.vend > 0 then round(coalesce(ci.inv, 0) / vc.vend * 100, 2) end as acos,
+           case when ci.inv > 0 then round(coalesce(vc.vend, 0) / ci.inv, 2) end as roas,
+           coalesce(mc.n, 0)::integer as n,
+           coalesce((select x.modo from core.ads_modo x
+                      where x.channel = k.channel and x.tipo = 'campanha' and x.chave = k.campaign_id), 'manual') as modo,
+           k.campaign_id as desempate
+      from k
+      left join mkt.ads_campaigns c on c.channel = k.channel and c.campaign_id = k.campaign_id
+      left join ci on ci.channel = k.channel and ci.campaign_id = k.campaign_id
+      left join vc on vc.channel = k.channel and vc.campaign_id = k.campaign_id
+      left join mc on mc.channel = k.channel and mc.campaign_id = k.campaign_id
+     -- 'conta' da Shopee sem sobra (nem investimento nem vendas): some
+     where not (k.channel = 'shopee' and k.campaign_id = 'conta'
+                and round(coalesce(ci.inv, 0), 2) = 0 and round(coalesce(vc.vend, 0), 2) = 0)
+  ),
+  nao as (
+    select round(v_inv - coalesce((select sum(l.inv) from linhas l), 0), 2) as inv,
+           round(coalesce((select sum(m.vend) from met m where m.campaign_id is null), 0), 2) as vend,
+           exists (select 1 from met m where m.campaign_id is null) as tem
+  )
+  select r.campaign_id, r.nome, r.status, r.automatica, r.orc, r.roas_target, r.acos_eq, r.inv, r.vend, r.acos, r.roas, r.n, r.modo
+    from (
+      select l.*, 0 as ordem from linhas l
+      union all
+      select null::text, null::text, null::text, null::boolean, null::numeric, null::numeric, null::numeric,
+             n.inv, n.vend, null::numeric, null::numeric, null::integer, null::text, null::text, 1
+        from nao n
+       where n.inv <> 0 or n.tem
+    ) r
+   order by r.ordem, r.inv desc, r.nome, r.desempate;
+end $$;
+
+grant execute on function analytics.ads_campanhas(text, date, date) to authenticated;
 
 grant execute on function analytics.ads_peso_sem_venda(text, date, date, text[]),
                           analytics.ads_peso_modelo(text, date, date),

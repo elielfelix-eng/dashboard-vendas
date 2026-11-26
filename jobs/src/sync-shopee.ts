@@ -26,8 +26,21 @@ export function inicioShopee(ultimoSucesso: Date | null, agora = new Date()): Da
   return new Date(Math.max(inicio, limite));
 }
 
-/** Data (America/Sao_Paulo) da criação do pedido: data de referência das tarifas. */
 const dataSP = (isoDate: string) => new Date(isoDate).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+
+/** Data de referência das tarifas: dia do pagamento em Brasília (sem pagamento: dia da criação). */
+export function dataRefTarifas(o: Pick<Order, 'dateClosed' | 'dateCreated'>): string {
+  return dataSP(o.dateClosed ?? o.dateCreated);
+}
+
+/**
+ * Pede escrow só de pedido pago, ou cancelado DEPOIS de pago (devolução pode gerar tarifa).
+ * Não pede: não pagos (unpaid), desconhecidos e cancelados sem pagamento (tag shopee:sem_pagamento).
+ */
+export function precisaEscrow(o: Pick<Order, 'status' | 'tags'>): boolean {
+  if (o.status === 'paid') return true;
+  return o.status === 'cancelled' && !o.tags.includes('shopee:sem_pagamento');
+}
 
 export async function syncShopee(sql: Sql): Promise<number> {
   const contas = await sql<{ id: string; external_id: string; nickname: string | null }[]>`
@@ -88,8 +101,8 @@ export async function syncShopee(sql: Sql): Promise<number> {
         stats.pendentes = pedidos.length;
       }
 
-      // Escrow: dos pagos e dos cancelados (devolução pode gerar tarifa). Sem escrow: nada é gravado.
-      const candidatos = [...gravados.values()].filter((o) => o.status === 'paid' || o.status === 'cancelled');
+      // Escrow: dos pagos e dos cancelados depois de pagos. Sem escrow: nada é gravado.
+      const candidatos = [...gravados.values()].filter(precisaEscrow);
       const escrows = new Map((await shopee.getEscrowBatch(candidatos.map((o) => o.orderId))).map((e) => [e.orderSn, e]));
       const comEscrow: string[] = [];
       const linhas: { order_id: string; categoria: string; valor: number; data_ref: string }[] = [];
@@ -97,7 +110,7 @@ export async function syncShopee(sql: Sql): Promise<number> {
         const tarifas = tarifasDoEscrow(escrows.get(o.orderId));
         if (!tarifas) { stats.sem_escrow++; continue; }
         comEscrow.push(o.orderId);
-        const dataRef = dataSP(o.dateCreated);
+        const dataRef = dataRefTarifas(o);
         for (const t of tarifas) linhas.push({ order_id: o.orderId, categoria: t.categoria, valor: t.valor, data_ref: dataRef });
       }
       if (comEscrow.length) {

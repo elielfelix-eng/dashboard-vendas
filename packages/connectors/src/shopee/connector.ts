@@ -140,7 +140,27 @@ export function toShopeeOrder(o: ShopeeOrderDetail): Order {
 /* Pagamento (escrow)                                                        */
 /* ------------------------------------------------------------------------ */
 
-/** Pagamento de um pedido: só o order_income (sem buyer_payment_info nem nome do comprador). */
+/**
+ * Campos de dinheiro do order_income que o painel usa (lista explícita). Todo o resto do escrow,
+ * inclusive buyer_user_name, buyer_payment_info e qualquer nome/endereço/contato, é descartado.
+ * buyer_paid_shipping_fee é um VALOR (frete pago pelo comprador), não dado pessoal.
+ */
+export const CAMPOS_ESCROW = [
+  'escrow_amount', 'commission_fee', 'service_fee', 'seller_transaction_fee', 'credit_card_transaction_fee',
+  'actual_shipping_fee', 'shopee_shipping_rebate', 'buyer_paid_shipping_fee', 'voucher_from_seller', 'seller_voucher',
+  'campaign_fee', 'seller_order_processing_fee', 'return_handling_fee', 'reverse_shipping_fee',
+] as const;
+
+function soDinheiro(inc: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const k of CAMPOS_ESCROW) {
+    const v = num(inc[k]);
+    if (v !== null) out[k] = v;
+  }
+  return out;
+}
+
+/** Pagamento de um pedido: só os campos de CAMPOS_ESCROW do order_income. */
 export interface ShopeeEscrow {
   orderSn: string;
   income: Record<string, unknown>;
@@ -156,11 +176,13 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 
 /**
  * Tarifas do pagamento, uma linha por categoria com valor diferente de zero.
- * Convenção igual à de analytics.ml_fatura: custo POSITIVO, crédito negativo.
+ * Convenção igual à de analytics.ml_fatura: custo POSITIVO, crédito negativo. Cada campo entra com o
+ * SINAL que a Shopee manda (tarifa positiva = custo; ajuste negativo = crédito); nada de abs().
  *  - comissao        = commission_fee
  *  - taxa_servico    = service_fee
  *  - taxa_transacao  = seller_transaction_fee + credit_card_transaction_fee
- *  - frete           = actual_shipping_fee - shopee_shipping_rebate (negativo se o subsídio passar do frete)
+ *  - frete           = actual_shipping_fee - shopee_shipping_rebate - buyer_paid_shipping_fee
+ *                      (negativo = crédito, quando subsídio + frete pago pelo comprador passam do frete real)
  *  - cupom_vendedor  = voucher_from_seller (ou seller_voucher). seller_discount NÃO entra: já está no
  *                      preço com desconto do item (model_discounted_price), entraria duas vezes.
  *  - campanha        = campaign_fee
@@ -172,13 +194,13 @@ const r2 = (v: number) => Math.round(v * 100) / 100;
 export function tarifasDoEscrow(e: ShopeeEscrow | undefined | null): ShopeeTarifa[] | null {
   const inc = e?.income;
   if (!inc || num(inc.escrow_amount) === null) return null;
-  const a = (k: string) => Math.abs(num(inc[k]) ?? 0);
+  const a = (k: string) => num(inc[k]) ?? 0;
   const cupom = num(inc.voucher_from_seller) !== null ? a('voucher_from_seller') : a('seller_voucher');
   const valores: [ShopeeCategoria, number][] = [
     ['comissao', a('commission_fee')],
     ['taxa_servico', a('service_fee')],
     ['taxa_transacao', a('seller_transaction_fee') + a('credit_card_transaction_fee')],
-    ['frete', a('actual_shipping_fee') - a('shopee_shipping_rebate')],
+    ['frete', a('actual_shipping_fee') - a('shopee_shipping_rebate') - a('buyer_paid_shipping_fee')],
     ['cupom_vendedor', cupom],
     ['campanha', a('campaign_fee')],
     ['processamento', a('seller_order_processing_fee')],
@@ -192,12 +214,15 @@ export function tarifasDoEscrow(e: ShopeeEscrow | undefined | null): ShopeeTarif
 /* Conector                                                                  */
 /* ------------------------------------------------------------------------ */
 
-const AUTH_ERRORS = new Set(['error_auth', 'invalid_acceess_token', 'invalid_access_token', 'error_permission']);
+/** Token recusado: só estes (ou HTTP 401 sem código) podem pedir renovação. */
+const TOKEN_ERRORS = new Set(['error_auth', 'invalid_acceess_token', 'invalid_access_token']);
 /** Só o código de erro da Shopee (ex.: order.order_list_invalid_time), nunca a mensagem. */
 const codigoErro = (v: unknown) => (typeof v === 'string' ? v.replace(/[^a-z0-9_.]/gi, '').slice(0, 80) : '');
 
 /** Janela máxima da lista de pedidos: 15 dias (com 16 a Shopee recusa). */
 const JANELA_SEG = 15 * 86_400;
+/** Teto de páginas por janela (proteção contra cursor que não termina). */
+export const MAX_PAGINAS = 1000;
 
 interface ShopeeEnvelope<T> { error?: string; message?: string; response?: T }
 
@@ -210,7 +235,16 @@ export class ShopeeConnector implements MarketplaceConnector {
     private readonly getToken: TokenProvider = async () => { throw new Error('Conector Shopee sem token.'); },
   ) {}
 
-  /** Chamada da loja, assinada. Token recusado: renova UMA vez e repete; de novo -> ShopeeAuthError. */
+  /** A renovação forçada acontece no máximo uma vez por instância (= por execução da loja). */
+  private renovou = false;
+
+  /**
+   * Chamada da loja, assinada.
+   *  - token recusado (error_auth / invalid_access_token / HTTP 401): renova UMA vez na execução e repete;
+   *    recusado de novo -> ShopeeAuthError (aviso de reconexão);
+   *  - sem permissão (error_permission / HTTP 403): erro "Sem permissão na API da Shopee (<código>)",
+   *    sem renovar token e sem pedir reconexão.
+   */
   private async call<T>(path: string, params: Record<string, string | number> = {}, body?: unknown): Promise<T> {
     const label = `Shopee ${path}`;
     const tentar = async (force: boolean): Promise<T> => {
@@ -237,9 +271,15 @@ export class ShopeeConnector implements MarketplaceConnector {
         try { data = JSON.parse(err.body) as ShopeeEnvelope<T>; } catch { data = {}; }
       }
       const code = codigoErro(data.error);
-      if (status === 401 || status === 403 || AUTH_ERRORS.has(code)) {
-        if (!force) return tentar(true);
+      if (TOKEN_ERRORS.has(code) || (status === 401 && !code)) {
+        if (!force && !this.renovou) {
+          this.renovou = true;
+          return tentar(true);
+        }
         throw new ShopeeAuthError(code || `http_${status}`);
+      }
+      if (code === 'error_permission' || status === 403) {
+        throw new Error(`Sem permissão na API da Shopee (${code || `http_${status}`}) em ${label}`);
       }
       if (status !== 200) throw new Error(`HTTP ${status} em ${label}${code ? `: ${code}` : ''}`);
       if (code) throw new Error(`Erro da Shopee em ${label}: ${code}`);
@@ -249,19 +289,22 @@ export class ShopeeConnector implements MarketplaceConnector {
   }
 
   /**
-   * Pedidos CRIADOS no intervalo, em janelas de até 15 dias (create_time, em segundos, limites inclusivos:
-   * cada janela começa no segundo seguinte ao fim da anterior). Lista paginada por cursor (100 por página);
-   * detalhe em lotes de 50. Um mesmo pedido nunca sai duas vezes.
+   * Pedidos CRIADOS no intervalo, em janelas de até 15 dias (create_time, em segundos, limites inclusivos).
+   * Janelas consecutivas se sobrepõem em 1 segundo (a próxima começa no último segundo da anterior),
+   * para não depender de a Shopee tratar o limite como inclusivo; os repetidos são descartados.
+   * Lista paginada por cursor (100 por página, no máximo MAX_PAGINAS por janela); detalhe em lotes de 50.
+   * Um mesmo pedido nunca sai duas vezes.
    */
   async *listOrders(from: Date, to: Date): AsyncIterable<Order[]> {
     const ini = Math.floor(from.getTime() / 1000);
     const fim = Math.floor(to.getTime() / 1000);
     const vistos = new Set<string>();
-    for (let a = ini; a <= fim; a += JANELA_SEG) {
+    for (let a = ini; ; ) {
       const b = Math.min(a + JANELA_SEG - 1, fim);
       const sns: string[] = [];
+      const cursores = new Set<string>();
       let cursor = '';
-      for (;;) {
+      for (let pagina = 1; ; pagina++) {
         const r = await this.call<{ more?: boolean; next_cursor?: string; order_list?: { order_sn?: string }[] }>(
           '/api/v2/order/get_order_list',
           { time_range_field: 'create_time', time_from: a, time_to: b, page_size: 100, cursor },
@@ -269,10 +312,21 @@ export class ShopeeConnector implements MarketplaceConnector {
         for (const o of r?.order_list ?? []) {
           if (o.order_sn && !vistos.has(o.order_sn)) { vistos.add(o.order_sn); sns.push(o.order_sn); }
         }
-        if (!r?.more || !r.next_cursor || r.next_cursor === cursor) break;
+        if (!r?.more || !r.next_cursor) break;
+        cursores.add(cursor);
+        if (cursores.has(r.next_cursor)) {
+          console.warn('[Shopee] get_order_list: cursor repetido, paginação interrompida');
+          break;
+        }
+        if (pagina >= MAX_PAGINAS) {
+          console.warn(`[Shopee] get_order_list: limite de ${MAX_PAGINAS} páginas atingido, paginação interrompida`);
+          break;
+        }
         cursor = r.next_cursor;
       }
       for (const lote of chunk(sns, 50)) yield await this.detalhes(lote);
+      if (b >= fim) break;
+      a = b; // sobreposição de 1 segundo
     }
   }
 
@@ -302,7 +356,7 @@ export class ShopeeConnector implements MarketplaceConnector {
       for (const x of Array.isArray(r) ? r : []) {
         const d = x?.escrow_detail;
         if (d?.order_sn && d.order_income && typeof d.order_income === 'object') {
-          out.push({ orderSn: d.order_sn, income: semDadosPessoais(d.order_income) as Record<string, unknown> });
+          out.push({ orderSn: d.order_sn, income: soDinheiro(d.order_income) });
         }
       }
     }

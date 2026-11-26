@@ -3,12 +3,13 @@
 --        e a lista de pedidos que precisam ser buscados de novo.
 -- Pode ser executada mais de uma vez (preserva os dados gravados).
 --
--- Convencao de sinal igual a analytics.ml_fatura: custo POSITIVO, credito negativo.
+-- Convencao de sinal igual a analytics.ml_fatura: custo POSITIVO, credito negativo. Cada campo da Shopee
+-- entra com o proprio sinal (tarifa positiva = custo; ajuste negativo = credito).
 -- Categorias (relatorio de cobertura aprovado em 26/11/2026):
 --   comissao       commission_fee
 --   taxa_servico   service_fee
 --   taxa_transacao seller_transaction_fee + credit_card_transaction_fee
---   frete          actual_shipping_fee - shopee_shipping_rebate (negativo se o subsidio passar do frete)
+--   frete          actual_shipping_fee - shopee_shipping_rebate - buyer_paid_shipping_fee (negativo = credito)
 --   cupom_vendedor voucher_from_seller (ou seller_voucher); seller_discount nao entra (ja esta no preco do item)
 --   campanha       campaign_fee
 --   processamento  seller_order_processing_fee
@@ -43,6 +44,36 @@ select e.order_id, e.categoria, e.valor, e.data_ref
   from mkt.shopee_escrow e
  where e.categoria <> 'liquido';
 grant select on analytics.shopee_fatura to authenticated;
+
+-- Conferencia por pedido (um pedido por linha, so os que ja tem escrow):
+--   receita_itens = soma de preco de venda x quantidade dos itens (mkt.order_items: unit_price =
+--                   model_discounted_price, ou model_original_price sem desconto); sem frete do comprador
+--   tarifas       = soma de analytics.shopee_fatura do pedido
+--   liquido       = categoria 'liquido' (escrow_amount)
+--   diferenca     = receita_itens - tarifas - liquido (0,00 quando as categorias explicam o repasse)
+-- Mesma protecao da fatura: security_invoker + RLS de mkt.shopee_escrow (so quem ve custos).
+create or replace view analytics.shopee_conciliacao with (security_invoker = true) as
+with esc as (
+  select e.order_id,
+         coalesce(sum(e.valor) filter (where e.categoria <> 'liquido'), 0) as tarifas,
+         coalesce(sum(e.valor) filter (where e.categoria = 'liquido'), 0) as liquido
+    from mkt.shopee_escrow e
+   group by e.order_id
+),
+rec as (
+  select oi.order_id, sum(oi.unit_price * oi.quantity) as receita_itens
+    from mkt.order_items oi
+   where oi.channel = 'shopee'
+   group by oi.order_id
+)
+select e.order_id,
+       round(coalesce(r.receita_itens, 0), 2) as receita_itens,
+       e.tarifas,
+       e.liquido,
+       round(coalesce(r.receita_itens, 0) - e.tarifas - e.liquido, 2) as diferenca
+  from esc e
+  left join rec r on r.order_id = e.order_id;
+grant select on analytics.shopee_conciliacao to authenticated;
 
 -- Grava o escrow dos pedidos informados: apaga as linhas deles e grava as novas (idempotente).
 -- Linhas com valor zero ou de pedido fora da lista sao ignoradas. Uso so do job de sincronizacao.

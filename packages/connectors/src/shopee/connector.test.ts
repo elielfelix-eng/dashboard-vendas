@@ -1,6 +1,7 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  MAX_PAGINAS,
   SHOPEE_API,
   SHOPEE_AUTH_EXPIRED,
   ShopeeAuthError,
@@ -160,32 +161,45 @@ test('tarifas zeradas ou ausentes não geram linha', () => {
   assert.deepEqual(tarifasDoEscrow({ orderSn: 'X', income: { escrow_amount: 0, commission_fee: 0, service_fee: 0 } }), []);
 });
 
-test('mapeamento das tarifas: custo positivo, frete líquido do subsídio, líquido separado', () => {
+test('mapeamento das tarifas (exemplo da revisão): frete líquido do subsídio e do frete pago pelo comprador; fecha com o líquido', () => {
   const linhas = tarifasDoEscrow({
     orderSn: 'X',
     income: {
-      escrow_amount: 40.12,
+      escrow_amount: 41.7,
       commission_fee: 8.5,
       service_fee: 3.2,
-      seller_transaction_fee: 1.1,
-      credit_card_transaction_fee: 0.4,
+      seller_transaction_fee: 1.5,
       actual_shipping_fee: 20,
       shopee_shipping_rebate: 15,
+      buyer_paid_shipping_fee: 5,
       voucher_from_seller: 5,
-      seller_discount: 7, // já está no preço com desconto do item: não entra
-      campaign_fee: 2,
-      seller_order_processing_fee: 1,
-      return_handling_fee: 0.5,
-      reverse_shipping_fee: 4,
-      shopee_voucher: 9, // pago pela Shopee: não entra
     },
-  });
+  })!;
   assert.deepEqual(linhas, [
     { categoria: 'comissao', valor: 8.5 },
     { categoria: 'taxa_servico', valor: 3.2 },
     { categoria: 'taxa_transacao', valor: 1.5 },
-    { categoria: 'frete', valor: 5 },
     { categoria: 'cupom_vendedor', valor: 5 },
+    { categoria: 'liquido', valor: 41.7 },
+  ]);
+  // itens 59,90 - tarifas - líquido = 0 (frete 0 não vira linha)
+  const tarifas = linhas.filter((l) => l.categoria !== 'liquido').reduce((s, l) => s + l.valor, 0);
+  assert.equal(Math.round((59.9 - tarifas - 41.7) * 100) / 100, 0);
+});
+
+test('demais categorias: campanha, processamento, devolução, taxa de cartão; seller_discount e cupom da Shopee ficam fora', () => {
+  const linhas = tarifasDoEscrow({
+    orderSn: 'X',
+    income: {
+      escrow_amount: 40.12, credit_card_transaction_fee: 0.4, seller_transaction_fee: 1.1,
+      actual_shipping_fee: 20, shopee_shipping_rebate: 10, buyer_paid_shipping_fee: 4,
+      seller_discount: 7, shopee_voucher: 9, campaign_fee: 2, seller_order_processing_fee: 1,
+      return_handling_fee: 0.5, reverse_shipping_fee: 4,
+    },
+  });
+  assert.deepEqual(linhas, [
+    { categoria: 'taxa_transacao', valor: 1.5 },
+    { categoria: 'frete', valor: 6 },
     { categoria: 'campanha', valor: 2 },
     { categoria: 'processamento', valor: 1 },
     { categoria: 'devolucao', valor: 4.5 },
@@ -193,13 +207,13 @@ test('mapeamento das tarifas: custo positivo, frete líquido do subsídio, líqu
   ]);
 });
 
-test('tarifas negativas na API viram custo positivo; subsídio maior que o frete vira crédito (negativo)', () => {
+test('sinal da Shopee preservado: ajuste negativo de comissão fica crédito; subsídio maior que o frete vira crédito', () => {
   const linhas = tarifasDoEscrow({
     orderSn: 'X',
     income: { escrow_amount: 10, commission_fee: -8.5, actual_shipping_fee: 10, shopee_shipping_rebate: 12 },
   });
   assert.deepEqual(linhas, [
-    { categoria: 'comissao', valor: 8.5 },
+    { categoria: 'comissao', valor: -8.5 },
     { categoria: 'frete', valor: -2 },
     { categoria: 'liquido', valor: 10 },
   ]);
@@ -222,7 +236,7 @@ test('getEscrowBatch: POST assinado, 50 por chamada, sem comprador; pedido sem e
             order_sn: sn,
             buyer_user_name: 'comprador-ficticio',
             buyer_payment_info: { buyer_payment_method: 'pix', buyer_total_amount: 50 },
-            order_income: { escrow_amount: 40, commission_fee: 5 },
+            order_income: { escrow_amount: 40, commission_fee: 5, buyer_paid_shipping_fee: 3, buyer_user_name: 'comprador-ficticio', buyer_total_amount: 50 },
           },
         })),
       });
@@ -239,6 +253,8 @@ test('getEscrowBatch: POST assinado, 50 por chamada, sem comprador; pedido sem e
   assert.ok(!res.some((e) => e.orderSn === 'SN7'));
   assert.ok(!JSON.stringify(res).includes('comprador-ficticio'));
   assert.ok(!JSON.stringify(res).includes('buyer_payment_info'));
+  assert.ok(!JSON.stringify(res).includes('buyer_total_amount'));
+  assert.deepEqual(res[0].income, { escrow_amount: 40, commission_fee: 5, buyer_paid_shipping_fee: 3 });
   const u = chamadas[0].url;
   const ts = Number(u.searchParams.get('timestamp'));
   assert.equal(u.searchParams.get('sign'), shopeeSign(app, '/api/v2/payment/get_escrow_detail_batch', ts, 'acc-1', SHOP_ID));
@@ -298,12 +314,12 @@ test('listOrders: janelas de até 15 dias, cursor, sem perder nem repetir pedido
   assert.equal(vistos.length, pedidos.length, 'nenhum pedido perdido ou repetido');
   assert.equal(new Set(vistos).size, pedidos.length);
   assert.deepEqual(new Set(vistos), new Set(pedidos.map((p) => p.sn)));
-  // Janelas encadeadas sem buraco e sem sobreposição, cada uma com no máximo 15 dias
+  // Janelas encadeadas sem buraco, com 1 segundo de sobreposição, cada uma com no máximo 15 dias
   assert.equal(janelas[0][0], ini);
   assert.equal(janelas.at(-1)![1], fim);
   for (let i = 0; i < janelas.length; i++) {
     assert.ok(janelas[i][1] - janelas[i][0] < 15 * DAY);
-    if (i) assert.equal(janelas[i][0], janelas[i - 1][1] + 1);
+    if (i) assert.equal(janelas[i][0], janelas[i - 1][1], 'sobreposição de 1 segundo');
   }
   assert.equal(janelas.length, 3);
   // O detalhe não pede dados do comprador nem do endereço
@@ -408,4 +424,68 @@ test('erro da Shopee com HTTP 200 (campo error preenchido) também falha, sem se
     async () => { for await (const _ of new ShopeeConnector(app, SHOP_ID, provider).listOrders(new Date(1_780_000_000_000), new Date(1_780_000_000_000 + 1000))) { /* nada */ } },
     (e: unknown) => /order\.order_list_invalid_time/.test((e as Error).message) && !(e as Error).message.includes('acc-1'),
   );
+});
+
+// ------------------------------------------------------------------------
+// Revisão: permissão, renovação única e cursor
+// ------------------------------------------------------------------------
+
+const varrer = async (shopee: ShopeeConnector) => {
+  const out: string[] = [];
+  for await (const l of shopee.listOrders(new Date(1_780_000_000_000), new Date(1_780_000_000_000 + 1000))) out.push(...l.map((o) => o.orderId));
+  return out;
+};
+
+for (const [nome, resp] of [
+  ['error_permission', () => json({ error: 'error_permission', message: 'acc-1' })],
+  ['HTTP 403 sem código', () => new Response('forbidden', { status: 403 })],
+  ['error_permission com HTTP 403', () => json({ error: 'error_permission', message: 'x' }, 403)],
+] as [string, () => Response][]) {
+  test(`sem permissão (${nome}): não renova token nem pede reconexão`, async () => {
+    const chamadas = servidor({ '/api/v2/order/get_order_list': resp });
+    const { provider, pedidos } = tokens();
+    await assert.rejects(
+      () => varrer(new ShopeeConnector(app, SHOP_ID, provider)),
+      (e: unknown) => !(e instanceof ShopeeAuthError) && /^Sem permissão na API da Shopee \((error_permission|http_403)\)/.test((e as Error).message)
+        && !(e as Error).message.includes('acc-1') && !/reconect/i.test((e as Error).message),
+    );
+    assert.equal(chamadas.length, 1);
+    assert.deepEqual(pedidos, [false]);
+  });
+}
+
+test('renovação forçada no máximo uma vez por execução', async () => {
+  let n = 0;
+  servidor({
+    // 1ª recusada, 2ª ok (após renovar), 3ª recusada de novo: não renova outra vez
+    '/api/v2/order/get_order_list': () => (++n === 1 || n === 3
+      ? json({ error: 'error_auth', message: 'x' })
+      : json({ error: '', response: { more: false, next_cursor: '', order_list: [] } })),
+  });
+  const { provider, pedidos } = tokens();
+  const shopee = new ShopeeConnector(app, SHOP_ID, provider);
+  await varrer(shopee);
+  await assert.rejects(() => varrer(shopee), (e: unknown) => e instanceof ShopeeAuthError);
+  assert.deepEqual(pedidos, [false, true, false]);
+  assert.equal(n, 3);
+});
+
+test('cursor repetido interrompe a paginação (sem laço infinito)', async () => {
+  let n = 0;
+  servidor({
+    '/api/v2/order/get_order_list': () => { n++; return json({ error: '', response: { more: true, next_cursor: 'C1', order_list: [] } }); },
+  });
+  const { provider } = tokens();
+  await varrer(new ShopeeConnector(app, SHOP_ID, provider));
+  assert.equal(n, 2); // '' -> C1 -> C1 (repetido): para
+});
+
+test(`cursor que nunca termina para em ${MAX_PAGINAS} páginas`, async () => {
+  let n = 0;
+  servidor({
+    '/api/v2/order/get_order_list': () => { n++; return json({ error: '', response: { more: true, next_cursor: `C${n}`, order_list: [] } }); },
+  });
+  const { provider } = tokens();
+  await varrer(new ShopeeConnector(app, SHOP_ID, provider));
+  assert.equal(n, MAX_PAGINAS);
 });

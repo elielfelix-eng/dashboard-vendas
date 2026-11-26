@@ -110,6 +110,31 @@ eq('RLS: authenticated nao executa a gravacao', await comoAuth(() => tenta(`sele
 eq('RLS: authenticated nao executa os pendentes', await comoAuth(() => tenta(`select mkt.shopee_pedidos_pendentes(1)`)), 'negado');
 eq('RLS: politica usa (select ...)', await val(`select qual ~* 'SELECT core\\.' from pg_policies where schemaname = 'mkt' and tablename = 'shopee_escrow'`), true);
 
+// ---------------- Conferencia por pedido (exemplo da revisao) ----------------
+// Itens 59,90; cupom do vendedor 5; comissao 8,5; servico 3,2; transacao 1,5;
+// frete 20 - subsidio 15 - pago pelo comprador 5 = 0 (sem linha); liquido 41,70.
+await db.query(`insert into mkt.orders (channel, order_id, status, date_created, raw) values ('shopee', 'R1', 'paid', '2026-11-10 10:00-03', '{"order_status":"COMPLETED"}')`);
+await db.query(`insert into mkt.order_items (channel, order_id, line_no, sku, quantity, unit_price) values ('shopee', 'R1', 1, 'BLA68-AZU', 1, 59.90)`);
+await gravarEscrow(['R1'], JSON.stringify([
+  { order_id: 'R1', categoria: 'cupom_vendedor', valor: 5, data_ref: '2026-11-10' },
+  { order_id: 'R1', categoria: 'comissao', valor: 8.5, data_ref: '2026-11-10' },
+  { order_id: 'R1', categoria: 'taxa_servico', valor: 3.2, data_ref: '2026-11-10' },
+  { order_id: 'R1', categoria: 'taxa_transacao', valor: 1.5, data_ref: '2026-11-10' },
+  { order_id: 'R1', categoria: 'frete', valor: 0, data_ref: '2026-11-10' },
+  { order_id: 'R1', categoria: 'liquido', valor: 41.7, data_ref: '2026-11-10' },
+]));
+eq('conciliacao: colunas', (await rows(`select column_name from information_schema.columns where table_schema = 'analytics' and table_name = 'shopee_conciliacao' order by ordinal_position`)).map((r) => r.column_name),
+  ['order_id', 'receita_itens', 'tarifas', 'liquido', 'diferenca']);
+eq('conciliacao: exemplo da revisao fecha em 0,00', await rows(`select receita_itens::text as r, tarifas::text as t, liquido::text as l, diferenca::text as d from analytics.shopee_conciliacao where order_id = 'R1'`),
+  [{ r: '59.90', t: '18.20', l: '41.70', d: '0.00' }]);
+eq('conciliacao: pedido sem escrow fica fora', await val(`select count(*)::int from analytics.shopee_conciliacao where order_id = 'P2'`), 0);
+eq('conciliacao: P1 (itens 59,90; tarifas 13,50; liquido 40,12) mostra a diferenca', await val(`select diferenca::text from analytics.shopee_conciliacao where order_id = 'P1'`), '6.28');
+eq('RLS conciliacao: com custos ve', await comoAuth(() => val(`select count(*)::int from analytics.shopee_conciliacao`)), 3);
+await db.exec(`set teste.custos = 'false'`);
+eq('RLS conciliacao: sem custos nao ve', await comoAuth(() => val(`select count(*)::int from analytics.shopee_conciliacao`)), 0);
+await db.exec(`set teste.custos = 'true'`);
+await db.exec(`delete from mkt.orders where order_id = 'R1'`);
+
 // ---------------- Reexecucao preserva dados ----------------
 await db.exec(mig('0020_shopee_pagamentos.sql'));
 eq('0020 reexecutada preserva o escrow', await val(`select count(*)::int from mkt.shopee_escrow`), 6);

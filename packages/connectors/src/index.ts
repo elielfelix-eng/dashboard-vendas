@@ -18,5 +18,8 @@ export {
   exchangeShopeeCode,
   refreshShopeeTokens,
   shopeeAuthUrl,
+  mapShopeeStatus,
+  tarifasDoEscrow,
+  toShopeeOrder,
 } from './shopee/connector.ts';
-export type { ShopeeAppCredentials } from './shopee/connector.ts';
+export type { ShopeeAppCredentials, ShopeeCategoria, ShopeeEscrow, ShopeeTarifa } from './shopee/connector.ts';

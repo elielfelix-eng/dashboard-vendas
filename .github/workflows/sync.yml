@@ -9,7 +9,7 @@ on:
       source:
         description: 'O que sincronizar'
         type: choice
-        options: [all, mercadolivre, bitrix24]
+        options: [all, mercadolivre, bitrix24, shopee]
         default: all
       ads_dias:
         description: 'Dias de metricas de Ads por anuncio para buscar de novo (vazio = 30; maximo 89)'
@@ -65,4 +65,28 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+
+  # Shopee: job separado, a falha de um não afeta o outro. Nunca roda duas ao mesmo tempo
+  # (o refresh token da Shopee é de uso único).
+  shopee:
+    if: ${{ github.event_name == 'schedule' || inputs.source == 'all' || inputs.source == 'shopee' || inputs.source == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency:
+      group: sync-shopee
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Sincronizar Shopee
+        run: npm run sync -- --source=shopee
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
+          SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}
           HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}

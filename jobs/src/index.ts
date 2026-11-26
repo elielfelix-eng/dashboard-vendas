@@ -1,15 +1,16 @@
 /**
  * Ponto de entrada da sincronização.
- * Uso:  npm run sync -- --source=all | mercadolivre | bitrix24
+ * Uso:  npm run sync -- --source=all | mercadolivre | bitrix24 | shopee
  * Executado automaticamente pelo GitHub Actions às 08h, 13h e 17h (Brasília).
  */
 import { connect } from './db.ts';
+import { FONTES_PERMITIDAS, rodarFontes } from './fontes.ts';
 import { syncBitrix24 } from './sync-bitrix24.ts';
 import { syncMercadoLivre } from './sync-mercadolivre.ts';
+import { syncShopee } from './sync-shopee.ts';
 
 const arg = process.argv.find((a) => a.startsWith('--source='));
 const source = arg?.split('=')[1] ?? 'all';
-const ALLOWED = ['all', 'mercadolivre', 'bitrix24'];
 
 async function ping(suffix = '') {
   const url = process.env.HEALTHCHECK_URL;
@@ -18,25 +19,17 @@ async function ping(suffix = '') {
 }
 
 async function main() {
-  if (!ALLOWED.includes(source)) throw new Error(`--source inválido: ${source}. Use: ${ALLOWED.join(', ')}`);
+  if (!FONTES_PERMITIDAS.includes(source)) throw new Error(`--source inválido: ${source}. Use: ${FONTES_PERMITIDAS.join(', ')}`);
   await ping('/start');
   const sql = connect();
   let failures = 0;
   try {
     // Cada fonte tem o próprio contador: a falha de uma não impede a outra
-    if (source === 'all' || source === 'mercadolivre') {
-      try { failures += await syncMercadoLivre(sql); } catch (err) {
-        failures++;
-        console.error('[ML] Falha geral:', (err as Error).message);
-      }
-    }
-    if (source === 'all' || source === 'bitrix24') {
-      try { failures += await syncBitrix24(sql); } catch (err) {
-        failures++;
-        console.error('[Bitrix] Falha geral:', (err as Error).message);
-      }
-    }
-    // Próximas fases: shopee e atualização das views de KPI
+    failures = await rodarFontes(source, [
+      { fonte: 'mercadolivre', rotulo: 'ML', rodar: () => syncMercadoLivre(sql) },
+      { fonte: 'bitrix24', rotulo: 'Bitrix', rodar: () => syncBitrix24(sql) },
+      { fonte: 'shopee', rotulo: 'Shopee', rodar: () => syncShopee(sql) },
+    ]);
   } finally {
     await sql.end();
   }

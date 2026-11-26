@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 // Shopee (migrations 0020, 0030, 0031): pagamentos (escrow), view analytics.shopee_fatura, pendentes e idempotencia.
 // Shopee (migration 0032): Ads da conta e por anuncio sem somar o dia 2x; "sem modelo" e tabela = cartao.
+// Shopee (migration 0021): funcoes do painel com vendas, tarifas, margem e Ads da Shopee; ML identico antes/depois.
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 let db = new PGlite(); // trocado por um banco novo na secao da 0032 (Ads), que precisa das funcoes do painel
 let fails = 0;
@@ -266,14 +267,8 @@ await gravarAds([D5], porAnuncio, conta);
 eq('sem modelo: SH1 -> AAA11; SH2 (sem SKU) e o resto da conta -> modelo nulo',
   await rows(`select modelo, investimento::float as inv, vendas_ads::float as v from analytics.ads_metricas_modelo('shopee', '2026-11-01', '2026-11-30') order by modelo nulls last`),
   [{ modelo: 'AAA11', inv: 30, v: 6 }, { modelo: null, inv: 30, v: 12 }]);
-// Contrato para a Tarefa 5 (0021): o cartao de investimento da Shopee = soma de mkt.ads_campaign_daily ('conta').
-// Ate a 0021, dash_ads_periodo devolve 0 para a Shopee; aqui ele e simulado com esse contrato.
-await db.exec(`
-create or replace function analytics.dash_ads_periodo(p_canal text, p_de date, p_ate date) returns numeric
-language sql stable security definer set search_path = '' as $$
-  select coalesce((select sum(a.cost) from mkt.ads_campaign_daily a
-                    where a.channel = 'shopee' and p_canal in ('consolidado', 'shopee') and a.day between p_de and p_ate), 0)
-$$;`);
+// Contrato da Tarefa 5: o cartao de investimento da Shopee = soma de mkt.ads_campaign_daily ('conta'), lido pela 0021.
+await db.exec(mig('0021_shopee_funcoes.sql'));
 const cartao = await val(`select investimento::float from analytics.ads_resumo('shopee', '2026-11-01', '2026-11-30')`);
 eq('cartao: investimento da Shopee = conta do dia', cartao, 60);
 const tabela = await rows(`select modelo, investimento::float as inv from analytics.ads_modelos('shopee', '2026-11-01', '2026-11-30') order by modelo nulls last`);
@@ -290,6 +285,293 @@ eq('so a conta: uma linha "sem modelo" = cartao', tabela2, [{ modelo: null, inv:
 eq('ads: authenticated nao executa a gravacao', await comoAuth(() => tenta(`select mkt.shopee_gravar_ads(array['2026-11-05']::date[], '[]'::jsonb, '[]'::jsonb)`)), 'negado');
 await db.exec(mig('0032_shopee_ads.sql'));
 eq('0032 reexecutada preserva o Ads', (await adsShopee()).length, 1);
+
+// =====================================================================
+// 0021: funcoes do painel com a Shopee (Tarefa 5). Banco novo com Mercado Livre e Shopee em outubro/2026.
+// O retrato do Mercado Livre e tirado ANTES da 0021 e conferido depois (nada do ML pode mudar).
+// =====================================================================
+db = new PGlite();
+await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
+for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
+  '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
+  '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql',
+  '0020_shopee_pagamentos.sql', '0030_shopee_escrow_campos.sql', '0031_shopee_categorias.sql', '0032_shopee_ads.sql'])
+  await db.exec(mig(f));
+console.log('Banco novo (0021): 0002..0019 + 0020, 0030, 0031 e 0032 aplicadas, ainda sem a 0021');
+await db.exec(`
+  create or replace function core.my_role() returns core.app_role language sql as $$ select coalesce(nullif(current_setting('teste.perfil', true), ''), 'admin')::core.app_role $$;
+  create or replace function core.can_see_channel(ch text) returns boolean language sql as $$ select ch = any (string_to_array(coalesce(nullif(current_setting('teste.canais', true), ''), 'mercadolivre,shopee,crm'), ',')) $$;
+  grant usage on schema core to authenticated;`);
+const perfil = (p) => db.exec(`set teste.perfil = '${p}'`);
+const canais = (c) => db.exec(`set teste.canais = '${c}'`);
+await perfil('admin'); await canais('mercadolivre,shopee,crm');
+
+// ---------------- Mercado Livre (mesmo cenario de ads.test.mjs + cancelado, devolvido e parametros) ----------------
+await db.exec(`
+insert into core.accounts (channel, external_id, active) values ('mercadolivre', 'ml1', true), ('shopee', 'sh1', true);
+insert into core.orcamento_ads (channel, vigente_desde, valor_mensal) values ('mercadolivre', '2026-10-01', 3000), ('shopee', '2026-10-01', 1000);
+insert into core.parametros_custo (channel, imposto_pct, embalagem_pedido, embalagem_peca, vigente_desde) values
+ ('mercadolivre', 8, 2, 0.5, '2026-01-01'), ('shopee', 10, 1, 0, '2026-01-01');
+insert into erp.cost_tiers (product_id, qty_start, qty_end, price, created_at, source) values
+ ('AAA11',1,49,10,'2026-01-01','erp'), ('BBB22',1,49,5,'2026-01-01','erp'), ('DDD44',1,49,1,'2026-01-01','erp'), ('SHP01',1,49,7,'2026-01-01','erp');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw, shipment_id, shipping_cost_seller, shipment_status) values
+ ('mercadolivre','P1','paid','2026-10-10 12:00+00','2026-10-10 12:00+00',200,'{}','s1',null,null),
+ ('mercadolivre','P2','paid','2026-10-12 12:00+00','2026-10-12 12:00+00',100,'{}','s2',null,null),
+ ('mercadolivre','P3','paid','2026-10-15 12:00+00','2026-10-15 12:00+00',50,'{}','s3',9,null),
+ ('mercadolivre','P4','paid','2026-10-20 12:00+00','2026-10-20 12:00+00',30,'{}','s4',6,null),
+ ('mercadolivre','P5','paid','2026-09-20 12:00+00','2026-09-20 12:00+00',70,'{}','s5',null,null),
+ ('mercadolivre','P6','cancelled','2026-10-13 12:00+00','2026-10-13 12:00+00',30,'{}','s6',null,'cancelled'),
+ ('mercadolivre','P7','cancelled','2026-10-14 12:00+00','2026-10-14 12:00+00',70,'{}','s7',null,'delivered');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price, sale_fee) values
+ ('mercadolivre','P1',1,'MLB1','AAA11-AZU','Produto A',2,100,11),
+ ('mercadolivre','P2',1,'MLB1','AAA11-AZU','Produto A',1,60,7),
+ ('mercadolivre','P2',2,'MLB2','BBB22-AZU','Produto B',1,40,5),
+ ('mercadolivre','P3',1,'MLB3','CCC33-AZU','Produto C',1,50,6),
+ ('mercadolivre','P4',1,'MLB4','DDD44-AZU','Produto D',1,30,4),
+ ('mercadolivre','P5',1,'MLB5','EEE55-AZU','Produto E',1,70,8),
+ ('mercadolivre','P6',1,'MLB4','DDD44-AZU','Produto D',1,30,4),
+ ('mercadolivre','P7',1,'MLB1','AAA11-AZU','Produto A',1,70,8);
+insert into mkt.items (channel, item_id, title, sku) values
+ ('mercadolivre','MLB1','Anuncio A',null), ('mercadolivre','MLB2','Anuncio B',null), ('mercadolivre','MLB3','Anuncio C',null),
+ ('mercadolivre','MLB9','Anuncio sem SKU',null);
+insert into mkt.billing_details (period_key, detail_id, created_at, detail_type, code, amount, order_id) values
+ ('2026-10','f1','2026-10-11 10:00+00','CHARGE','CVVML',20,'P1'),
+ ('2026-10','f2','2026-10-11 10:00+00','CHARGE','PADS',12,'P1'),
+ ('2026-10','f3','2026-10-13 10:00+00','CHARGE','PADS',10,'P2'),
+ ('2026-10','f3b','2026-10-13 10:00+00','CHARGE','CXDE',15,'P2'),
+ ('2026-10','f4','2026-10-04 06:00+00','CHARGE','PADS',7,null),
+ ('2026-10','f5','2026-10-22 06:00+00','CHARGE','PADS',99,null),
+ ('2026-10','f6','2026-10-08 06:00+00','CHARGE','CDLIT',8,null),
+ ('2026-10','f8','2026-10-15 10:00+00','CHARGE','CXDE',12,'P7'),
+ ('2026-09','f7','2026-09-16 06:00+00','CHARGE','PADS',15,null);
+insert into mkt.ads_campaign_daily (channel, campaign_id, day, cost) values
+ ('mercadolivre','c1','2026-10-05',100), ('mercadolivre','c1','2026-10-20',50), ('mercadolivre','c2','2026-10-10',30),
+ ('mercadolivre','c1','2026-10-15',5);
+insert into mkt.ads_campaigns (channel, campaign_id, name, status, budget, roas_target, automatica) values
+ ('mercadolivre','c1','Campanha 1','active',40,4,false), ('mercadolivre','c3','Campanha 3','active',10,null,true);
+insert into mkt.ads_metrics_daily (channel, item_id, day, campaign_id, impressions, clicks, cost, direct_amount, indirect_amount, direct_units, indirect_units, organic_units) values
+ ('mercadolivre','MLB1','2026-10-05','c1',1000,50,60,300,0,3,0,0),
+ ('mercadolivre','MLB1','2026-10-20','c1',500,20,30,0,100,0,1,0),
+ ('mercadolivre','MLB2','2026-10-06','c1',400,10,20,40,0,1,0,0),
+ ('mercadolivre','MLB3','2026-10-10','c2',200,8,25,0,0,0,0,0),
+ ('mercadolivre','MLB9','2026-10-10','c2',100,2,5,0,0,0,0,0);
+insert into mkt.ads_anuncios (channel, item_id, campaign_id, status) values
+ ('mercadolivre','MLB1','c1','active'), ('mercadolivre','MLB2','c1','active'), ('mercadolivre','MLB3','c2','paused');
+`);
+
+// ---------------- Shopee (gravada pelos mesmos caminhos do job) ----------------
+// S1 pago com escrow; S2 TO_RETURN (pago, decisao 1) com reembolso; S3 pago ainda sem escrow (estimado);
+// S4 cancelado depois de pago (com escrow antigo, que nao conta); S5 cancelado sem pagamento (decisao 2); S6 nao pago.
+const pedidoShopee = async (id, status, bruto, criado, pago, sku, qtd, preco) => {
+  await db.query(`insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, tags, raw)
+    values ('shopee', $1, $2, $3, $4, $5, array['shopee:' || $6::text], jsonb_build_object('order_status', $6::text))`,
+  [id, status, criado, pago, qtd * preco, bruto]);
+  await db.query(`insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price)
+    values ('shopee', $1, 1, $2, $3, 'Produto Shopee', $4, $5)`, [id, sku.startsWith('AAA11') ? 'SH1' : 'SH2', sku, qtd, preco]);
+};
+await pedidoShopee('S1', 'paid', 'COMPLETED', '2026-10-15 10:00-03', '2026-10-15 10:05-03', 'AAA11-AZU', 2, 50);
+await pedidoShopee('S2', 'paid', 'TO_RETURN', '2026-10-16 10:00-03', '2026-10-16 10:05-03', 'SHP01-X', 1, 100);
+await pedidoShopee('S3', 'paid', 'READY_TO_SHIP', '2026-10-20 10:00-03', '2026-10-20 10:05-03', 'SHP01-X', 1, 60);
+await pedidoShopee('S4', 'cancelled', 'CANCELLED', '2026-10-17 10:00-03', '2026-10-17 10:05-03', 'SHP01-X', 1, 40);
+await pedidoShopee('S5', 'cancelled', 'CANCELLED', '2026-10-18 10:00-03', null, 'SHP01-X', 1, 30);
+await pedidoShopee('S6', 'unpaid', 'UNPAID', '2026-10-19 10:00-03', null, 'SHP01-X', 1, 25);
+const esc = (id, l) => gravarEscrow([id], JSON.stringify(Object.entries(l).map(([categoria, valor]) => ({ order_id: id, categoria, valor, data_ref: '2026-10-15' }))));
+await esc('S1', { comissao: 12, taxa_servico: 6, taxa_transacao: 2, frete: 4, cupom_vendedor: 5, liquido: 71 });
+await esc('S2', { comissao: 12, taxa_servico: 6, taxa_transacao: 2, reembolso: 100, liquido: -20 });
+await esc('S4', { comissao: 8, liquido: 32 });
+await db.exec(`insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','SH1','Caneca Shopee','AAA11-AZU','active'), ('shopee','SH2','Copo Shopee','SHP01-X','active')`);
+const MS = (day, cost, direct, indirect) => ({ item_id: 'conta', day, campaign_id: 'conta', impressions: 100, clicks: 10, cost,
+  direct_amount: direct, indirect_amount: indirect, direct_units: 1, indirect_units: 0, organic_units: 0 });
+await gravarAds(['2026-10-15', '2026-10-16'], JSON.stringify([MS('2026-10-15', 30, 120, 30), MS('2026-10-16', 10, 20, 0)]),
+  JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }, { day: '2026-10-16', cost: 10, raw: {} }]));
+
+// ---------------- Retrato do Mercado Livre (e do consolidado das sugestoes) ----------------
+const OUT21 = `'2026-10-01'::date, '2026-10-31'::date`;
+const RETRATO = {
+  base: `select * from analytics.dash_pedidos_base('2026-01-01', '2026-12-31') where channel = 'mercadolivre' order by order_id`,
+  resumo_out: `select * from analytics.dash_resumo('mercadolivre', ${OUT21})`,
+  resumo_set: `select * from analytics.dash_resumo('mercadolivre', '2026-09-01', '2026-09-30')`,
+  mensal: `select * from analytics.dash_resultado_mensal('mercadolivre', '2026-08-01', '2026-10-31')`,
+  serie_dia: `select * from analytics.dash_serie('mercadolivre', ${OUT21}, 'dia')`,
+  serie_semana: `select * from analytics.dash_serie('mercadolivre', ${OUT21}, 'semana')`,
+  itens: `select * from analytics.dash_itens('mercadolivre', ${OUT21}) order by order_id, item_id, sku`,
+  modelos: `select * from analytics.dash_modelos('mercadolivre', ${OUT21})`,
+  skus: `select * from analytics.dash_skus('mercadolivre', ${OUT21}, null)`,
+  pedidos: `select * from analytics.dash_pedidos('mercadolivre', ${OUT21}, null)`,
+  alertas: `select * from analytics.dash_alertas('mercadolivre', ${OUT21})`,
+  custos_periodo: `select * from analytics.dash_custos_periodo('mercadolivre', ${OUT21}) order by categoria`,
+  ads_periodo: `select analytics.dash_ads_periodo('mercadolivre', ${OUT21}) as v, analytics.dash_ads_periodo('mercadolivre', '2026-09-01', '2026-09-30') as s`,
+  metas: `select * from analytics.dash_metas('mercadolivre', 2026, '2026-10-20')`,
+  ads_resumo: `select * from analytics.ads_resumo('mercadolivre', ${OUT21})`,
+  ads_resumo_leve: `select * from analytics.ads_resumo('mercadolivre', ${OUT21}, false)`,
+  ads_serie: `select * from analytics.ads_serie('mercadolivre', ${OUT21})`,
+  ads_metricas: `select * from analytics.ads_metricas_modelo('mercadolivre', ${OUT21}) order by modelo`,
+  ads_modelos: `select * from analytics.ads_modelos('mercadolivre', ${OUT21})`,
+  ads_campanhas: `select * from analytics.ads_campanhas('mercadolivre', ${OUT21})`,
+  ads_sugestoes: `select * from analytics.ads_sugestoes('mercadolivre', '2026-10-31')`,
+  ads_sugestoes_cons: `select * from analytics.ads_sugestoes('consolidado', '2026-10-31')`,
+  ads_orcamento: `select * from analytics.ads_orcamento('mercadolivre', '2026-10-20')`,
+  ads_seguidores: `select * from analytics.ads_seguidores('mercadolivre', ${OUT21})`,
+};
+const retrato = async () => {
+  const r = {};
+  for (const [k, sql] of Object.entries(RETRATO)) r[k] = await rows(sql);
+  return r;
+};
+const antesAdmin = await retrato();
+await perfil('comercial');
+const antesComercial = await comoAuth(retrato);
+await perfil('admin');
+eq('retrato do ML tem dados (pedidos, modelos, Ads)', [antesAdmin.base.length, antesAdmin.modelos.length > 1, antesAdmin.ads_modelos.length > 1], [7, true, true]);
+
+await db.exec(mig('0021_shopee_funcoes.sql'));
+await db.exec(mig('0021_shopee_funcoes.sql')); // reexecutavel
+console.log('0021 aplicada (2x)');
+
+// ---------------- Mercado Livre identico antes e depois da 0021 (decisao 6) ----------------
+const depoisAdmin = await retrato();
+for (const k of Object.keys(RETRATO)) eq(`ML igual antes/depois (admin): ${k}`, depoisAdmin[k], antesAdmin[k]);
+await perfil('comercial');
+const depoisComercial = await comoAuth(retrato);
+await perfil('admin');
+for (const k of Object.keys(RETRATO)) eq(`ML igual antes/depois (comercial, RLS): ${k}`, depoisComercial[k], antesComercial[k]);
+
+// ---------------- Step 1: dash_resumo('shopee') devolve as vendas da Shopee ----------------
+const RES21 = `select pedidos, vendas_brutas::float, unidades, ticket_medio::float, cancelados, devolvidos, pct_cancel_devol::float,
+  receita::float, comissao::float, frete::float, parcelamento::float, product_ads::float, seguidores::float, estornos::float,
+  difal::float, outras::float, custo_produto::float, imposto::float, embalagem::float, margem_bruta::float,
+  margem_contribuicao::float, pedidos_sem_custo, canceladas_valor::float, devolvidas_valor::float, estimados
+  from analytics.dash_resumo($1, '2026-10-01', '2026-10-31')`;
+const res21 = async (c) => (await rows(RES21, [c]))[0];
+const sh = await res21('shopee');
+eq('resumo shopee: vendas (S1..S4; S5 cancelado sem pagamento e S6 nao pago ficam fora)',
+  { p: sh.pedidos, vb: sh.vendas_brutas, u: sh.unidades, t: sh.ticket_medio, c: sh.cancelados, d: sh.devolvidos, pct: sh.pct_cancel_devol, r: sh.receita, cv: sh.canceladas_valor },
+  { p: 4, vb: 300, u: 5, t: 75, c: 1, d: 0, pct: 25, r: 260, cv: 40 });
+eq('decisao 1: TO_RETURN conta como venda paga (receita inclui S2)', await rows(`select order_id, classe from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') where channel = 'shopee' order by order_id`),
+  [{ order_id: 'S1', classe: 'pago' }, { order_id: 'S2', classe: 'pago' }, { order_id: 'S3', classe: 'pago' },
+   { order_id: 'S4', classe: 'cancelado' }, { order_id: 'S5', classe: 'outro' }, { order_id: 'S6', classe: 'outro' }]);
+eq('decisao 2: cancelado sem pagamento nao infla a taxa de cancelamento (1 de 4, nao 2 de 5)', [sh.cancelados, sh.pct_cancel_devol], [1, 25]);
+eq('serie shopee: dia 15 (S1), 17 (S4 cancelado) e 18 (S5 fora)',
+  (await rows(`select periodo::text as d, vendas_brutas::float as v, pedidos as p, receita::float as r from analytics.dash_serie('shopee', '2026-10-15', '2026-10-18', 'dia')`)),
+  [{ d: '2026-10-15', v: 100, p: 1, r: 100 }, { d: '2026-10-16', v: 100, p: 1, r: 100 }, { d: '2026-10-17', v: 40, p: 1, r: 0 }, { d: '2026-10-18', v: 0, p: 0, r: 0 }]);
+eq('resultado mensal shopee: outubro = resumo', (await rows(`select vendas_brutas::float as v, margem_contribuicao::float as m from analytics.dash_resultado_mensal('shopee', '2026-10-01', '2026-10-31')`)),
+  [{ v: 300, m: sh.margem_contribuicao }]);
+eq('metas: realizado da Shopee em outubro = receita', (await rows(`select realizado::float as r from analytics.dash_metas('shopee', 2026, '2026-10-20') where mes = '2026-10-01'`)), [{ r: 260 }]);
+
+// ---------------- Step 2: margem desconta comissao, taxas e frete do escrow; sem escrow = estimada e marcada ----------------
+eq('resumo shopee: tarifas do escrow + estimativa de S3 (taxas 20%, frete 2%, outras 2,5% da venda)',
+  { com: sh.comissao, fr: sh.frete, out: sh.outras, parc: sh.parcelamento, est: sh.estimados },
+  { com: 52, fr: 5.2, out: 106.5, parc: 0, est: 1 });
+eq('resumo shopee: Ads da conta, custo, imposto e embalagem da Shopee',
+  { ads: sh.product_ads, cp: sh.custo_produto, imp: sh.imposto, emb: sh.embalagem, sc: sh.pedidos_sem_custo }, { ads: 40, cp: 34, imp: 26, emb: 3, sc: 0 });
+eq('resumo shopee: margens (contribuicao = 260 - 203,70 - 26 - 3 - 34)', [sh.margem_bruta, sh.margem_contribuicao], [226, -6.7]);
+const B21 = `select order_id, comissao::float as c, frete::float as f, outras::float as o, frete_estimado as e
+  from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') where channel = 'shopee' order by order_id`;
+eq('base shopee: tarifas por pedido (S4 cancelado: escrow antigo nao conta; S3 estimado e marcado)', await rows(B21), [
+  { order_id: 'S1', c: 20, f: 4, o: 5, e: false }, { order_id: 'S2', c: 20, f: 0, o: 100, e: false }, { order_id: 'S3', c: 12, f: 1.2, o: 1.5, e: true },
+  { order_id: 'S4', c: 0, f: 0, o: 0, e: false }, { order_id: 'S5', c: 0, f: 0, o: 0, e: false }, { order_id: 'S6', c: 0, f: 0, o: 0, e: false }]);
+const semEstimar = (await rows(B21)).find((x) => x.order_id === 'S3');
+eq('sem escrow a margem nao sai inflada (tarifa estimada > 0)', semEstimar.c + semEstimar.f + semEstimar.o > 0, true);
+// Escrow chega: a estimativa sai e entram os valores reais
+await esc('S3', { comissao: 7, taxa_servico: 3.6, taxa_transacao: 1.2, liquido: 48.2 });
+eq('escrow chegou: S3 com o valor real, sem marca', (await rows(B21)).find((x) => x.order_id === 'S3'), { order_id: 'S3', c: 11.8, f: 0, o: 0, e: false });
+await db.exec(`delete from mkt.shopee_escrow where order_id = 'S3'`);
+// Sem nenhum historico de escrow: estimativa zero, mas o pedido continua marcado como estimado
+await db.exec(`update mkt.orders set status = 'unpaid' where order_id in ('S1', 'S2')`);
+eq('sem historico de escrow: marcado como estimado', (await rows(B21)).find((x) => x.order_id === 'S3').e, true);
+await db.exec(`update mkt.orders set status = 'paid' where order_id in ('S1', 'S2')`);
+eq('modelos shopee: contribuicao soma a margem do resumo',
+  Math.round((await rows(`select contribuicao::float as c from analytics.dash_modelos('shopee', ${OUT21})`)).reduce((s, m) => s + m.c, 0) * 100) / 100, -6.7);
+eq('modelos shopee: AAA11 e SHP01', (await rows(`select modelo, vendas_brutas::float as v, receita::float as r, custo_produto::float as c from analytics.dash_modelos('shopee', ${OUT21}) order by modelo`)),
+  [{ modelo: 'AAA11', v: 100, r: 100, c: 20 }, { modelo: 'SHP01', v: 200, r: 160, c: 14 }]);
+
+// ---------------- Step 3: consolidado = soma dos canais, sem duplicar pedido nem tarifa ----------------
+const ml = await res21('mercadolivre');
+const co = await res21('consolidado');
+const SOMA = ['pedidos', 'vendas_brutas', 'unidades', 'cancelados', 'devolvidos', 'receita', 'comissao', 'frete', 'parcelamento', 'product_ads',
+  'seguidores', 'estornos', 'difal', 'outras', 'custo_produto', 'imposto', 'embalagem', 'margem_bruta', 'margem_contribuicao',
+  'pedidos_sem_custo', 'canceladas_valor', 'devolvidas_valor', 'estimados'];
+const r2 = (x) => Math.round(x * 100) / 100;
+eq('consolidado = ML + Shopee (campo a campo)', SOMA.map((k) => r2(co[k])), SOMA.map((k) => r2(ml[k] + sh[k])));
+eq('consolidado: cada pedido uma vez', await rows(`select count(*)::int as n, count(distinct (channel, order_id))::int as d from analytics.dash_pedidos_base('2026-10-01', '2026-10-31')`),
+  [{ n: 12, d: 12 }]);
+eq('consolidado: tarifa da Shopee uma vez (escrow de pedido pago + estimativa)', r2(co.comissao - ml.comissao), 52);
+eq('consolidado: modelos somam os dois canais (AAA11 = ML + Shopee)',
+  (await rows(`select modelo, vendas_brutas::float as v from analytics.dash_modelos('consolidado', ${OUT21}) where modelo = 'AAA11'`))[0].v,
+  (await rows(`select vendas_brutas::float as v from analytics.dash_modelos('mercadolivre', ${OUT21}) where modelo = 'AAA11'`))[0].v + 100);
+eq('consolidado: contribuicao dos modelos = margem do resumo',
+  r2((await rows(`select contribuicao::float as c from analytics.dash_modelos('consolidado', ${OUT21})`)).reduce((s, m) => s + m.c, 0)), r2(co.margem_contribuicao));
+eq('metas consolidado: realizado = ML + Shopee', (await rows(`select realizado::float as r from analytics.dash_metas('consolidado', 2026, '2026-10-20') where mes = '2026-10-01'`))[0].r,
+  (await rows(`select realizado::float as r from analytics.dash_metas('mercadolivre', 2026, '2026-10-20') where mes = '2026-10-01'`))[0].r + 260);
+
+// ---------------- Step 4: sem 'custos' nao le tarifas nem margem da Shopee ----------------
+await perfil('comercial');
+const shc = await comoAuth(() => res21('shopee'));
+eq('comercial: tarifas e margem da Shopee nulas', [shc.comissao, shc.frete, shc.parcelamento, shc.seguidores, shc.estornos, shc.difal, shc.outras,
+  shc.custo_produto, shc.imposto, shc.embalagem, shc.margem_bruta, shc.margem_contribuicao], Array(12).fill(null));
+eq('comercial: vendas e Ads da Shopee visiveis, sem estimados', [shc.vendas_brutas, shc.receita, shc.product_ads, shc.estimados], [300, 260, 40, 0]);
+eq('comercial: base sem tarifa da Shopee', await comoAuth(() => rows(`select distinct comissao, frete, outras, custo_produto from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') where channel = 'shopee'`)),
+  [{ comissao: null, frete: null, outras: null, custo_produto: null }]);
+eq('comercial: itens e modelos da Shopee sem tarifas', await comoAuth(async () => [
+  (await rows(`select distinct tarifas from analytics.dash_itens('shopee', ${OUT21})`)).map((x) => x.tarifas),
+  (await rows(`select distinct tarifas_frete, contribuicao from analytics.dash_modelos('shopee', ${OUT21})`))]),
+  [[null], [{ tarifas_frete: null, contribuicao: null }]]);
+eq('comercial: consolidado sem tarifa da Shopee (so as do ML)', (await comoAuth(() => res21('consolidado'))).comissao, Number(depoisComercial.resumo_out[0].comissao));
+await perfil('admin');
+await canais('mercadolivre');
+eq('sem o canal Shopee: resumo da Shopee vazio e consolidado = ML', [(await comoAuth(() => res21('shopee'))).pedidos, (await comoAuth(() => res21('consolidado'))).vendas_brutas],
+  [0, ml.vendas_brutas]);
+eq('sem o canal Shopee: Ads da Shopee 0', await comoAuth(() => val(`select analytics.dash_ads_periodo('shopee', ${OUT21})::float`)), 0);
+await canais('mercadolivre,shopee,crm');
+
+// ---------------- Step 5: Ads da Shopee (conta) no consolidado e so a Shopee em 'shopee' ----------------
+const adsP = (c) => val(`select analytics.dash_ads_periodo('${c}', ${OUT21})::float`);
+const adsMl = await adsP('mercadolivre');
+eq('dash_ads_periodo: shopee = conta (30 + 10)', await adsP('shopee'), 40);
+eq('dash_ads_periodo: consolidado = ML + Shopee', await adsP('consolidado'), adsMl + 40);
+const serie = (c) => rows(`select dia::text as d, investimento::float as i, vendas_ads::float as v from analytics.ads_serie('${c}', ${OUT21})`);
+const sSh = await serie('shopee'); const sMl = await serie('mercadolivre'); const sCo = await serie('consolidado');
+eq('ads_serie shopee: so os dias da Shopee', sSh.filter((x) => x.i || x.v), [{ d: '2026-10-15', i: 30, v: 150 }, { d: '2026-10-16', i: 10, v: 20 }]);
+eq('ads_serie: soma = dash_ads_periodo (gemea), nos tres canais', [sSh, sMl, sCo].map((s) => r2(s.reduce((a, x) => a + x.i, 0))), [40, adsMl, adsMl + 40]);
+eq('ads_serie consolidado: cada dia = ML + Shopee', sCo.every((x, i) => r2(x.i) === r2(sMl[i].i + sSh[i].i) && r2(x.v) === r2(sMl[i].v + sSh[i].v)), true);
+const orc = await rows(`select canal, gasto_product_ads::float as g, gasto_mes::float as m from analytics.ads_orcamento('consolidado', '2026-10-20')`);
+eq('ads_orcamento: Shopee = Ads da conta no mes; consolidado = soma', orc.map((x) => [x.canal, x.g]),
+  [['mercadolivre', orc[0].g], ['shopee', 40], ['consolidado', r2(orc[0].g + 40)]]);
+eq('ads_orcamento shopee: so a Shopee', (await rows(`select canal, gasto_product_ads::float as g from analytics.ads_orcamento('shopee', '2026-10-20')`)), [{ canal: 'shopee', g: 40 }]);
+const RS = `select investimento::float as i, vendas_ads::float as v, roas::float, acos::float, tacos::float, vendas_brutas_canal::float as vb,
+  nao_atribuido::float as na, tem_detalhe as t from analytics.ads_resumo($1, '2026-10-01', '2026-10-31')`;
+const rsSh = (await rows(RS, ['shopee']))[0]; const rsMl = (await rows(RS, ['mercadolivre']))[0]; const rsCo = (await rows(RS, ['consolidado']))[0];
+eq('ads_resumo shopee: conta inteira (ROAS 170/40, ACOS, TACOS sobre 300), tudo nao atribuido',
+  rsSh, { i: 40, v: 170, roas: 4.25, acos: 23.53, tacos: 13.33, vb: 300, na: 40, t: true });
+eq('ads_resumo: vendas brutas = dash_resumo (shopee e consolidado)', [rsSh.vb, rsCo.vb], [sh.vendas_brutas, co.vendas_brutas]);
+eq('ads_resumo consolidado: investimento e vendas somam (ROAS nao inflado)', [rsCo.i, rsCo.v, rsCo.roas],
+  [r2(rsMl.i + 40), r2(rsMl.v + 170), r2((rsMl.v + 170) / (rsMl.i + 40))]);
+eq('ads_resumo consolidado: nao atribuido = ML + Shopee (nunca negativo)', [rsCo.na, rsCo.na >= 0], [r2(rsMl.na + 40), true]);
+const camp = (c) => rows(`select campanha_id, nome, investimento::float as i, vendas_ads::float as v, roas::float from analytics.ads_campanhas('${c}', ${OUT21})`);
+eq('ads_campanhas shopee: so a conta, soma = cartao', await camp('shopee'), [{ campanha_id: 'conta', nome: 'Shopee Ads (conta inteira)', i: 40, v: 170, roas: 4.25 }]);
+const cCo = await camp('consolidado'); const cMl = await camp('mercadolivre');
+eq('ads_campanhas consolidado: soma = cartao; linha "nao atribuido" = a do ML',
+  [r2(cCo.reduce((s, x) => s + x.i, 0)), cCo.find((x) => x.campanha_id === null)?.i ?? null], [r2(adsMl + 40), cMl.find((x) => x.campanha_id === null)?.i ?? null]);
+const AM = `select modelo, investimento::float as i, lucro_pos_ads::float as l, sugestao from analytics.ads_modelos($1, '2026-10-01', '2026-10-31')`;
+const amSh = await rows(AM, ['shopee']);
+eq('ads_modelos shopee: modelos vendidos sem Ads por produto; linha nula = conta inteira', amSh.map((x) => [x.modelo, x.i, x.sugestao]),
+  [['AAA11', 0, null], ['SHP01', 0, null], [null, 40, null]]);
+const dmSh = await rows(`select modelo, (contribuicao + custos_rateados)::float as antes from analytics.dash_modelos('shopee', ${OUT21}) order by modelo`);
+eq('ads_modelos shopee: lucro apos Ads = contribuicao antes do Ads (sem Ads atribuido)', amSh.filter((x) => x.modelo).map((x) => r2(x.l)), dmSh.map((x) => r2(x.antes)));
+const amCo = await rows(AM, ['consolidado']); const amMl = await rows(AM, ['mercadolivre']);
+eq('ads_modelos consolidado: soma = cartao; linha nula = ML + 40', [r2(amCo.reduce((s, x) => s + x.i, 0)), amCo.find((x) => x.modelo === null).i],
+  [r2(adsMl + 40), r2(amMl.find((x) => x.modelo === null).i + 40)]);
+eq('ads_sugestoes: Shopee sem sugestao por produto (decisao 3)', (await rows(`select * from analytics.ads_sugestoes('shopee', '2026-10-31')`)).length, 0);
+eq('ads_sugestoes consolidado: so sugestoes do ML', (await rows(`select distinct canal from analytics.ads_sugestoes('consolidado', '2026-10-31')`)).map((x) => x.canal), ['mercadolivre']);
+await perfil('comercial');
+eq('comercial (sem custos, com ads): Ads da Shopee visivel', await comoAuth(async () => (await rows(RS, ['shopee']))[0].i), 40);
+await perfil('admin');
+
+// ---------------- Reaplicar 0009/0019 desfaz; reaplicar a 0021 depois refaz ----------------
+await db.exec(mig('0009_dashboard_funcoes.sql'));
+await db.exec(mig('0019_ads_funcoes.sql'));
+await db.exec(mig('0021_shopee_funcoes.sql'));
+eq('0009 + 0019 + 0021 reaplicadas: Shopee de volta', [(await res21('shopee')).vendas_brutas, await adsP('shopee')], [300, 40]);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

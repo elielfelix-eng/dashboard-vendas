@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 // Shopee (migrations 0020, 0030, 0031): pagamentos (escrow), view analytics.shopee_fatura, pendentes e idempotencia.
 // Shopee (migration 0032): Ads da conta e por anuncio sem somar o dia 2x; "sem modelo" e tabela = cartao.
 // Shopee (migration 0021): funcoes do painel com vendas, tarifas, margem e Ads da Shopee; ML identico antes/depois.
+// Shopee (migration 0033): Ads por produto da Shopee (ranking e sugestoes, limites do ML); ML identico antes/depois.
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 let db = new PGlite(); // trocado por um banco novo na secao da 0032 (Ads), que precisa das funcoes do painel
 let fails = 0;
@@ -597,6 +598,218 @@ await db.exec(mig('0009_dashboard_funcoes.sql'));
 await db.exec(mig('0019_ads_funcoes.sql'));
 await db.exec(mig('0021_shopee_funcoes.sql'));
 eq('0009 + 0019 + 0021 reaplicadas: Shopee de volta', [(await res21('shopee')).vendas_brutas, await adsP('shopee')], [300, 40]);
+
+// =====================================================================
+// 0033: Ads por produto da Shopee (Tarefa 5b): ranking e sugestoes com os mesmos limites do ML.
+// Mesmo banco da 0021. O retrato do ML e tirado com o Ads por produto da Shopee ja gravado, ANTES da 0033.
+// =====================================================================
+// Limites: a linha padrao da Shopee (0018) continua la e o ML e editado; a 0033 copia o ML para a Shopee.
+await db.exec(`update core.parametros_ads set pausar_gasto_min = 60, escalar_folga_pp = 12 where channel = 'mercadolivre';
+  insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','SH3','Garrafa Shopee','GGG77-PRT','active');`);
+// Ads por produto da Shopee (como combinarAdsShopee grava: 'conta' = so a sobra do dia; sem sobra, sem linha 'conta')
+//   15/10: conta 30 = SH1 12 (AAA11) + SH2 10 (SHP01) + sobra 8;  16/10: conta 10 = SH2 10;
+//   20 a 26/10: conta 10 por dia = SH3 10 (GGG77, sem venda): 7 dias, R$ 70, nenhuma unidade.
+const MP = (item, day, cost, clicks, direct, units) => ({ item_id: item, day, campaign_id: item === 'conta' ? 'conta' : 'k1', impressions: 100,
+  clicks, cost, direct_amount: direct, indirect_amount: 0, direct_units: units, indirect_units: 0, organic_units: 0 });
+const DIAS33 = ['2026-10-15', '2026-10-16', ...[20, 21, 22, 23, 24, 25, 26].map((d) => `2026-10-${d}`)];
+await gravarAds(DIAS33, JSON.stringify([
+  MP('SH1', '2026-10-15', 12, 20, 60, 1), MP('SH2', '2026-10-15', 10, 10, 20, 1), MP('conta', '2026-10-15', 8, 5, 40, 0),
+  MP('SH2', '2026-10-16', 10, 10, 20, 1),
+  ...DIAS33.slice(2).map((d) => MP('SH3', d, 10, 3, 0, 0))]),
+JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }, { day: '2026-10-16', cost: 10, raw: {} }, ...DIAS33.slice(2).map((d) => ({ day: d, cost: 10, raw: {} }))]));
+eq('0033: cartao da Shopee = conta (30 + 10 + 70)', await adsP('shopee'), 110);
+
+const RETRATO33 = Object.keys(RETRATO).filter((k) => k !== 'ads_sugestoes_cons'); // o consolidado passa a ter a Shopee (intencional)
+const retrato33 = async () => { const r = {}; for (const k of RETRATO33) r[k] = await rows(RETRATO[k]); return r; };
+const antes33 = await retrato33();
+await perfil('comercial');
+const antes33c = await comoAuth(retrato33);
+await perfil('admin');
+eq('0033: retrato do ML com sugestoes e tabela', [antes33.ads_sugestoes.length > 1, antes33.ads_modelos.length > 1], [true, true]);
+eq('limites antes da 0033: Shopee com a linha padrao da 0018 (diferente do ML editado)',
+  await rows(`select vigente_desde::text as v, pausar_gasto_min::float as p, escalar_folga_pp::float as f from core.parametros_ads where channel = 'shopee'`),
+  [{ v: '2025-01-01', p: 50, f: 10 }]);
+
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+await db.exec(mig('0033_shopee_ads_produto.sql')); // reexecutavel
+console.log('0033 aplicada (2x)');
+
+// ---------------- Mercado Livre identico antes e depois da 0033 ----------------
+const depois33 = await retrato33();
+for (const k of RETRATO33) eq(`0033: ML igual antes/depois (admin): ${k}`, depois33[k], antes33[k]);
+await perfil('comercial');
+const depois33c = await comoAuth(retrato33);
+await perfil('admin');
+for (const k of RETRATO33) eq(`0033: ML igual antes/depois (comercial, RLS): ${k}`, depois33c[k], antes33c[k]);
+
+// ---------------- Limites da Shopee = os do ML (linha criada pela 0033) ----------------
+const LIM = `select vigente_desde::text as v, pausar_gasto_min::float, pausar_cliques_min, min_dias_dados, revisar_cliques_min,
+  revisar_conversao_max_pct::float, escalar_folga_pp::float, escalar_unidades_min, testar_margem_min_pct::float, testar_unidades_min,
+  teste_reserva_pct::float, teste_max_modelos, reduzir_fator::float, teto_fator::float, alerta_sobra_pct::float
+  from core.parametros_ads where channel = $1 order by vigente_desde`;
+const limMl = await rows(LIM, ['mercadolivre']);
+eq('limites: Shopee = ML (pausar 60, folga 12), mesmo com a linha padrao da Shopee antes', await rows(LIM, ['shopee']), limMl);
+eq('limites: ML editado de fato (nao sao os padroes)', [limMl[0].pausar_gasto_min, limMl[0].escalar_folga_pp], [60, 12]);
+
+// ---------------- ads_sugestoes('shopee'): so dados da Shopee, regras e textos do ML ----------------
+const SG = `select modelo, canal, sugestao, motivo, investimento_30d::float as i, vendas_ads_30d::float as v, unidades_ads_30d::float as u,
+  acos_30d::float as acos, acos_equilibrio_30d::float as eqb, dias_com_dados as d from analytics.ads_sugestoes($1, '2026-10-31')`;
+const sgSh = await rows(SG, ['shopee']);
+eq('sugestoes shopee: AAA11 (ACOS 20% < equilibrio 40% - folga 12, so 1 unidade) = manter', sgSh.find((x) => x.modelo === 'AAA11'),
+  { modelo: 'AAA11', canal: 'shopee', sugestao: 'manter', motivo: 'ACOS 20,00% bem abaixo do equilíbrio 40,00%, mas só 1 unidade vendida por Ads; mínimo 3',
+    i: 12, v: 60, u: 1, acos: 20, eqb: 40, d: 1 });
+eq('sugestoes shopee: SHP01 (ACOS 50% > equilibrio -9,19%; margem com escrow, estimativa e cancelado pago) = reduzir', sgSh.find((x) => x.modelo === 'SHP01'),
+  { modelo: 'SHP01', canal: 'shopee', sugestao: 'reduzir', motivo: 'ACOS 50,00% acima do equilíbrio -9,19%', i: 20, v: 40, u: 2, acos: 50, eqb: -9.19, d: 2 });
+eq('sugestoes shopee: GGG77 (R$ 70 em 7 dias sem venda, limite 60 copiado do ML) = pausar', sgSh.find((x) => x.modelo === 'GGG77'),
+  { modelo: 'GGG77', canal: 'shopee', sugestao: 'pausar', motivo: 'gastou R$ 70,00 em 30 dias sem venda', i: 70, v: 0, u: 0, acos: null, eqb: null, d: 7 });
+eq('sugestoes shopee: so modelos da Shopee (sobra da conta nunca vira modelo)', sgSh.map((x) => x.modelo), ['AAA11', 'GGG77', 'SHP01']);
+const dmSh33 = await rows(`select modelo, round((contribuicao + custos_rateados) / receita * 100, 2)::float as e from analytics.dash_modelos('shopee', '2026-10-02', '2026-10-31') order by modelo`);
+eq('sugestoes shopee: equilibrio = margem antes do Ads de dash_modelos(shopee) (sem fatura por pedido)',
+  sgSh.filter((x) => x.eqb !== null).map((x) => [x.modelo, x.eqb]), dmSh33.map((x) => [x.modelo, x.e]));
+
+// ---------------- ads_modelos('shopee'): por modelo; nao atribuido = sobra da conta ----------------
+const AM33 = `select modelo, investimento::float as i, acos::float as acos, acos_equilibrio::float as eqb, lucro_pos_ads::float as l, sugestao
+  from analytics.ads_modelos($1, '2026-10-01', '2026-10-31')`;
+const am33 = await rows(AM33, ['shopee']);
+eq('ads_modelos shopee: investimento, ACOS, equilibrio e sugestao por modelo; linha nula = sobra da conta (8)', am33, [
+  { modelo: 'GGG77', i: 70, acos: null, eqb: null, l: -70, sugestao: 'pausar' },
+  { modelo: 'SHP01', i: 20, acos: 50, eqb: -9.19, l: -34.7, sugestao: 'reduzir' },
+  { modelo: 'AAA11', i: 12, acos: 20, eqb: 40, l: 28, sugestao: 'manter' },
+  { modelo: null, i: 8, acos: null, eqb: null, l: null, sugestao: null }]);
+const naoSh = am33.find((x) => x.modelo === null).i;
+eq('ads_modelos shopee: soma das linhas + nao atribuido = dash_ads_periodo(shopee); nao atribuido >= 0',
+  [r2(am33.reduce((s, x) => s + x.i, 0)), naoSh >= 0], [await adsP('shopee'), true]);
+eq('ads_resumo shopee: nao atribuido = o da tabela', (await rows(RS, ['shopee']))[0].na, naoSh);
+// Por anuncio cobrindo a conta inteira: nao atribuido ~0
+await gravarAds(['2026-10-15'], JSON.stringify([MP('SH1', '2026-10-15', 12, 20, 60, 1), MP('SH2', '2026-10-15', 18, 10, 20, 1)]),
+  JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }]));
+eq('ads_modelos shopee: por anuncio cobre a conta -> sem linha "nao atribuido"', (await rows(AM33, ['shopee'])).filter((x) => x.modelo === null), []);
+await gravarAds(['2026-10-15'], JSON.stringify([MP('SH1', '2026-10-15', 12, 20, 60, 1), MP('SH2', '2026-10-15', 10, 10, 20, 1), MP('conta', '2026-10-15', 8, 5, 40, 0)]),
+  JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }]));
+// Item 'conta' nunca e modelo, nem se um anuncio cadastrado tivesse esse id com SKU
+await db.exec(`insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','conta','x','AAA11-AZU','active')`);
+eq('ads_modelos shopee: item "conta" segue em "nao atribuido" mesmo com SKU', (await rows(AM33, ['shopee'])).map((x) => [x.modelo, x.i]),
+  [['GGG77', 70], ['SHP01', 20], ['AAA11', 12], [null, 8]]);
+await db.exec(`delete from mkt.items where channel = 'shopee' and item_id = 'conta'`);
+
+// ---------------- Consolidado: metricas e margem somadas; tabela = sugestao ----------------
+const sgMl = await rows(SG, ['mercadolivre']);
+const sgCo = await rows(SG, ['consolidado']);
+const aMl = sgMl.find((x) => x.modelo === 'AAA11'); const aSh = sgSh.find((x) => x.modelo === 'AAA11'); const aCo = sgCo.find((x) => x.modelo === 'AAA11');
+eq('consolidado AAA11: Ads somados (ML + Shopee), canal = o de maior investimento',
+  [aCo.i, aCo.v, aCo.u, aCo.canal], [r2(aMl.i + aSh.i), r2(aMl.v + aSh.v), r2(aMl.u + aSh.u), aMl.i > aSh.i ? 'mercadolivre' : 'shopee']);
+const dmCo = (await rows(`select contribuicao::float as c, receita::float as r from analytics.dash_modelos('consolidado', $1, $2) where modelo = 'AAA11'`, J30))[0];
+eq('consolidado AAA11: equilibrio com a margem dos dois canais (nao e o do ML nem o da Shopee)',
+  [aCo.eqb !== aMl.eqb, aCo.eqb !== aSh.eqb, aCo.eqb !== null], [true, true, true]);
+// Valor esperado, montado a parte: contribuicao consolidada + parte do Product Ads do periodo (ML API + conta Shopee,
+// rateada pela receita) + Product Ads da fatura do ML ligado aos pedidos do AAA11 (P1 12 + P2 10 x 60/100 = 18).
+const adsCpCo = await val(`select coalesce(sum(valor), 0)::float from analytics.dash_custos_periodo('consolidado', $1, $2) where categoria = 'product_ads'`, J30);
+const recCo = await val(`select sum(receita)::float from analytics.dash_modelos('consolidado', $1, $2)`, J30);
+eq('consolidado AAA11: equilibrio = (contribuicao + rateio do Ads do periodo + fatura do ML) / receita = 55,25',
+  [aCo.eqb, r2((dmCo.c + adsCpCo * dmCo.r / recCo + 18) / dmCo.r * 100)], [55.25, 55.25]);
+eq('consolidado: ACOS de equilibrio da tabela = o da sugestao (AAA11, periodo = janela)', await eqTab('consolidado'), aCo.eqb);
+eq('consolidado: o numero da tabela aparece no motivo', aCo.motivo.includes(`${String(aCo.eqb.toFixed(2)).replace('.', ',')}%`), true);
+eq('consolidado: receita do equilibrio = ML + Shopee (AAA11)', dmCo.r, (await recAAA('mercadolivre')) + 100);
+eq('consolidado: GGG77 (so Shopee) e SHP01 com sugestao do canal Shopee', sgCo.filter((x) => ['GGG77', 'SHP01'].includes(x.modelo)).map((x) => [x.modelo, x.canal, x.sugestao]),
+  [['GGG77', 'shopee', 'pausar'], ['SHP01', 'shopee', 'reduzir']]);
+const amCo33 = await rows(AM33, ['consolidado']);
+eq('ads_modelos consolidado: soma = cartao; nao atribuido = ML + sobra da Shopee',
+  [r2(amCo33.reduce((s, x) => s + x.i, 0)), amCo33.find((x) => x.modelo === null).i],
+  [r2(adsMl + 110), r2((await rows(AM33, ['mercadolivre'])).find((x) => x.modelo === null).i + 8)]);
+
+// ---------------- Sem 'custos': sem margem nem equilibrio (como o ML) ----------------
+await perfil('comercial');
+const sgShC = await comoAuth(() => rows(SG, ['shopee']));
+eq('comercial: Shopee sem equilibrio; pausar continua; sem reduzir', sgShC.map((x) => [x.modelo, x.sugestao, x.eqb]),
+  [['AAA11', null, null], ['GGG77', 'pausar', null], ['SHP01', null, null]]);
+eq('comercial: ads_modelos shopee sem equilibrio nem lucro', (await comoAuth(() => rows(AM33, ['shopee']))).map((x) => [x.modelo, x.eqb, x.l]),
+  [['GGG77', null, null], ['SHP01', null, null], ['AAA11', null, null], [null, null, null]]);
+await perfil('admin');
+
+// ---------------- Limites: a Shopee editada (Parametros) muda a sugestao; a 0033 e uma copia unica e reexecutavel ----------------
+await db.exec(`update core.parametros_ads set pausar_gasto_min = 75 where channel = 'shopee'`);
+eq('limites: Shopee editada para 75, GGG77 (R$ 70) deixa de ser pausar', (await rows(SG, ['shopee'])).find((x) => x.modelo === 'GGG77').sugestao, 'manter');
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+const limSh1 = await rows(LIM, ['shopee']);
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+eq('limites: reexecutar a 0033 copia o ML de novo (copia unica decidida pelo dono) e duas execucoes dao o mesmo',
+  [limSh1, await rows(LIM, ['shopee'])], [limMl, limMl]);
+// ML com uma vigencia mais nova: a Shopee recebe essa vigencia com os mesmos valores (a mais antiga fica)
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, pausar_gasto_min, teste_max_modelos) values ('mercadolivre', '2026-11-01', 45, 7)`);
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+eq('limites: ultima linha do ML copiada com a vigencia dela', (await rows(LIM, ['shopee'])).map((x) => [x.v, x.pausar_gasto_min, x.teste_max_modelos]),
+  [['2025-01-01', 60, 5], ['2026-11-01', 45, 7]]);
+eq('limites: ultima linha da Shopee = ultima do ML', (await rows(LIM, ['shopee']))[1], (await rows(LIM, ['mercadolivre']))[1]);
+await db.exec(`delete from core.parametros_ads where vigente_desde = '2026-11-01'`);
+// Reaplicar 0019 e 0021 exige reaplicar a 0033 (documentado no cabecalho)
+await db.exec(mig('0019_ads_funcoes.sql'));
+await db.exec(mig('0021_shopee_funcoes.sql'));
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+eq('0019 + 0021 + 0033 reaplicadas: sugestoes da Shopee de volta', (await rows(SG, ['shopee'])).map((x) => x.modelo), ['AAA11', 'GGG77', 'SHP01']);
+
+// ---------------- ads_campanhas (fix da 5b): campanha real da Shopee com o proprio investimento; 'conta' = sobra ----------------
+// SH1 e SH3 na campanha k1 (12 + 70 = 82, vendas 60), SH2 na k2 (20, vendas 40), sobra da conta 8 (vendas 40). Cartao 110.
+const K = (m, k) => ({ ...m, campaign_id: k });
+const adsCampanhas = (sh2dia15, sobra) => gravarAds(DIAS33, JSON.stringify([
+  K(MP('SH1', '2026-10-15', 12, 20, 60, 1), 'k1'), K(MP('SH2', '2026-10-15', sh2dia15, 10, 20, 1), 'k2'),
+  ...(sobra ? [MP('conta', '2026-10-15', sobra, 5, 40, 0)] : []),
+  K(MP('SH2', '2026-10-16', 10, 10, 20, 1), 'k2'),
+  ...DIAS33.slice(2).map((d) => K(MP('SH3', d, 10, 3, 0, 0), 'k1'))]),
+JSON.stringify([{ day: '2026-10-15', cost: 30, raw: {} }, { day: '2026-10-16', cost: 10, raw: {} }, ...DIAS33.slice(2).map((d) => ({ day: d, cost: 10, raw: {} }))]));
+await adsCampanhas(10, 8);
+await db.exec(`insert into mkt.ads_campaigns (channel, campaign_id, name, status) values ('shopee','k1','Shopee 1','active'), ('shopee','k2','Shopee 2','active')`);
+const CA = `select campanha_id, nome, investimento::float as i, vendas_ads::float as v, roas::float, acos::float from analytics.ads_campanhas($1, ${OUT21})`;
+const caSh = await rows(CA, ['shopee']);
+eq('ads_campanhas shopee: investimento por campanha (metricas por anuncio), ROAS e ACOS; conta = sobra', caSh, [
+  { campanha_id: 'k1', nome: 'Shopee 1', i: 82, v: 60, roas: 0.73, acos: 136.67 },
+  { campanha_id: 'k2', nome: 'Shopee 2', i: 20, v: 40, roas: 2, acos: 50 },
+  { campanha_id: 'conta', nome: 'Shopee Ads (conta inteira)', i: 8, v: 40, roas: 5, acos: 20 }]);
+eq('ads_campanhas shopee: soma = cartao (dash_ads_periodo)', r2(caSh.reduce((s, x) => s + x.i, 0)), await adsP('shopee'));
+// Sem sobra (por anuncio cobre a conta): a linha 'conta' some
+await adsCampanhas(18, 0);
+eq('ads_campanhas shopee: sem sobra, sem linha "conta"; soma = cartao', (await rows(CA, ['shopee'])).map((x) => [x.campanha_id, x.i]), [['k1', 82], ['k2', 28]]);
+await adsCampanhas(10, 8);
+// Consolidado: ML como antes + Shopee, sem contar duas vezes
+const caMl = await rows(CA, ['mercadolivre']);
+const caCo = await rows(CA, ['consolidado']);
+eq('ads_campanhas consolidado: soma = cartao (ML + Shopee)', r2(caCo.reduce((s, x) => s + x.i, 0)), r2(adsMl + 110));
+const chave = (x) => JSON.stringify(x);
+eq('ads_campanhas consolidado: linhas = as do ML + as da Shopee (cada uma uma vez)',
+  caCo.map(chave).sort(), [...caMl, ...caSh].map(chave).sort());
+
+// ---------------- Ruido de centavos da Shopee escondido (decisao do dono, rodada final) ----------------
+// Por anuncio 0,01 acima da conta no dia 15 (SH2 18,01, sem linha 'conta'): sobra da Shopee = -0,01.
+await adsCampanhas(18.01, 0);
+const nulaAm = async (c) => (await rows(AM33, [c])).filter((x) => x.modelo === null);
+const amSh01 = await rows(AM33, ['shopee']);
+eq('ruido: ads_modelos shopee sem linha "nao atribuido" (-0,01) e sem investimento negativo',
+  [amSh01.filter((x) => x.modelo === null).length, amSh01.every((x) => x.i >= 0)], [0, true]);
+eq('ruido: ads_campanhas shopee sem linha "conta" nem "nao atribuido"', (await rows(CA, ['shopee'])).map((x) => [x.campanha_id, x.i]), [['k1', 82], ['k2', 28.01]]);
+eq('ruido: consolidado com a linha "nao atribuido" so do ML (tabela por modelo)', await nulaAm('consolidado'), await nulaAm('mercadolivre'));
+eq('ruido: consolidado com as linhas de campanha do ML + as reais da Shopee',
+  (await rows(CA, ['consolidado'])).map(chave).sort(), [...caMl, ...(await rows(CA, ['shopee']))].map(chave).sort());
+await adsCampanhas(10, 8);
+eq('ruido: sobra de 8 continua aparecendo (tabela por modelo e campanhas)',
+  [(await nulaAm('shopee')).map((x) => x.i), (await rows(CA, ['shopee'])).filter((x) => x.campanha_id === 'conta').map((x) => x.i)], [[8], [8]]);
+eq('ruido: consolidado com a sobra de 8 = ML + 8', (await nulaAm('consolidado'))[0].i, r2((await nulaAm('mercadolivre'))[0].i + 8));
+
+// ---------------- Anuncio da Shopee que vendeu dois modelos (2:1): Ads repartido 2:1 ----------------
+await db.exec(`
+insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','SH4','Kit Shopee','HHH88-AZU','active');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, tags, raw) values
+ ('shopee','S7','paid','2026-10-21 10:00-03','2026-10-21 10:05-03',20,array['shopee:COMPLETED'],'{"order_status":"COMPLETED"}'),
+ ('shopee','S8','paid','2026-10-22 10:00-03','2026-10-22 10:05-03',10,array['shopee:COMPLETED'],'{"order_status":"COMPLETED"}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('shopee','S7',1,'SH4','HHH88-AZU','Kit Shopee',2,10), ('shopee','S8',1,'SH4','III99-AZU','Kit Shopee',1,10);`);
+await gravarAds(['2026-10-27'], JSON.stringify([K(MP('SH4', '2026-10-27', 9, 30, 30, 3), 'k2')]), JSON.stringify([{ day: '2026-10-27', cost: 9, raw: {} }]));
+const am21 = await rows(AM33, ['shopee']);
+eq('2:1: SH4 (2 HHH88 e 1 III99 vendidos) reparte R$ 9 em 6 e 3', am21.filter((x) => ['HHH88', 'III99'].includes(x.modelo)).map((x) => [x.modelo, x.i]),
+  [['HHH88', 6], ['III99', 3]]);
+eq('2:1: nenhum investimento negativo; soma da tabela = cartao (119)', [am21.every((x) => x.i >= 0), r2(am21.reduce((s, x) => s + x.i, 0)), await adsP('shopee')],
+  [true, 119, 119]);
+eq('2:1: sugestoes com o mesmo rateio (vendas e unidades por Ads 2:1)',
+  (await rows(SG, ['shopee'])).filter((x) => ['HHH88', 'III99'].includes(x.modelo)).map((x) => [x.modelo, x.i, x.v, x.u]),
+  [['HHH88', 6, 20, 2], ['III99', 3, 10, 1]]);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

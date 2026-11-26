@@ -13,8 +13,12 @@
 --     (date_closed preenchido) = cancelado; cancelado sem pagamento, nao pago e o resto = outro
 --     (fora das vendas brutas e da taxa de cancelamento, decisao 2). A Shopee nao tem 'devolvido'
 --     nem 'dividido': o reembolso de uma devolucao sai da margem pelo escrow (categoria reembolso).
---   * Tarifas = analytics.shopee_fatura (escrow), so de pedido pago (um cancelado pode ter escrow
---     antigo, lido antes do cancelamento, que a sincronizacao nao rele). Colunas do painel:
+--   * Tarifas = analytics.shopee_fatura (escrow) de pedido pago e de pedido cancelado depois de pago
+--     (decisao do dono, rodada 1: o custo do cancelado e perda do periodo; a venda continua fora da
+--     receita). A sincronizacao rele o escrow dos cancelados depois de pagos na janela normal (pedidos
+--     criados nos ultimos 30 dias sao relidos a cada execucao, e precisaEscrow inclui esses cancelados;
+--     o pago mais antigo que vira cancelado e relido pelos pendentes na mesma execucao).
+--     Colunas do painel (mapeamento num lugar so, CTE fat_col):
 --       comissao = comissao + taxa_servico + taxa_transacao
 --       frete    = frete
 --       outras   = cupom_vendedor, campanha, processamento, devolucao, protecao_frete e reembolso
@@ -192,18 +196,27 @@ language sql stable security invoker set search_path = '' as $$
      where oi.channel = 'shopee'
      group by oi.order_id
   ),
-  -- Pedidos pagos que ja tem escrow (qualquer linha, inclusive so o liquido)
+  -- Pedidos pagos ou cancelados depois de pagos que ja tem escrow (qualquer linha, inclusive so o liquido)
   com_escrow as materialized (
     select distinct e.order_id
       from mkt.shopee_escrow e
-     where e.order_id in (select b.order_id from base b where b.classe = 'pago')
+     where e.order_id in (select b.order_id from base b where b.classe in ('pago', 'cancelado'))
+  ),
+  -- UNICO lugar do mapeamento categoria do escrow -> coluna do painel (usado por fat e hist)
+  fat_col as not materialized (
+    select f.order_id, f.categoria, f.valor,
+           case when f.categoria in ('comissao', 'taxa_servico', 'taxa_transacao') then 'comissao'
+                when f.categoria = 'frete' then 'frete'
+                else 'outras'   -- cupom_vendedor, campanha, processamento, devolucao, protecao_frete, reembolso
+           end as coluna
+      from analytics.shopee_fatura f
   ),
   fat as materialized (
     select f.order_id,
-           sum(f.valor) filter (where f.categoria in ('comissao', 'taxa_servico', 'taxa_transacao')) as comissao,
-           sum(f.valor) filter (where f.categoria = 'frete') as frete,
-           sum(f.valor) filter (where f.categoria not in ('comissao', 'taxa_servico', 'taxa_transacao', 'frete')) as outras
-      from analytics.shopee_fatura f
+           sum(f.valor) filter (where f.coluna = 'comissao') as comissao,
+           sum(f.valor) filter (where f.coluna = 'frete') as frete,
+           sum(f.valor) filter (where f.coluna = 'outras') as outras
+      from fat_col f
      where f.order_id in (select e.order_id from com_escrow e)
      group by f.order_id
   ),
@@ -234,11 +247,11 @@ language sql stable security invoker set search_path = '' as $$
              where oi.channel = 'shopee'
              group by oi.order_id) v on v.order_id = o.order_id
       join (select f.order_id,
-                   coalesce(sum(f.valor) filter (where f.categoria in ('comissao', 'taxa_servico', 'taxa_transacao')), 0) as comissao,
-                   coalesce(sum(f.valor) filter (where f.categoria = 'frete'), 0) as frete,
-                   coalesce(sum(f.valor) filter (where f.categoria not in ('comissao', 'taxa_servico', 'taxa_transacao', 'frete',
-                                                                         'devolucao', 'reembolso')), 0) as outras
-              from analytics.shopee_fatura f
+                   coalesce(sum(f.valor) filter (where f.coluna = 'comissao'), 0) as comissao,
+                   coalesce(sum(f.valor) filter (where f.coluna = 'frete'), 0) as frete,
+                   coalesce(sum(f.valor) filter (where f.coluna = 'outras'), 0) as outras
+              from fat_col f
+             where f.categoria not in ('devolucao', 'reembolso')
              group by f.order_id) h on h.order_id = o.order_id
      where o.channel = 'shopee' and o.status = 'paid' and v.valor_venda > 0
        and (select core.has_perm('custos'))
@@ -266,17 +279,14 @@ language sql stable security invoker set search_path = '' as $$
   )
   select p.order_id::text, p.classe::text, p.sale_ts::timestamptz, p.data_venda, p.sku::text, p.sku_anuncio::text,
          p.qtd, p.unidades, p.valor_venda::numeric, p.receita::numeric,
-         case when not v.ve then null when p.classe <> 'pago' then 0
-              when p.estimar then coalesce(es.comissao, 0) else p.comissao end::numeric,
-         case when not v.ve then null when p.classe <> 'pago' then 0
-              when p.estimar then coalesce(es.frete, 0) else p.frete end::numeric,
+         case when not v.ve then null when p.estimar then coalesce(es.comissao, 0) else p.comissao end::numeric,
+         case when not v.ve then null when p.estimar then coalesce(es.frete, 0) else p.frete end::numeric,
          case when v.ve then 0 end::numeric,
          case when v.ve then 0 end::numeric,
          case when v.ve then 0 end::numeric,
          case when v.ve then 0 end::numeric,
          case when v.ve then 0 end::numeric,
-         case when not v.ve then null when p.classe <> 'pago' then 0
-              when p.estimar then coalesce(es.outras, 0) else p.outras end::numeric,
+         case when not v.ve then null when p.estimar then coalesce(es.outras, 0) else p.outras end::numeric,
          case when v.ve then p.custo_produto::numeric end,
          case when v.ve then p.alerta_custo::text end,
          'shopee'::text,
@@ -717,18 +727,13 @@ begin
   if p_canal = 'shopee' then
     return;
   end if;
-  -- Consolidado: as sugestoes sao as do Mercado Livre (unico canal com Ads por produto), com a margem
-  -- e as unidades do proprio ML, como antes da Shopee entrar nas vendas.
-  if p_canal = 'consolidado' then
-    return query select * from analytics.ads_sugestoes('mercadolivre', p_ate);
-    return;
-  end if;
+  -- Daqui em diante p_canal e 'mercadolivre' ou 'consolidado', e os dois dao as sugestoes do Mercado Livre
+  -- (unico canal com Ads por produto), com a margem e as unidades do proprio ML: tudo abaixo e so do ML.
   v_ve := core.has_perm('custos');
 
   return query
   with itens as materialized (
-    -- vendas por item so existem no Mercado Livre: na Shopee nao roda
-    select i.* from analytics.dash_itens(p_canal, v_de, p_ate) i where p_canal <> 'shopee'
+    select i.* from analytics.dash_itens('mercadolivre', v_de, p_ate) i
   ),
   met as materialized (
     select m.channel, m.item_id, m.day, m.campaign_id,
@@ -737,7 +742,7 @@ begin
            coalesce(m.direct_units, 0) + coalesce(m.indirect_units, 0) as un
       from mkt.ads_metrics_daily m
      where m.day between v_de and p_ate
-       and (p_canal = 'consolidado' and m.channel in ('mercadolivre', 'shopee') or m.channel = p_canal)
+       and m.channel = 'mercadolivre'
   ),
   vendas as materialized (
     -- passo 1 de ads_peso_modelo, com o dash_itens desta funcao
@@ -753,7 +758,7 @@ begin
       from vendas v
     union all
     select s.channel, s.item_id, s.modelo, s.peso
-      from analytics.ads_peso_sem_venda(p_canal, v_de, p_ate,
+      from analytics.ads_peso_sem_venda('mercadolivre', v_de, p_ate,
                                         array(select distinct v.channel || ':' || v.item_id from vendas v)) s
   ),
   anuncio as materialized (
@@ -808,15 +813,14 @@ begin
     select coalesce(sum(c.valor), 0) as total,
            coalesce(sum(c.valor) filter (where c.categoria = 'product_ads'), 0) as ads,
            (select coalesce(sum(v.receita), 0) from vm v) as receita
-      from analytics.dash_custos_periodo(p_canal, v_de, p_ate) c
-     where p_canal <> 'shopee'
+      from analytics.dash_custos_periodo('mercadolivre', v_de, p_ate) c
   ),
   fped as materialized (
     -- Product Ads da fatura ligada a pedidos da janela (pela data da venda), como ads_modelos
     select o.order_id, coalesce(o.date_closed, o.date_created) as sale_ts, sum(f.valor) as ads
       from analytics.ml_fatura f
       join mkt.orders o on o.channel = 'mercadolivre' and o.order_id = f.order_id
-     where v_ve and p_canal in ('consolidado', 'mercadolivre')
+     where v_ve
        and f.categoria = 'product_ads'
        and (coalesce(o.date_closed, o.date_created) at time zone 'America/Sao_Paulo')::date between v_de and p_ate
      group by o.order_id, coalesce(o.date_closed, o.date_created)
@@ -839,7 +843,7 @@ begin
   ),
   base as (
     select u.modelo,
-           coalesce(a.canal, case when p_canal = 'shopee' then 'shopee' else 'mercadolivre' end) as canal,
+           coalesce(a.canal, 'mercadolivre') as canal,
            coalesce(a.inv, 0) as inv, coalesce(a.cli, 0) as cli_b, coalesce(a.vend, 0) as vend, coalesce(a.un, 0) as un_b,
            coalesce(d.dias, 0) as dias, coalesce(pa.pausado, false) as pausado,
            coalesce(v.pagas, 0) as pagas, coalesce(v.receita, 0) as receita,
@@ -948,6 +952,8 @@ end $$;
 -- Tabela por modelo: igual a 0019, mas as vendas por modelo (dash_modelos) passam a valer tambem para a
 -- Shopee. O Ads da conta Shopee nao e atribuido a modelo: fica na linha final "nao atribuido"
 -- (investimento do cartao - atribuido), assim a soma da tabela continua = cartao. Shopee sem sugestao.
+-- Consolidado: lucro apos Ads e margem somam os dois canais, mas o ACOS de equilibrio e o do Mercado
+-- Livre (mesma base de ads_sugestoes, decisao do dono na rodada 1).
 -- ---------------------------------------------------------------------
 create or replace function analytics.ads_modelos(p_canal text, p_de date, p_ate date)
 returns table (modelo text, produto text, foto text, investimento numeric, impressoes numeric, cliques numeric,
@@ -1047,6 +1053,16 @@ begin
            coalesce((select sum(c.valor) from analytics.dash_custos_periodo(p_canal, p_de, p_ate) c
                       where c.categoria = 'product_ads'), 0) as ads_cp
   ),
+  -- Consolidado: o ACOS de equilibrio usa a mesma base de ads_sugestoes (so o Mercado Livre), para a
+  -- tabela e o motivo da sugestao mostrarem o mesmo numero. Nos outros canais nao roda.
+  dm_eq as materialized (
+    select * from analytics.dash_modelos('mercadolivre', p_de, p_ate) where p_canal = 'consolidado'
+  ),
+  rt_eq as materialized (
+    select coalesce((select sum(de.receita) from dm_eq de), 0) as receita,
+           coalesce((select sum(c.valor) from analytics.dash_custos_periodo('mercadolivre', p_de, p_ate) c
+                      where p_canal = 'consolidado' and c.categoria = 'product_ads'), 0) as ads_cp
+  ),
   fped as materialized (
     -- Product Ads da fatura ligada a pedidos do periodo (pela data da venda), como dash_pedidos_base
     select o.order_id, coalesce(o.date_closed, o.date_created) as sale_ts, sum(f.valor) as ads
@@ -1093,6 +1109,14 @@ begin
                      + case when rt.receita > 0 then rt.ads_cp * d.receita / rt.receita else 0 end
                      + coalesce(fm.ads, 0)
            end as antes,
+           -- base do ACOS de equilibrio no consolidado (so ML; mesma conta de antes com dm_eq/rt_eq)
+           case when not v_ve or de.modelo is null then null
+                when de.contribuicao is null or coalesce(de.sem_custo, 0) > 0 then null
+                else de.contribuicao
+                     + case when rte.receita > 0 then rte.ads_cp * de.receita / rte.receita else 0 end
+                     + coalesce(fm.ads, 0)
+           end as antes_ml,
+           coalesce(de.receita, 0) as receita_ml,
            case when v_ve and coalesce(d.sem_custo, 0) = 0 then d.contribuicao_pct end as cpct,
            -- mesmo conjunto de anuncios da sugestao (30 dias); sem linha nas sugestoes, os anuncios do periodo
            coalesce(sg.pausado, a.pausado, false) as pausado,
@@ -1110,7 +1134,9 @@ begin
       left join topo tp on tp.modelo = u.modelo
       left join sug sg on sg.modelo = u.modelo
       left join mkt.items it on it.channel = tp.channel and it.item_id = tp.item_id
+      left join dm_eq de on de.modelo = u.modelo
      cross join rt
+     cross join rt_eq rte
   ),
   sem as (
     select coalesce(sum(pm.imp), 0) as imp, coalesce(sum(pm.cli), 0) as cli, coalesce(sum(pm.vend), 0) as vend,
@@ -1132,7 +1158,9 @@ begin
              case when l.cli > 0 then round(l.un / l.cli * 100, 2) end as conversao,
              round(l.vend, 2) as vendas_ads, round(l.un, 2) as unidades_ads,
              case when l.vend > 0 then round(l.inv / l.vend * 100, 2) end as acos,
-             case when l.receita > 0 then round(l.antes / l.receita * 100, 2) end as acos_equilibrio,
+             case when p_canal = 'consolidado' then
+                    case when l.receita_ml > 0 then round(l.antes_ml / l.receita_ml * 100, 2) end
+                  when l.receita > 0 then round(l.antes / l.receita * 100, 2) end as acos_equilibrio,
              round(l.antes - l.inv, 2) as lucro_pos_ads,
              l.cpct as contribuicao_pct,
              case when not l.pausado then l.sug end as sugestao,

@@ -361,7 +361,7 @@ insert into mkt.ads_anuncios (channel, item_id, campaign_id, status) values
 
 // ---------------- Shopee (gravada pelos mesmos caminhos do job) ----------------
 // S1 pago com escrow; S2 TO_RETURN (pago, decisao 1) com reembolso; S3 pago ainda sem escrow (estimado);
-// S4 cancelado depois de pago (com escrow antigo, que nao conta); S5 cancelado sem pagamento (decisao 2); S6 nao pago.
+// S4 cancelado depois de pago com escrow (custo do periodo, sem venda); S5 cancelado sem pagamento (decisao 2); S6 nao pago.
 const pedidoShopee = async (id, status, bruto, criado, pago, sku, qtd, preco) => {
   await db.query(`insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, tags, raw)
     values ('shopee', $1, $2, $3, $4, $5, array['shopee:' || $6::text], jsonb_build_object('order_status', $6::text))`,
@@ -443,6 +443,7 @@ const RES21 = `select pedidos, vendas_brutas::float, unidades, ticket_medio::flo
   margem_contribuicao::float, pedidos_sem_custo, canceladas_valor::float, devolvidas_valor::float, estimados
   from analytics.dash_resumo($1, '2026-10-01', '2026-10-31')`;
 const res21 = async (c) => (await rows(RES21, [c]))[0];
+const r2 = (x) => Math.round(x * 100) / 100;
 const sh = await res21('shopee');
 eq('resumo shopee: vendas (S1..S4; S5 cancelado sem pagamento e S6 nao pago ficam fora)',
   { p: sh.pedidos, vb: sh.vendas_brutas, u: sh.unidades, t: sh.ticket_medio, c: sh.cancelados, d: sh.devolvidos, pct: sh.pct_cancel_devol, r: sh.receita, cv: sh.canceladas_valor },
@@ -459,17 +460,17 @@ eq('resultado mensal shopee: outubro = resumo', (await rows(`select vendas_bruta
 eq('metas: realizado da Shopee em outubro = receita', (await rows(`select realizado::float as r from analytics.dash_metas('shopee', 2026, '2026-10-20') where mes = '2026-10-01'`)), [{ r: 260 }]);
 
 // ---------------- Step 2: margem desconta comissao, taxas e frete do escrow; sem escrow = estimada e marcada ----------------
-eq('resumo shopee: tarifas do escrow + estimativa de S3 (taxas 20%, frete 2%, outras 2,5% da venda)',
+eq('resumo shopee: tarifas do escrow (S1, S2, S4 cancelado) + estimativa de S3 (taxas 20%, frete 2%, outras 2,5% da venda)',
   { com: sh.comissao, fr: sh.frete, out: sh.outras, parc: sh.parcelamento, est: sh.estimados },
-  { com: 52, fr: 5.2, out: 106.5, parc: 0, est: 1 });
+  { com: 60, fr: 5.2, out: 106.5, parc: 0, est: 1 });
 eq('resumo shopee: Ads da conta, custo, imposto e embalagem da Shopee',
   { ads: sh.product_ads, cp: sh.custo_produto, imp: sh.imposto, emb: sh.embalagem, sc: sh.pedidos_sem_custo }, { ads: 40, cp: 34, imp: 26, emb: 3, sc: 0 });
-eq('resumo shopee: margens (contribuicao = 260 - 203,70 - 26 - 3 - 34)', [sh.margem_bruta, sh.margem_contribuicao], [226, -6.7]);
+eq('resumo shopee: margens (contribuicao = 260 - 211,70 - 26 - 3 - 34)', [sh.margem_bruta, sh.margem_contribuicao], [226, -14.7]);
 const B21 = `select order_id, comissao::float as c, frete::float as f, outras::float as o, frete_estimado as e
   from analytics.dash_pedidos_base('2026-10-01', '2026-10-31') where channel = 'shopee' order by order_id`;
-eq('base shopee: tarifas por pedido (S4 cancelado: escrow antigo nao conta; S3 estimado e marcado)', await rows(B21), [
+eq('base shopee: tarifas por pedido (S4 cancelado depois de pago: custo do escrow conta; S3 estimado e marcado)', await rows(B21), [
   { order_id: 'S1', c: 20, f: 4, o: 5, e: false }, { order_id: 'S2', c: 20, f: 0, o: 100, e: false }, { order_id: 'S3', c: 12, f: 1.2, o: 1.5, e: true },
-  { order_id: 'S4', c: 0, f: 0, o: 0, e: false }, { order_id: 'S5', c: 0, f: 0, o: 0, e: false }, { order_id: 'S6', c: 0, f: 0, o: 0, e: false }]);
+  { order_id: 'S4', c: 8, f: 0, o: 0, e: false }, { order_id: 'S5', c: 0, f: 0, o: 0, e: false }, { order_id: 'S6', c: 0, f: 0, o: 0, e: false }]);
 const semEstimar = (await rows(B21)).find((x) => x.order_id === 'S3');
 eq('sem escrow a margem nao sai inflada (tarifa estimada > 0)', semEstimar.c + semEstimar.f + semEstimar.o > 0, true);
 // Escrow chega: a estimativa sai e entram os valores reais
@@ -480,8 +481,24 @@ await db.exec(`delete from mkt.shopee_escrow where order_id = 'S3'`);
 await db.exec(`update mkt.orders set status = 'unpaid' where order_id in ('S1', 'S2')`);
 eq('sem historico de escrow: marcado como estimado', (await rows(B21)).find((x) => x.order_id === 'S3').e, true);
 await db.exec(`update mkt.orders set status = 'paid' where order_id in ('S1', 'S2')`);
+// Janela de 90 dias: so S1 nela (S2 vendido em junho) -> taxa de S1 (20%, 4%, 5%); janela vazia -> todo o historico
+const mover = (ids, d) => db.exec(`update mkt.orders set date_created = '${d} 10:00-03', date_closed = '${d} 10:05-03' where order_id in (${ids.map((x) => `'${x}'`).join(', ')})`);
+await mover(['S2'], '2026-06-01');
+eq('estimativa: janela de 90 dias com S1 usa so S1 (ignora S2 de junho)', (await rows(B21)).find((x) => x.order_id === 'S3'), { order_id: 'S3', c: 12, f: 2.4, o: 3, e: true });
+await mover(['S1'], '2026-06-01');
+eq('estimativa: janela de 90 dias vazia -> todos os pedidos com escrow (S1 + S2 de junho)', (await rows(B21)).find((x) => x.order_id === 'S3'), { order_id: 'S3', c: 12, f: 1.2, o: 1.5, e: true });
+await mover(['S1'], '2026-10-15'); await mover(['S2'], '2026-10-16');
+// Cancelado depois de pago (decisao do dono, rodada 1): custo do escrow e perda do periodo, sem venda
+const antesCanc = await res21('shopee');
+await db.exec(`delete from mkt.shopee_escrow where order_id = 'S4'`);
+const semCanc = await res21('shopee');
+await esc('S4', { comissao: 8, liquido: 32 });
+eq('cancelado depois de pago com escrow: margem cai exatamente o custo (8), sem venda a mais',
+  { m: r2(semCanc.margem_contribuicao - antesCanc.margem_contribuicao), r: antesCanc.receita - semCanc.receita, vb: antesCanc.vendas_brutas - semCanc.vendas_brutas,
+    p: antesCanc.pedidos - semCanc.pedidos, c: r2(antesCanc.comissao - semCanc.comissao) },
+  { m: 8, r: 0, vb: 0, p: 0, c: 8 });
 eq('modelos shopee: contribuicao soma a margem do resumo',
-  Math.round((await rows(`select contribuicao::float as c from analytics.dash_modelos('shopee', ${OUT21})`)).reduce((s, m) => s + m.c, 0) * 100) / 100, -6.7);
+  Math.round((await rows(`select contribuicao::float as c from analytics.dash_modelos('shopee', ${OUT21})`)).reduce((s, m) => s + m.c, 0) * 100) / 100, -14.7);
 eq('modelos shopee: AAA11 e SHP01', (await rows(`select modelo, vendas_brutas::float as v, receita::float as r, custo_produto::float as c from analytics.dash_modelos('shopee', ${OUT21}) order by modelo`)),
   [{ modelo: 'AAA11', v: 100, r: 100, c: 20 }, { modelo: 'SHP01', v: 200, r: 160, c: 14 }]);
 
@@ -491,11 +508,10 @@ const co = await res21('consolidado');
 const SOMA = ['pedidos', 'vendas_brutas', 'unidades', 'cancelados', 'devolvidos', 'receita', 'comissao', 'frete', 'parcelamento', 'product_ads',
   'seguidores', 'estornos', 'difal', 'outras', 'custo_produto', 'imposto', 'embalagem', 'margem_bruta', 'margem_contribuicao',
   'pedidos_sem_custo', 'canceladas_valor', 'devolvidas_valor', 'estimados'];
-const r2 = (x) => Math.round(x * 100) / 100;
 eq('consolidado = ML + Shopee (campo a campo)', SOMA.map((k) => r2(co[k])), SOMA.map((k) => r2(ml[k] + sh[k])));
 eq('consolidado: cada pedido uma vez', await rows(`select count(*)::int as n, count(distinct (channel, order_id))::int as d from analytics.dash_pedidos_base('2026-10-01', '2026-10-31')`),
   [{ n: 12, d: 12 }]);
-eq('consolidado: tarifa da Shopee uma vez (escrow de pedido pago + estimativa)', r2(co.comissao - ml.comissao), 52);
+eq('consolidado: tarifa da Shopee uma vez (escrow de pedido pago e cancelado + estimativa)', r2(co.comissao - ml.comissao), 60);
 eq('consolidado: modelos somam os dois canais (AAA11 = ML + Shopee)',
   (await rows(`select modelo, vendas_brutas::float as v from analytics.dash_modelos('consolidado', ${OUT21}) where modelo = 'AAA11'`))[0].v,
   (await rows(`select vendas_brutas::float as v from analytics.dash_modelos('mercadolivre', ${OUT21}) where modelo = 'AAA11'`))[0].v + 100);
@@ -566,6 +582,15 @@ eq('ads_sugestoes consolidado: so sugestoes do ML', (await rows(`select distinct
 await perfil('comercial');
 eq('comercial (sem custos, com ads): Ads da Shopee visivel', await comoAuth(async () => (await rows(RS, ['shopee']))[0].i), 40);
 await perfil('admin');
+
+// ---------------- Consolidado: ACOS de equilibrio da tabela = o da sugestao (base so ML), rodada 1 ----------------
+const J30 = ['2026-10-02', '2026-10-31']; // periodo = janela de 30 dias da sugestao
+const eqTab = async (c) => (await rows(`select acos_equilibrio::float as e from analytics.ads_modelos($1, $2, $3) where modelo = 'AAA11'`, [c, ...J30]))[0].e;
+const eqSug = (await rows(`select acos_equilibrio_30d::float as e, motivo from analytics.ads_sugestoes('consolidado', '2026-10-31') where modelo = 'AAA11'`))[0];
+const recAAA = async (c) => (await rows(`select receita::float as r from analytics.dash_modelos($1, $2, $3) where modelo = 'AAA11'`, [c, ...J30]))[0].r;
+eq('AAA11 vendido nos dois canais (receita consolidada > a do ML)', (await recAAA('consolidado')) > (await recAAA('mercadolivre')), true);
+eq('consolidado: ACOS de equilibrio da tabela = o da sugestao = o do ML (nao nulo)',
+  [await eqTab('consolidado'), eqSug.e, await eqTab('mercadolivre'), eqSug.e !== null], [eqSug.e, eqSug.e, eqSug.e, true]);
 
 // ---------------- Reaplicar 0009/0019 desfaz; reaplicar a 0021 depois refaz ----------------
 await db.exec(mig('0009_dashboard_funcoes.sql'));

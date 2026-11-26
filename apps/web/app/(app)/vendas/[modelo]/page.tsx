@@ -1,9 +1,10 @@
 import Link from 'next/link';
-import { ErroDados } from '@/components/cartao-indicador';
+import { AvisoDados, ErroDados } from '@/components/cartao-indicador';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { FotoProduto } from '@/components/foto-produto';
 import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
+import { atualizadoEmCanal, avisoSemDadosShopee, rotuloLinkAnuncio } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
 import { getPermissoes, exigirPermissao } from '@/lib/permissoes';
@@ -20,19 +21,21 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
   const { canal, chave, periodo } = lerFiltros(sp, hojeBrasilia());
   const verCustos = perms.has('custos');
 
-  let skus, pedidos, sinc, modelos;
+  let skus, pedidos, sinc, modelos, shopee;
   try {
-    [skus, pedidos, sinc, modelos] = await Promise.all([
+    sinc = await dash.sincronizacoes();
+    [skus, pedidos, modelos, shopee] = await Promise.all([
       dash.skus(canal, periodo.de, periodo.ate, modelo),
       dash.pedidos(canal, periodo.de, periodo.ate, modelo),
-      dash.sincronizacoes(),
       dash.modelos(canal, periodo.de, periodo.ate),
+      dash.contextoShopee(sinc),
     ]);
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">{modelo}</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
 
   const info = modelos.find((m) => m.modelo === modelo);
+  const aviso = avisoSemDadosShopee(canal, periodo, shopee.cob);
 
   const colSkus: Coluna<dash.LinhaSku>[] = [
     { chave: 'sku', titulo: 'SKU', tipo: 'texto' },
@@ -71,12 +74,14 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
           {info?.produto && <p className="text-sm text-muted">{info.produto}</p>}
           {info?.link && (
             <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-accent hover:underline">
-              Ver anúncio no Mercado Livre ↗
+              {rotuloLinkAnuncio(info.link)}
             </a>
           )}
         </div>
       </div>
-      <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={sinc.mercadolivre?.ultimoSucesso ?? null} />
+      <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={shopee.ativa}
+        atualizadoEm={atualizadoEmCanal(canal, sinc, shopee.ativa)} />
+      {aviso && <AvisoDados texto={aviso.texto} />}
       <section>
         <TabelaDados colunas={colSkus} linhas={skus} nomeArquivo={`${modelo}_skus_${periodo.de}_${periodo.ate}`} vazio="Sem vendas deste modelo no período."
           titulo="Por SKU" />

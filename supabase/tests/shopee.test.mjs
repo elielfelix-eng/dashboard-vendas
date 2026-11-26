@@ -903,5 +903,82 @@ eq('crescimento_canal: search_path vazio e sem execucao para anon', await rows(`
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'analytics' and p.proname = 'crescimento_canal'`),
   [{ c: 'search_path=""', anon: false }]);
 
+// =====================================================================
+// 0034: nome da linha 'conta' da Shopee = "Shopee Ads (sobra da conta)" (Tarefa 7). Mesmo banco.
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee,crm');
+await db.exec(mig('0034_shopee_conta_sobra.sql'));
+await db.exec(mig('0034_shopee_conta_sobra.sql')); // reexecutavel
+console.log('0034 aplicada (2x)');
+eq('0034: pseudo-campanha da Shopee renomeada', await rows(`select name from mkt.ads_campaigns where channel = 'shopee' and campaign_id = 'conta'`),
+  [{ name: 'Shopee Ads (sobra da conta)' }]);
+eq('0034: ads_campanhas mostra a sobra com o nome novo', (await rows(CA, ['shopee'])).filter((x) => x.campanha_id === 'conta').map((x) => [x.nome, x.i]),
+  [['Shopee Ads (sobra da conta)', 8]]);
+eq('0034: nenhuma campanha do Mercado Livre muda de nome', await val(`select count(*)::int from mkt.ads_campaigns where name like 'Shopee Ads%' and channel <> 'shopee'`), 0);
+// Reaplicar a 0032 (on conflict do nothing) nao volta o nome antigo
+await db.exec(mig('0032_shopee_ads.sql'));
+eq('0034: reaplicar a 0032 mantem o nome novo', await val(`select name from mkt.ads_campaigns where channel = 'shopee' and campaign_id = 'conta'`), 'Shopee Ads (sobra da conta)');
+
+// =====================================================================
+// 0035: foto e link dos anuncios da Shopee nas tabelas por modelo e por SKU (Tarefa 7). Mesmo banco.
+// O Mercado Livre e conferido antes e depois (nada do ML pode mudar).
+// =====================================================================
+const FL = {
+  modelos: (c) => rows(`select modelo, foto, link from analytics.dash_modelos($1, ${OUT21}) order by modelo nulls last`, [c]),
+  skus: (c) => rows(`select sku, foto, link from analytics.dash_skus($1, ${OUT21}, null) order by sku nulls last`, [c]),
+  tudo: (c) => rows(`select * from analytics.dash_modelos($1, ${OUT21}) order by modelo nulls last`, [c]),
+  tudoSku: (c) => rows(`select * from analytics.dash_skus($1, ${OUT21}, null) order by sku nulls last`, [c]),
+  ads: (c) => rows(`select modelo, foto from analytics.ads_modelos($1, ${OUT21}) order by modelo nulls last`, [c]),
+};
+// Anuncios da Shopee com miniatura e link (colunas thumbnail/permalink, como grava a sincronizacao)
+await db.exec(`
+insert into mkt.items (channel, item_id, title, status)
+select distinct 'shopee', oi.item_id, 'Anuncio Shopee', 'active' from mkt.order_items oi
+ where oi.channel = 'shopee' and oi.item_id is not null
+on conflict (channel, item_id) do nothing;
+update mkt.items set thumbnail = 'https://cf.shopee.com.br/file/' || item_id, permalink = 'https://shopee.com.br/product/9/' || item_id
+ where channel = 'shopee';`);
+// Anuncios do ML com foto (pictures e miniatura) e link, para o retrato do ML ter o que comparar
+await db.exec(`
+insert into mkt.items (channel, item_id, title, status)
+select distinct 'mercadolivre', oi.item_id, 'Anuncio ML', 'active' from mkt.order_items oi
+ where oi.channel = 'mercadolivre' and oi.item_id is not null
+on conflict (channel, item_id) do nothing;
+update mkt.items set thumbnail = 'http://http2.mlstatic.com/' || item_id || '-I.jpg', permalink = 'https://produto.mercadolivre.com.br/' || item_id,
+       raw = coalesce(raw, '{}'::jsonb) || jsonb_build_object('pictures', jsonb_build_array(jsonb_build_object('id', 'F1', 'secure_url', 'https://http2.mlstatic.com/' || item_id || '-O.jpg')))
+ where channel = 'mercadolivre' and item_id <> 'MLB1';`);
+const antes35 = { m: await FL.tudo('mercadolivre'), s: await FL.tudoSku('mercadolivre'), a: await FL.ads('mercadolivre') };
+eq('retrato do ML com foto e link (pictures) e um anuncio so com miniatura nula',
+  [antes35.m.some((x) => /-O\.jpg$/.test(x.foto ?? '') && /mercadolivre/.test(x.link ?? '')), antes35.m.length > 1], [true, true]);
+const antesSh = await FL.modelos('shopee');
+eq('antes da 0035: a Shopee vem sem foto e sem link', antesSh.some((x) => x.foto || x.link), false);
+await db.exec(mig('0035_shopee_foto_link.sql'));
+await db.exec(mig('0035_shopee_foto_link.sql')); // reexecutavel
+console.log('0035 aplicada (2x)');
+eq('0035: Mercado Livre igual antes/depois (dash_modelos)', await FL.tudo('mercadolivre'), antes35.m);
+eq('0035: Mercado Livre igual antes/depois (dash_skus)', await FL.tudoSku('mercadolivre'), antes35.s);
+eq('0035: Mercado Livre igual antes/depois (ads_modelos)', await FL.ads('mercadolivre'), antes35.a);
+const shM = (await FL.modelos('shopee')).filter((x) => x.modelo != null);
+eq('0035: modelos da Shopee com a foto e o link do anuncio da Shopee',
+  [shM.length > 0, shM.every((x) => /^https:\/\/cf\.shopee\.com\.br\/file\//.test(x.foto ?? '') && /^https:\/\/shopee\.com\.br\/product\/9\//.test(x.link ?? ''))],
+  [true, true]);
+const shS = (await FL.skus('shopee')).filter((x) => x.sku != null);
+eq('0035: SKUs da Shopee com foto e link', [shS.length > 0, shS.every((x) => x.foto && x.link)], [true, true]);
+eq('0035: foto do anuncio da Shopee em ads_modelos (Ads por modelo)',
+  (await FL.ads('shopee')).filter((x) => x.modelo != null).every((x) => x.foto == null || /shopee/.test(x.foto)), true);
+// Consolidado: linhas so do ML continuam com a foto do ML
+const coM = await FL.modelos('consolidado');
+const mlM = await FL.modelos('mercadolivre');
+const soMl = mlM.filter((x) => !shM.some((y) => y.modelo === x.modelo));
+eq('0035: consolidado com a foto do ML nos modelos so do ML',
+  soMl.map((x) => [x.modelo, x.foto, x.link]), coM.filter((x) => soMl.some((y) => y.modelo === x.modelo)).map((x) => [x.modelo, x.foto, x.link]));
+// Sem miniatura nem link na Shopee: continua nulo (sem quebrar)
+await db.exec(`update mkt.items set thumbnail = null, permalink = null where channel = 'shopee'`);
+eq('0035: anuncio da Shopee sem miniatura nem link fica vazio', (await FL.modelos('shopee')).some((x) => x.foto || x.link), false);
+eq('0035: search_path vazio nas funcoes recriadas', await rows(`select p.proname, array_to_string(p.proconfig, ',') as c from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'analytics' and p.proname in ('foto_anuncio', 'link_anuncio', 'dash_modelos', 'dash_skus') order by p.proname`),
+  [{ proname: 'dash_modelos', c: 'search_path=""' }, { proname: 'dash_skus', c: 'search_path=""' },
+    { proname: 'foto_anuncio', c: 'search_path=""' }, { proname: 'link_anuncio', c: 'search_path=""' }]);
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

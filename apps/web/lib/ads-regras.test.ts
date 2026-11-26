@@ -186,3 +186,44 @@ test('urlRetornoOrcamento: valores invalidos nao entram', () => {
 test('rotulo da linha sem campanha', () => {
   assert.equal(ROTULO_SEM_CAMPANHA, 'não atribuído a campanha');
 });
+
+// ---- Tarefa 7: textos com o canal certo e ruido de centavos da Shopee ----
+import { ocultarRuidoNaoAtribuido } from './ads-regras.ts';
+
+test('avisoFalhaAds: Mercado Livre continua citando o Mercado Livre', () => {
+  assert.match(avisoFalhaAds({ ads_campaign_days: -1 })!, /do Mercado Livre\./);
+  assert.match(avisoFalhaAds({ ads_campaign_days: -1 }, 'mercadolivre')!, /do Mercado Livre\./);
+});
+
+test('avisoFalhaAds: Shopee cita a Shopee (conta, por anuncio e campanhas)', () => {
+  assert.equal(avisoFalhaAds({ itens: 10 }, 'shopee'), null);
+  const conta = avisoFalhaAds({ ads_conta: -1 }, 'shopee')!;
+  assert.match(conta, /o investimento da conta da Shopee\./);
+  assert.match(conta, /podem estar incompletos/);
+  assert.doesNotMatch(conta, /Mercado Livre/);
+  assert.match(avisoFalhaAds({ ads_produto_indisponivel: 1 }, 'shopee')!, /as métricas por anúncio da Shopee/);
+  assert.match(avisoFalhaAds({ erro_ads_campanhas: 1 }, 'shopee')!, /as campanhas da Shopee\. O status de pausa e as campanhas/);
+  // as chaves do ML nao valem para a Shopee
+  assert.equal(avisoFalhaAds({ ads_campaign_days: -1 }, 'shopee'), null);
+});
+
+test('avisoSemDetalhe: texto do canal (ML igual ao de antes)', () => {
+  assert.equal(avisoSemDetalhe(false, 'mercadolivre'), AVISO_SEM_DETALHE);
+  assert.equal(avisoSemDetalhe(false, 'shopee'), 'sem detalhe por anúncio neste período (o painel busca o Ads por anúncio da Shopee dos últimos 90 dias)');
+  assert.equal(avisoSemDetalhe(false, 'consolidado'), 'sem detalhe por anúncio neste período (o Mercado Livre e a Shopee guardam o Ads por anúncio de cerca de 90 dias)');
+  assert.equal(avisoSemDetalhe(true, 'shopee'), null);
+});
+
+test('ruido de centavos: Shopee e consolidado escondem nao atribuido < R$ 0,05 ou negativo; ML nao muda', () => {
+  const l = (investimento: number, vendas_ads = 0) => ({ investimento, vendas_ads, outro: 'x' });
+  assert.equal(ocultarRuidoNaoAtribuido('shopee', l(-0.01)), null);
+  assert.equal(ocultarRuidoNaoAtribuido('shopee', l(0.04)), null);
+  assert.equal(ocultarRuidoNaoAtribuido('consolidado', l(0.03, 0.02)), null);
+  assert.deepEqual(ocultarRuidoNaoAtribuido('shopee', l(0.05)), l(0.05));
+  assert.deepEqual(ocultarRuidoNaoAtribuido('shopee', l(8, 40)), l(8, 40));
+  // investimento negativo nunca aparece; com vendas de verdade a linha fica, com investimento 0
+  assert.deepEqual(ocultarRuidoNaoAtribuido('shopee', l(-0.5, 10)), l(0, 10));
+  // Mercado Livre: exatamente como antes
+  assert.deepEqual(ocultarRuidoNaoAtribuido('mercadolivre', l(-0.01)), l(-0.01));
+  assert.deepEqual(ocultarRuidoNaoAtribuido('mercadolivre', l(0.01)), l(0.01));
+});

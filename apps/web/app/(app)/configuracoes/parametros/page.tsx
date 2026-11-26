@@ -14,7 +14,9 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 const CANAL: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee' };
 
 export default async function ParametrosPage({ searchParams }: { searchParams: SP }) {
-  await exigirPermissao('configuracoes');
+  const perms = await exigirPermissao('configuracoes');
+  // Os percentuais de crescimento só são lidos com a permissão 'vendas' (RLS da 0022).
+  const verCrescimento = perms.has('vendas');
   const { profile } = await requireUser();
   const ehAdmin = profile?.role === 'admin';
   const sp = await searchParams;
@@ -192,7 +194,13 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
         percentual em algum comparativo ou a margem fica negativa. Cada período usa a vigência mais recente com data igual ou anterior
         ao último dia analisado.{!ehAdmin && ' Só o administrador pode alterar.'}
       </p>
-      {['mercadolivre', 'shopee'].map((canal) => {
+      {!verCrescimento && (
+        <p className="mb-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">
+          Os percentuais de crescimento aparecem só para perfis com a permissão Vendas. Peça ao administrador para liberar,
+          se precisar ver ou conferir estes números.
+        </p>
+      )}
+      {verCrescimento && ['mercadolivre', 'shopee'].map((canal) => {
         const hist = crescimento.filter((l) => l.channel === canal);
         return (
           <div key={canal} className="mb-4 overflow-x-auto rounded-xl border border-border bg-surface">
@@ -229,7 +237,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
         );
       })}
 
-      {ehAdmin && ['mercadolivre', 'shopee'].map((canal) => {
+      {ehAdmin && verCrescimento && ['mercadolivre', 'shopee'].map((canal) => {
         const base = crescimento.find((l) => l.channel === canal && String(l.vigente_desde) <= hoje);
         return (
           <form key={canal} action={salvarParametrosCrescimento} className="mt-6 grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">

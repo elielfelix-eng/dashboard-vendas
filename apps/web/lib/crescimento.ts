@@ -41,11 +41,16 @@ const truncar = (v: number, casas: number) => {
   return Math.trunc(Math.round(Math.abs(v) * 1e6) / (1e6 / f)) / f;
 };
 const decimal = (v: number, casas: number) => v.toFixed(casas).replace('.', ',');
-const fmtVariacao = (v: number) => `${v < 0 ? '-' : '+'}${decimal(truncar(v, 1), 1)}%`;
+// Zero depois de truncar aparece como "0,0%", sem sinal (nunca "-0,0%" nem "+0,0%").
+const fmtVariacao = (v: number) => {
+  const t = truncar(v, 1);
+  return t === 0 ? '0,0%' : `${v < 0 ? '-' : '+'}${decimal(t, 1)}%`;
+};
 const fmtMargem = (v: number) => {
   const t = truncar(v, 1);
   const casas = t === 0 && v !== 0 ? 2 : 1;
-  return `${v < 0 ? '-' : ''}${decimal(truncar(v, casas), casas)}%`;
+  const t2 = truncar(v, casas);
+  return t2 === 0 ? '0,0%' : `${v < 0 ? '-' : ''}${decimal(t2, casas)}%`;
 };
 
 export function sugestaoCrescimento(dados: DadosCrescimento, parametros: ParametrosCrescimento): { sugestao: Sugestao; motivo: string } {
@@ -89,6 +94,34 @@ export function sugestaoParaTela(dados: DadosCrescimento, parametros: Parametros
   if (!verCustos || !parametros) return null;
   return sugestaoCrescimento(dados, parametros);
 }
+
+// ---------------------------------------------------------------------
+// Aba Canais do Comparativo (Tarefa 7): rotulo, tom e numeros na tela
+// ---------------------------------------------------------------------
+/** Tom da etiqueta: bom = verde, ruim = vermelho, neutro = cinza claro, cinza = contorno tracejado (sem base). */
+export type TomSugestaoCanal = 'bom' | 'ruim' | 'neutro' | 'cinza';
+
+const ROTULOS_CANAL: Record<Sugestao, string> = {
+  investir_mais: 'Investir mais', reduzir: 'Reduzir', manter: 'Manter', sem_historico: 'Sem histórico',
+};
+const TONS_CANAL: Record<Sugestao, TomSugestaoCanal> = {
+  investir_mais: 'bom', reduzir: 'ruim', manter: 'neutro', sem_historico: 'cinza',
+};
+export const rotuloSugestaoCanal = (s: Sugestao) => ROTULOS_CANAL[s];
+export const tomSugestaoCanal = (s: Sugestao) => TONS_CANAL[s];
+
+/** Crescimento das vendas para a tela ({valor, rotulo}, como `variacao`): "+12,4%", "0,0%" ou "sem dado" sem base. */
+export function textoCrescimento(atual: number | null, referencia: number | null): { valor: number | null; rotulo: string } {
+  const v = variacaoVendas(atual, referencia);
+  return v == null ? { valor: null, rotulo: 'sem dado' } : { valor: v, rotulo: fmtVariacao(v) };
+}
+
+/** Margem depois do Ads (% da receita) com uma casa truncada; traço quando nula (sem custos ou sem receita). */
+export const textoMargem = (v: number | null) => {
+  if (v == null) return '—';
+  const t = truncar(v, 1);
+  return t === 0 ? '0,0%' : `${v < 0 ? '-' : ''}${decimal(t, 1)}%`;
+};
 
 // ---------------------------------------------------------------------
 // Parametros editaveis (tela de Parametros, so o administrador)

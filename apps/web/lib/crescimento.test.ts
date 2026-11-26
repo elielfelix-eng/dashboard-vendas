@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sugestaoCrescimento, sugestaoParaTela, validarParametrosCrescimento, PARAMETROS_CRESCIMENTO_PADRAO,
+  rotuloSugestaoCanal, tomSugestaoCanal, textoCrescimento, textoMargem,
   type DadosCrescimento,
 } from './crescimento.ts';
 
@@ -105,7 +106,15 @@ test('motivo com os numeros que dispararam a sugestao', () => {
 test('motivo nunca mostra 10,0% para 9,99% (o numero nao cruza o limite)', () => {
   assert.match(sugestaoCrescimento(d({ vendas_atual: 1099.9, vendas_ano_passado: 1000 }), P).motivo, /\+9,9% sobre o período anterior/);
   assert.match(sugestaoCrescimento(d({ vendas_atual: 900.1, vendas_ano_passado: 1000 }), P).motivo, /-9,9% sobre o período anterior/);
-  assert.match(sugestaoCrescimento(d({ margem_pos_ads_atual: -0.004 }), P).motivo, /margem depois do Ads de -0,00%/);
+  assert.match(sugestaoCrescimento(d({ margem_pos_ads_atual: -0.03 }), P).motivo, /margem depois do Ads de -0,03%/);
+});
+
+test('zero truncado aparece como 0,0%, sem sinal (nunca -0,0% nem -0,00%)', () => {
+  assert.match(sugestaoCrescimento(d({ margem_pos_ads_atual: -0.004 }), P).motivo, /margem depois do Ads de 0,0%/);
+  assert.doesNotMatch(sugestaoCrescimento(d({ margem_pos_ads_atual: -0.004 }), P).motivo, /-0,0/);
+  // -0,01% sobre o periodo anterior e 0% sobre o ano passado
+  const r = sugestaoCrescimento(d({ vendas_atual: 999.9, vendas_anterior: 1000, vendas_ano_passado: 999.9 }), P).motivo;
+  assert.match(r, /^Vendas 0,0% sobre o período anterior e 0,0% sobre o ano passado/);
 });
 
 test('sem margem (sem custos): o motivo nao fala de margem', () => {
@@ -119,6 +128,31 @@ test('tela: sem custos, sem sugestao e sem motivo; com custos, igual a sugestaoC
   assert.equal(sugestaoParaTela(d(), P, false), null);
   assert.deepEqual(sugestaoParaTela(d(), P, true), sugestaoCrescimento(d(), P));
   assert.equal(sugestaoParaTela(d(), null, true), null); // sem parametros vigentes
+});
+
+// ---------------- Tarefa 7, Step 1: rotulo e tom de cada sugestao na aba Canais ----------------
+test('rotulo e tom: investir_mais verde, reduzir vermelho, manter neutro, sem_historico cinza', () => {
+  assert.deepEqual(
+    (['investir_mais', 'reduzir', 'manter', 'sem_historico'] as const).map((s) => [s, rotuloSugestaoCanal(s), tomSugestaoCanal(s)]),
+    [['investir_mais', 'Investir mais', 'bom'], ['reduzir', 'Reduzir', 'ruim'], ['manter', 'Manter', 'neutro'],
+      ['sem_historico', 'Sem histórico', 'cinza']]);
+});
+
+test('crescimento na tela: sinal, uma casa truncada, 0,0% sem sinal e "sem dado" sem base', () => {
+  assert.deepEqual(textoCrescimento(1124, 1000), { valor: 12.4, rotulo: '+12,4%' });
+  assert.deepEqual(textoCrescimento(850, 1000), { valor: -15, rotulo: '-15,0%' });
+  assert.deepEqual(textoCrescimento(1099.9, 1000), { valor: 9.99, rotulo: '+9,9%' });
+  assert.equal(textoCrescimento(999.9, 1000).rotulo, '0,0%');
+  assert.equal(textoCrescimento(1000, 1000).rotulo, '0,0%');
+  assert.deepEqual(textoCrescimento(500, 0), { valor: null, rotulo: 'sem dado' });
+  assert.deepEqual(textoCrescimento(500, null), { valor: null, rotulo: 'sem dado' });
+});
+
+test('margem na tela: uma casa, 0,0% sem sinal, traco sem custos', () => {
+  assert.equal(textoMargem(8.25), '8,2%');
+  assert.equal(textoMargem(-3.25), '-3,2%');
+  assert.equal(textoMargem(-0.004), '0,0%');
+  assert.equal(textoMargem(null), '—');
 });
 
 // ---------------- Parametros (tela de Parametros) ----------------

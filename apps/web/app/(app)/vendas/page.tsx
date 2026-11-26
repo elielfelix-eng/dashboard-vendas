@@ -1,9 +1,10 @@
-import { CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
+import { AvisoDados, CartaoIndicador, ErroDados, SemDados } from '@/components/cartao-indicador';
 import { GradeArrastavel } from '@/components/grade-arrastavel';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { lerGrao, queryFiltros, SeletorGrao } from '@/components/seletor-grao';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
+import { atualizadoEmCanal, avisoSemDadosShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, num, pct, variacao } from '@/lib/formato';
 import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -38,20 +39,22 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
 
   let d;
   try {
-    const [atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc] = await Promise.all([
+    const sinc = await dash.sincronizacoes();
+    const [atual, anterior, sAtual, sAnterior, mAtual, mAnterior, shopee] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
       dash.serie(canal, periodo.de, periodo.ate, grao),
       dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, grao),
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.modelos(canal, periodo.anteriorDe, periodo.anteriorAte),
-      dash.sincronizacoes(),
+      dash.contextoShopee(sinc),
     ]);
-    d = { atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc };
+    d = { atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc, shopee };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Vendas</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
   const { atual: a, anterior: p } = d;
+  const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
   const anteriorPorModelo = new Map(d.mAnterior.map((m) => [m.modelo, m.vendas_brutas]));
   const linhas: LinhaVendas[] = d.mAtual
     .filter((m) => m.pedidos > 0)
@@ -68,12 +71,16 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
   return (
     <div className="mx-auto max-w-6xl">
       <h1 className="mb-4 text-2xl font-semibold">Vendas</h1>
-      <FiltroTopo canal={canal} chave={chave} periodo={periodo} atualizadoEm={d.sinc.mercadolivre?.ultimoSucesso ?? null} />
-      {a.pedidos === 0 ? <SemDados /> : (
+      <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
+        atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
+      {aviso && !aviso.semDados && <AvisoDados texto={aviso.texto} />}
+      {aviso?.semDados ? <SemDados texto={aviso.texto} /> : a.pedidos === 0 ? <SemDados /> : (
         <>
           <p className="mb-3 text-xs text-muted">
-            Como nas Métricas do Mercado Livre: vendas brutas e quantidade de vendas incluem as canceladas e as devolvidas;
-            pedidos cancelados porque o carrinho foi dividido não contam. Vendas líquidas são só os pedidos pagos.
+            {canal !== 'shopee' && <>{canal === 'consolidado' ? 'Mercado Livre, como' : 'Como'} nas Métricas do Mercado Livre: vendas brutas e quantidade de vendas incluem as canceladas e as devolvidas;
+            pedidos cancelados porque o carrinho foi dividido não contam. </>}
+            {canal !== 'mercadolivre' && <>Shopee: vendas brutas incluem os pedidos pagos e os cancelados depois do pagamento; cancelados sem pagamento não contam. </>}
+            Vendas líquidas são só os pedidos pagos.
           </p>
           <GradeArrastavel id="vendas" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" itens={[
             { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)} /> },

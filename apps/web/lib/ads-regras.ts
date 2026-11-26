@@ -17,30 +17,59 @@ export const percentual = pct;
 /** Nome do modelo; a linha sem modelo é o que o cartão tem a mais que a tabela. */
 export const rotuloModelo = (modelo: string | null | undefined) => (modelo ? modelo : ROTULO_NAO_ATRIBUIDO);
 
-/** Aviso quando o período não tem dados por anúncio; nulo se tem. */
-export const avisoSemDetalhe = (temDetalhe: boolean) => (temDetalhe ? null : AVISO_SEM_DETALHE);
+const SEM_DETALHE: Record<string, string> = {
+  mercadolivre: AVISO_SEM_DETALHE,
+  shopee: 'sem detalhe por anúncio neste período (o painel busca o Ads por anúncio da Shopee dos últimos 90 dias)',
+  consolidado: 'sem detalhe por anúncio neste período (o Mercado Livre e a Shopee guardam o Ads por anúncio de cerca de 90 dias)',
+};
+
+/** Aviso quando o período não tem dados por anúncio; nulo se tem. O texto cita o canal. */
+export const avisoSemDetalhe = (temDetalhe: boolean, canal: 'consolidado' | 'mercadolivre' | 'shopee' = 'mercadolivre') =>
+  (temDetalhe ? null : SEM_DETALHE[canal]);
 
 const juntar = (xs: string[]) => (xs.length <= 1 ? xs.join('') : `${xs.slice(0, -1).join(', ')} e ${xs[xs.length - 1]}`);
 
 /**
- * Aviso quando a última sincronização do Mercado Livre falhou em alguma parte do Ads
- * (stats de core.sync_runs, jobs/src/sync-mercadolivre.ts): ads_campaign_days / ads_items = -1
- * (investimento e métricas incompletos) e erro_ads_campanhas / erro_ads_anuncios (cadastro e pausa).
+ * Aviso quando a última sincronização do canal falhou em alguma parte do Ads (stats de core.sync_runs).
+ * Mercado Livre (jobs/src/sync-mercadolivre.ts): ads_campaign_days / ads_items = -1 (investimento e métricas
+ * incompletos) e erro_ads_campanhas / erro_ads_anuncios (cadastro e pausa).
+ * Shopee (jobs/src/sync-shopee.ts, etapaAdsShopee): ads_conta = -1 (investimento da conta), ads_produto_indisponivel
+ * (métricas por anúncio) e erro_ads_campanhas (cadastro das campanhas).
  * Nulo se nada falhou.
  */
-export function avisoFalhaAds(stats: Record<string, unknown> | null | undefined): string | null {
+export function avisoFalhaAds(stats: Record<string, unknown> | null | undefined, canal: 'mercadolivre' | 'shopee' = 'mercadolivre'): string | null {
   if (!stats) return null;
   const dados: string[] = [];
-  if (Number(stats.ads_campaign_days) === -1) dados.push('o investimento por campanha');
-  if (Number(stats.ads_items) === -1) dados.push('as métricas por anúncio');
   const cadastro: string[] = [];
-  if (stats.erro_ads_campanhas) cadastro.push('as campanhas');
-  if (stats.erro_ads_anuncios) cadastro.push('o status dos anúncios');
+  if (canal === 'shopee') {
+    if (Number(stats.ads_conta) === -1) dados.push('o investimento da conta');
+    if (stats.ads_produto_indisponivel) dados.push('as métricas por anúncio');
+    if (stats.erro_ads_campanhas) cadastro.push('as campanhas');
+  } else {
+    if (Number(stats.ads_campaign_days) === -1) dados.push('o investimento por campanha');
+    if (Number(stats.ads_items) === -1) dados.push('as métricas por anúncio');
+    if (stats.erro_ads_campanhas) cadastro.push('as campanhas');
+    if (stats.erro_ads_anuncios) cadastro.push('o status dos anúncios');
+  }
   if (!dados.length && !cadastro.length) return null;
   const efeito = dados.length
     ? 'Os números de Ads dos últimos dias podem estar incompletos'
     : 'O status de pausa e as campanhas podem estar desatualizados';
-  return `A última atualização não conseguiu buscar ${juntar([...dados, ...cadastro])} do Mercado Livre. ${efeito}; a próxima atualização tenta de novo.`;
+  const nome = canal === 'shopee' ? 'da Shopee' : 'do Mercado Livre';
+  return `A última atualização não conseguiu buscar ${juntar([...dados, ...cadastro])} ${nome}. ${efeito}; a próxima atualização tenta de novo.`;
+}
+
+/**
+ * Ruído de centavos da Shopee (decisão do dono, 26/11): na Shopee e no consolidado, a linha "não atribuído"
+ * some quando o investimento fica abaixo de R$ 0,05 (inclusive negativo) e as vendas também; investimento
+ * negativo nunca aparece (vira 0). No Mercado Livre a linha volta exatamente como veio.
+ */
+export function ocultarRuidoNaoAtribuido<T extends { investimento: number; vendas_ads: number }>(
+  canal: 'consolidado' | 'mercadolivre' | 'shopee', linha: T,
+): T | null {
+  if (canal === 'mercadolivre') return linha;
+  if (linha.investimento < 0.05 && Math.abs(linha.vendas_ads) < 0.05) return null;
+  return linha.investimento < 0 ? { ...linha, investimento: 0 } : linha;
 }
 
 const CANAIS_URL = new Set(['consolidado', 'mercadolivre', 'shopee']);

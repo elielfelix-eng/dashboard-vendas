@@ -25,10 +25,11 @@ interface Props<T extends object> {
 }
 // Convenções das linhas: `href` vira link na primeira coluna; `ruim: true` pinta a linha de vermelho; `destaque: true` deixa em cinza e itálico (linhas de referência).
 
-export interface CelulaSugestao { rotulo: string; tom: 'ruim' | 'alerta' | 'bom' | 'info' | 'neutro'; motivo: string | null; pausado: boolean; valor: number }
+export interface CelulaSugestao { rotulo: string; tom: 'ruim' | 'alerta' | 'bom' | 'info' | 'neutro' | 'cinza'; motivo: string | null; pausado: boolean; valor: number }
 const TOM_CLASSE: Record<CelulaSugestao['tom'], string> = {
   ruim: 'bg-bad/15 text-bad', alerta: 'bg-amber-500/15 text-amber-700 dark:text-amber-400', bom: 'bg-good/15 text-good',
   info: 'bg-blue-500/15 text-blue-700 dark:text-blue-400', neutro: 'bg-border text-muted',
+  cinza: 'border border-dashed border-border text-muted',
 };
 
 function CelulaSugestaoView({ v }: { v: CelulaSugestao | null }) {

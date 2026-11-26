@@ -16,7 +16,7 @@ interface Props {
   periodo: Periodo;
   atualizadoEm: string | null;
   mostrarCanal?: boolean;
-  /** Habilita o botão da Shopee (telas que já tratam o canal sem dados). */
+  /** Habilita o botão da Shopee: loja conectada e com ao menos uma sincronização bem-sucedida (dash.contextoShopee). */
   shopeeAtiva?: boolean;
   children?: React.ReactNode;
 }
@@ -51,11 +51,11 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
                 key={c.chave}
                 type="button"
                 disabled={!c.ativo}
-                title={c.ativo ? undefined : 'Em breve'}
+                title={c.ativo ? undefined : 'A Shopee ainda não tem dados sincronizados no painel'}
                 onClick={() => ir({ canal: c.chave })}
                 className={`px-3 py-1.5 ${canal === c.chave ? 'bg-accent text-white' : 'hover:bg-accent-soft'} disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent`}
               >
-                {c.rotulo}{!c.ativo && <span className="ml-1 text-[10px]">em breve</span>}
+                {c.rotulo}{!c.ativo && <span className="ml-1 text-[10px]">sem dados</span>}
               </button>
             ); })}
           </div>

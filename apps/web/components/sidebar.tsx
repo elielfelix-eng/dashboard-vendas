@@ -12,7 +12,7 @@ const NAV: { section: string; items: NavItem[] }[] = [
     { href: '/alertas', label: 'Alertas e Reputação', ready: true, perm: 'operacao' },
     { href: '/rentabilidade', label: 'Rentabilidade', ready: true, perm: 'rentabilidade' },
     { href: '/ads', label: 'Ads', ready: true, perm: 'ads' },
-    { href: '/comparativo', label: 'Comparativo anual', ready: true, perm: 'vendas' },
+    { href: '/comparativo', label: 'Comparativo', ready: true, perm: 'vendas' },
     { href: '/metas', label: 'Metas e Projeção', ready: true, perm: 'metas' },
     { href: '/anuncios', label: 'Anúncios', ready: false },
     { href: '/novos-produtos', label: 'Novos Produtos', ready: false },

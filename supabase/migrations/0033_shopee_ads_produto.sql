@@ -23,26 +23,44 @@
 --     A sincronizacao (combinarAdsShopee) grava em 'conta' so a SOBRA do dia (conta - soma dos anuncios,
 --     nunca negativa) quando ha linhas por anuncio, entao nada conta duas vezes.
 --   * Por campanha (ads_campanhas): campanha real da Shopee = gasto das metricas por anuncio dela; a linha
---     'conta' = so a sobra (cartao da Shopee - campanhas reais). Soma das linhas da Shopee = cartao.
---   * Limites: core.parametros_ads da Shopee. Sem nenhuma linha da Shopee, copia as do ML (todas as
---     vigencias). Uma linha da Shopee que ja exista (ou editada) nunca e sobrescrita.
+--     'conta' = so a sobra (cartao da Shopee - campanhas reais). Soma das linhas da Shopee = cartao
+--     (salvo o ruido de centavos escondido, abaixo).
+--   * Limites: COPIA UNICA (decisao do dono, 26/11) da ultima linha do ML para a Shopee, mesma vigencia e
+--     valores (cria ou atualiza). Edicoes posteriores: em Configuracoes > Parametros. Reexecutar esta
+--     migration copia o ML de novo.
+--   * Ruido de centavos (decisao do dono, rodada final): a sobra da Shopee ("nao atribuido" em ads_modelos e
+--     a linha 'conta' em ads_campanhas, na Shopee e na parte da Shopee do consolidado) nao aparece quando
+--     |investimento| < 0,05 e vendas/unidades tambem < 0,05; investimento negativo nunca aparece (vira 0).
+--     Nesse caso a soma da tabela pode diferir do cartao em centavos. O ML nao muda.
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
--- Limites da Shopee = os do Mercado Livre, so se a Shopee nao tiver nenhuma linha.
+-- Limites da Shopee = os do Mercado Livre (COPIA UNICA decidida pelo dono em 26/11/2026).
+-- A ultima linha do ML (maior vigente_desde) e copiada para a Shopee com a mesma vigencia e os mesmos
+-- valores: cria a linha ou atualiza a que ja existe (ex.: a linha padrao que a 0018 criou). Duas
+-- execucoes dao o mesmo resultado. Depois disso os limites da Shopee sao editados em Configuracoes >
+-- Parametros. ATENCAO: reexecutar esta migration copia o ML de novo por cima da Shopee nessa vigencia.
 -- ---------------------------------------------------------------------
-insert into core.parametros_ads (channel, vigente_desde, pausar_gasto_min, pausar_cliques_min, min_dias_dados,
-                                 revisar_cliques_min, revisar_conversao_max_pct, escalar_folga_pp, escalar_unidades_min,
-                                 testar_margem_min_pct, testar_unidades_min, teste_reserva_pct, teste_max_modelos,
-                                 reduzir_fator, teto_fator, alerta_sobra_pct)
+insert into core.parametros_ads as s (channel, vigente_desde, pausar_gasto_min, pausar_cliques_min, min_dias_dados,
+                                      revisar_cliques_min, revisar_conversao_max_pct, escalar_folga_pp, escalar_unidades_min,
+                                      testar_margem_min_pct, testar_unidades_min, teste_reserva_pct, teste_max_modelos,
+                                      reduzir_fator, teto_fator, alerta_sobra_pct)
 select 'shopee', p.vigente_desde, p.pausar_gasto_min, p.pausar_cliques_min, p.min_dias_dados,
        p.revisar_cliques_min, p.revisar_conversao_max_pct, p.escalar_folga_pp, p.escalar_unidades_min,
        p.testar_margem_min_pct, p.testar_unidades_min, p.teste_reserva_pct, p.teste_max_modelos,
        p.reduzir_fator, p.teto_fator, p.alerta_sobra_pct
   from core.parametros_ads p
  where p.channel = 'mercadolivre'
-   and not exists (select 1 from core.parametros_ads s where s.channel = 'shopee')
-on conflict (channel, vigente_desde) do nothing;
+ order by p.vigente_desde desc
+ limit 1
+on conflict (channel, vigente_desde) do update set
+  pausar_gasto_min = excluded.pausar_gasto_min, pausar_cliques_min = excluded.pausar_cliques_min,
+  min_dias_dados = excluded.min_dias_dados, revisar_cliques_min = excluded.revisar_cliques_min,
+  revisar_conversao_max_pct = excluded.revisar_conversao_max_pct, escalar_folga_pp = excluded.escalar_folga_pp,
+  escalar_unidades_min = excluded.escalar_unidades_min, testar_margem_min_pct = excluded.testar_margem_min_pct,
+  testar_unidades_min = excluded.testar_unidades_min, teste_reserva_pct = excluded.teste_reserva_pct,
+  teste_max_modelos = excluded.teste_max_modelos, reduzir_fator = excluded.reduzir_fator,
+  teto_fator = excluded.teto_fator, alerta_sobra_pct = excluded.alerta_sobra_pct;
 
 -- ---------------------------------------------------------------------
 -- Peso dos anuncios SEM venda: igual a 0019, mas o item 'conta' da Shopee (sobra da conta) nunca
@@ -396,13 +414,17 @@ returns table (modelo text, produto text, foto text, investimento numeric, impre
 language plpgsql stable security invoker set search_path = '' as $$
 #variable_conflict use_column
 declare
-  v_inv numeric;
-  v_ve  boolean;
+  v_inv    numeric;
+  v_inv_sh numeric;
+  v_ve     boolean;
 begin
   if not core.has_perm('ads') or coalesce(p_canal, '') not in ('consolidado', 'mercadolivre', 'shopee') then
     return;
   end if;
   v_inv := coalesce(analytics.dash_ads_periodo(p_canal, p_de, p_ate), 0);
+  -- parte da Shopee do cartao (no consolidado, v_inv - v_inv_sh = parte do ML)
+  v_inv_sh := case when p_canal in ('consolidado', 'shopee')
+                   then coalesce(analytics.dash_ads_periodo('shopee', p_de, p_ate), 0) else 0 end;
   v_ve := core.has_perm('custos');
 
   return query
@@ -552,14 +574,48 @@ begin
       left join mkt.items it on it.channel = tp.channel and it.item_id = tp.item_id
      cross join rt
   ),
+  -- "Nao atribuido" por canal: investimento do cartao do canal - atribuido a modelos do canal, e as
+  -- metricas dos anuncios "sem modelo" do canal. ML: regra de sempre. Shopee: sem o ruido de centavos.
   sem as (
-    select coalesce(sum(pm.imp), 0) as imp, coalesce(sum(pm.cli), 0) as cli, coalesce(sum(pm.vend), 0) as vend,
-           coalesce(sum(pm.un), 0) as un, count(*) > 0 as tem
-      from pm where pm.modelo is null
+    select pm.channel,
+           coalesce(sum(pm.inv) filter (where pm.modelo is not null), 0) as atr,
+           coalesce(sum(pm.imp) filter (where pm.modelo is null), 0) as imp,
+           coalesce(sum(pm.cli) filter (where pm.modelo is null), 0) as cli,
+           coalesce(sum(pm.vend) filter (where pm.modelo is null), 0) as vend,
+           coalesce(sum(pm.un) filter (where pm.modelo is null), 0) as un,
+           count(*) filter (where pm.modelo is null) > 0 as tem
+      from pm
+     group by pm.channel
+  ),
+  ml as (
+    select round(v_inv - v_inv_sh - coalesce((select s.atr from sem s where s.channel = 'mercadolivre'), 0), 2) as inv,
+           coalesce((select s.imp from sem s where s.channel = 'mercadolivre'), 0) as imp,
+           coalesce((select s.cli from sem s where s.channel = 'mercadolivre'), 0) as cli,
+           coalesce((select s.vend from sem s where s.channel = 'mercadolivre'), 0) as vend,
+           coalesce((select s.un from sem s where s.channel = 'mercadolivre'), 0) as un,
+           coalesce((select s.tem from sem s where s.channel = 'mercadolivre'), false) as tem
+  ),
+  sh0 as (
+    select round(v_inv_sh - coalesce((select s.atr from sem s where s.channel = 'shopee'), 0), 2) as inv,
+           coalesce((select s.imp from sem s where s.channel = 'shopee'), 0) as imp,
+           coalesce((select s.cli from sem s where s.channel = 'shopee'), 0) as cli,
+           coalesce((select s.vend from sem s where s.channel = 'shopee'), 0) as vend,
+           coalesce((select s.un from sem s where s.channel = 'shopee'), 0) as un
+  ),
+  sh as (
+    -- mostra a sobra da Shopee so se nao for ruido; investimento negativo nunca aparece
+    select greatest(sh0.inv, 0) as inv, sh0.imp, sh0.cli, sh0.vend, sh0.un,
+           not (sh0.inv < 0.05 and abs(sh0.vend) < 0.05 and abs(sh0.un) < 0.05) as mostra
+      from sh0
   ),
   nao as (
-    select round(v_inv - coalesce((select sum(a.inv) from ads_mod a), 0), 2) as inv, sem.*
-      from sem
+    select ml.inv + case when sh.mostra then sh.inv else 0 end as inv,
+           ml.imp + case when sh.mostra then sh.imp else 0 end as imp,
+           ml.cli + case when sh.mostra then sh.cli else 0 end as cli,
+           ml.vend + case when sh.mostra then sh.vend else 0 end as vend,
+           ml.un + case when sh.mostra then sh.un else 0 end as un,
+           ml.inv <> 0 or ml.tem or sh.mostra as tem
+      from ml, sh
   )
   select r.modelo, r.produto, r.foto, r.investimento, r.impressoes, r.cliques, r.ctr, r.cpc, r.conversao,
          r.vendas_ads, r.unidades_ads, r.acos, r.acos_equilibrio, r.lucro_pos_ads, r.contribuicao_pct,
@@ -587,7 +643,7 @@ begin
              null::text, null::text, false, null::text, null::text,
              1
         from nao n
-       where n.inv <> 0 or n.tem
+       where n.tem
     ) r
    order by r.ordem, r.investimento desc, r.modelo;
 end $$;
@@ -609,12 +665,16 @@ returns table (campanha_id text, nome text, status text, automatica boolean, orc
 language plpgsql stable security invoker set search_path = '' as $$
 #variable_conflict use_column
 declare
-  v_inv numeric;
+  v_inv    numeric;
+  v_inv_sh numeric;
 begin
   if not core.has_perm('ads') or coalesce(p_canal, '') not in ('consolidado', 'mercadolivre', 'shopee') then
     return;
   end if;
   v_inv := coalesce(analytics.dash_ads_periodo(p_canal, p_de, p_ate), 0);
+  -- parte da Shopee do cartao (no consolidado, v_inv - v_inv_sh = parte do ML)
+  v_inv_sh := case when p_canal in ('consolidado', 'shopee')
+                   then coalesce(analytics.dash_ads_periodo('shopee', p_de, p_ate), 0) else 0 end;
 
   return query
   with met as materialized (
@@ -643,10 +703,12 @@ begin
     union all
     select 'shopee'::text, c.campaign_id, c.inv from ci_sh c
     union all
-    -- sobra da conta Shopee: cartao da Shopee - campanhas reais
-    select 'shopee'::text, 'conta'::text,
-           analytics.dash_ads_periodo('shopee', p_de, p_ate) - coalesce((select sum(c.inv) from ci_sh c), 0)
+    -- sobra da conta Shopee: cartao da Shopee - campanhas reais (negativa nunca aparece; o ruido some em linhas)
+    select 'shopee'::text, 'conta'::text, greatest(v_inv_sh - coalesce((select sum(c.inv) from ci_sh c), 0), 0)
      where p_canal in ('consolidado', 'shopee')
+  ),
+  sobra_sh as (
+    select v_inv_sh - coalesce((select sum(c.inv) from ci_sh c), 0) as inv
   ),
   vc as (
     select met.channel, met.campaign_id, sum(met.vend) as vend
@@ -675,7 +737,7 @@ begin
   )
   ,
   linhas as (
-    select k.campaign_id,
+    select k.channel, k.campaign_id,
            coalesce(nullif(c.name, ''), k.campaign_id) as nome,
            c.status,
            c.automatica,
@@ -695,18 +757,21 @@ begin
       left join ci on ci.channel = k.channel and ci.campaign_id = k.campaign_id
       left join vc on vc.channel = k.channel and vc.campaign_id = k.campaign_id
       left join mc on mc.channel = k.channel and mc.campaign_id = k.campaign_id
-     -- 'conta' da Shopee sem sobra (nem investimento nem vendas): some
+     -- 'conta' da Shopee sem sobra de verdade (investimento < 0,05, inclusive negativo, e vendas < 0,05): some
      where not (k.channel = 'shopee' and k.campaign_id = 'conta'
-                and round(coalesce(ci.inv, 0), 2) = 0 and round(coalesce(vc.vend, 0), 2) = 0)
+                and (select s.inv from sobra_sh s) < 0.05 and abs(coalesce(vc.vend, 0)) < 0.05)
   ),
   nao as (
-    select round(v_inv - coalesce((select sum(l.inv) from linhas l), 0), 2) as inv,
+    -- so a parte do ML (a Shopee ja soma o proprio cartao nas linhas dela, salvo o ruido escondido)
+    select round(v_inv - v_inv_sh - coalesce((select sum(l.inv) from linhas l where l.channel = 'mercadolivre'), 0), 2) as inv,
            round(coalesce((select sum(m.vend) from met m where m.campaign_id is null), 0), 2) as vend,
            exists (select 1 from met m where m.campaign_id is null) as tem
   )
   select r.campaign_id, r.nome, r.status, r.automatica, r.orc, r.roas_target, r.acos_eq, r.inv, r.vend, r.acos, r.roas, r.n, r.modo
     from (
-      select l.*, 0 as ordem from linhas l
+      select l.campaign_id, l.nome, l.status, l.automatica, l.orc, l.roas_target, l.acos_eq, l.inv, l.vend, l.acos, l.roas,
+             l.n, l.modo, l.desempate, 0 as ordem
+        from linhas l
       union all
       select null::text, null::text, null::text, null::boolean, null::numeric, null::numeric, null::numeric,
              n.inv, n.vend, null::numeric, null::numeric, null::integer, null::text, null::text, 1

@@ -603,9 +603,8 @@ eq('0009 + 0019 + 0021 reaplicadas: Shopee de volta', [(await res21('shopee')).v
 // 0033: Ads por produto da Shopee (Tarefa 5b): ranking e sugestoes com os mesmos limites do ML.
 // Mesmo banco da 0021. O retrato do ML e tirado com o Ads por produto da Shopee ja gravado, ANTES da 0033.
 // =====================================================================
-// Limites: sem linha da Shopee (a 0018 cria uma com os padroes; aqui ela e apagada) e o ML editado.
-await db.exec(`delete from core.parametros_ads where channel = 'shopee';
-  update core.parametros_ads set pausar_gasto_min = 60, escalar_folga_pp = 12 where channel = 'mercadolivre';
+// Limites: a linha padrao da Shopee (0018) continua la e o ML e editado; a 0033 copia o ML para a Shopee.
+await db.exec(`update core.parametros_ads set pausar_gasto_min = 60, escalar_folga_pp = 12 where channel = 'mercadolivre';
   insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','SH3','Garrafa Shopee','GGG77-PRT','active');`);
 // Ads por produto da Shopee (como combinarAdsShopee grava: 'conta' = so a sobra do dia; sem sobra, sem linha 'conta')
 //   15/10: conta 30 = SH1 12 (AAA11) + SH2 10 (SHP01) + sobra 8;  16/10: conta 10 = SH2 10;
@@ -627,6 +626,9 @@ await perfil('comercial');
 const antes33c = await comoAuth(retrato33);
 await perfil('admin');
 eq('0033: retrato do ML com sugestoes e tabela', [antes33.ads_sugestoes.length > 1, antes33.ads_modelos.length > 1], [true, true]);
+eq('limites antes da 0033: Shopee com a linha padrao da 0018 (diferente do ML editado)',
+  await rows(`select vigente_desde::text as v, pausar_gasto_min::float as p, escalar_folga_pp::float as f from core.parametros_ads where channel = 'shopee'`),
+  [{ v: '2025-01-01', p: 50, f: 10 }]);
 
 await db.exec(mig('0033_shopee_ads_produto.sql'));
 await db.exec(mig('0033_shopee_ads_produto.sql')); // reexecutavel
@@ -646,7 +648,7 @@ const LIM = `select vigente_desde::text as v, pausar_gasto_min::float, pausar_cl
   teste_reserva_pct::float, teste_max_modelos, reduzir_fator::float, teto_fator::float, alerta_sobra_pct::float
   from core.parametros_ads where channel = $1 order by vigente_desde`;
 const limMl = await rows(LIM, ['mercadolivre']);
-eq('limites: Shopee criada com os valores do ML (pausar 60, folga 12)', await rows(LIM, ['shopee']), limMl);
+eq('limites: Shopee = ML (pausar 60, folga 12), mesmo com a linha padrao da Shopee antes', await rows(LIM, ['shopee']), limMl);
 eq('limites: ML editado de fato (nao sao os padroes)', [limMl[0].pausar_gasto_min, limMl[0].escalar_folga_pp], [60, 12]);
 
 // ---------------- ads_sugestoes('shopee'): so dados da Shopee, regras e textos do ML ----------------
@@ -696,9 +698,15 @@ const sgCo = await rows(SG, ['consolidado']);
 const aMl = sgMl.find((x) => x.modelo === 'AAA11'); const aSh = sgSh.find((x) => x.modelo === 'AAA11'); const aCo = sgCo.find((x) => x.modelo === 'AAA11');
 eq('consolidado AAA11: Ads somados (ML + Shopee), canal = o de maior investimento',
   [aCo.i, aCo.v, aCo.u, aCo.canal], [r2(aMl.i + aSh.i), r2(aMl.v + aSh.v), r2(aMl.u + aSh.u), aMl.i > aSh.i ? 'mercadolivre' : 'shopee']);
-const dmCo = (await rows(`select (contribuicao + custos_rateados)::float as c, receita::float as r from analytics.dash_modelos('consolidado', $1, $2) where modelo = 'AAA11'`, J30))[0];
+const dmCo = (await rows(`select contribuicao::float as c, receita::float as r from analytics.dash_modelos('consolidado', $1, $2) where modelo = 'AAA11'`, J30))[0];
 eq('consolidado AAA11: equilibrio com a margem dos dois canais (nao e o do ML nem o da Shopee)',
   [aCo.eqb !== aMl.eqb, aCo.eqb !== aSh.eqb, aCo.eqb !== null], [true, true, true]);
+// Valor esperado, montado a parte: contribuicao consolidada + parte do Product Ads do periodo (ML API + conta Shopee,
+// rateada pela receita) + Product Ads da fatura do ML ligado aos pedidos do AAA11 (P1 12 + P2 10 x 60/100 = 18).
+const adsCpCo = await val(`select coalesce(sum(valor), 0)::float from analytics.dash_custos_periodo('consolidado', $1, $2) where categoria = 'product_ads'`, J30);
+const recCo = await val(`select sum(receita)::float from analytics.dash_modelos('consolidado', $1, $2)`, J30);
+eq('consolidado AAA11: equilibrio = (contribuicao + rateio do Ads do periodo + fatura do ML) / receita = 55,25',
+  [aCo.eqb, r2((dmCo.c + adsCpCo * dmCo.r / recCo + 18) / dmCo.r * 100)], [55.25, 55.25]);
 eq('consolidado: ACOS de equilibrio da tabela = o da sugestao (AAA11, periodo = janela)', await eqTab('consolidado'), aCo.eqb);
 eq('consolidado: o numero da tabela aparece no motivo', aCo.motivo.includes(`${String(aCo.eqb.toFixed(2)).replace('.', ',')}%`), true);
 eq('consolidado: receita do equilibrio = ML + Shopee (AAA11)', dmCo.r, (await recAAA('mercadolivre')) + 100);
@@ -718,11 +726,21 @@ eq('comercial: ads_modelos shopee sem equilibrio nem lucro', (await comoAuth(() 
   [['GGG77', null, null], ['SHP01', null, null], ['AAA11', null, null], [null, null, null]]);
 await perfil('admin');
 
-// ---------------- Reexecucao preserva a linha da Shopee editada ----------------
+// ---------------- Limites: a Shopee editada (Parametros) muda a sugestao; a 0033 e uma copia unica e reexecutavel ----------------
 await db.exec(`update core.parametros_ads set pausar_gasto_min = 75 where channel = 'shopee'`);
+eq('limites: Shopee editada para 75, GGG77 (R$ 70) deixa de ser pausar', (await rows(SG, ['shopee'])).find((x) => x.modelo === 'GGG77').sugestao, 'manter');
 await db.exec(mig('0033_shopee_ads_produto.sql'));
-eq('limites: reaplicar a 0033 nao sobrescreve a Shopee editada', (await rows(LIM, ['shopee'])).map((x) => [x.v, x.pausar_gasto_min]), [['2025-01-01', 75]]);
-eq('limites: com 75, GGG77 (R$ 70) deixa de ser pausar', (await rows(SG, ['shopee'])).find((x) => x.modelo === 'GGG77').sugestao, 'manter');
+const limSh1 = await rows(LIM, ['shopee']);
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+eq('limites: reexecutar a 0033 copia o ML de novo (copia unica decidida pelo dono) e duas execucoes dao o mesmo',
+  [limSh1, await rows(LIM, ['shopee'])], [limMl, limMl]);
+// ML com uma vigencia mais nova: a Shopee recebe essa vigencia com os mesmos valores (a mais antiga fica)
+await db.exec(`insert into core.parametros_ads (channel, vigente_desde, pausar_gasto_min, teste_max_modelos) values ('mercadolivre', '2026-11-01', 45, 7)`);
+await db.exec(mig('0033_shopee_ads_produto.sql'));
+eq('limites: ultima linha do ML copiada com a vigencia dela', (await rows(LIM, ['shopee'])).map((x) => [x.v, x.pausar_gasto_min, x.teste_max_modelos]),
+  [['2025-01-01', 60, 5], ['2026-11-01', 45, 7]]);
+eq('limites: ultima linha da Shopee = ultima do ML', (await rows(LIM, ['shopee']))[1], (await rows(LIM, ['mercadolivre']))[1]);
+await db.exec(`delete from core.parametros_ads where vigente_desde = '2026-11-01'`);
 // Reaplicar 0019 e 0021 exige reaplicar a 0033 (documentado no cabecalho)
 await db.exec(mig('0019_ads_funcoes.sql'));
 await db.exec(mig('0021_shopee_funcoes.sql'));
@@ -758,6 +776,40 @@ eq('ads_campanhas consolidado: soma = cartao (ML + Shopee)', r2(caCo.reduce((s, 
 const chave = (x) => JSON.stringify(x);
 eq('ads_campanhas consolidado: linhas = as do ML + as da Shopee (cada uma uma vez)',
   caCo.map(chave).sort(), [...caMl, ...caSh].map(chave).sort());
+
+// ---------------- Ruido de centavos da Shopee escondido (decisao do dono, rodada final) ----------------
+// Por anuncio 0,01 acima da conta no dia 15 (SH2 18,01, sem linha 'conta'): sobra da Shopee = -0,01.
+await adsCampanhas(18.01, 0);
+const nulaAm = async (c) => (await rows(AM33, [c])).filter((x) => x.modelo === null);
+const amSh01 = await rows(AM33, ['shopee']);
+eq('ruido: ads_modelos shopee sem linha "nao atribuido" (-0,01) e sem investimento negativo',
+  [amSh01.filter((x) => x.modelo === null).length, amSh01.every((x) => x.i >= 0)], [0, true]);
+eq('ruido: ads_campanhas shopee sem linha "conta" nem "nao atribuido"', (await rows(CA, ['shopee'])).map((x) => [x.campanha_id, x.i]), [['k1', 82], ['k2', 28.01]]);
+eq('ruido: consolidado com a linha "nao atribuido" so do ML (tabela por modelo)', await nulaAm('consolidado'), await nulaAm('mercadolivre'));
+eq('ruido: consolidado com as linhas de campanha do ML + as reais da Shopee',
+  (await rows(CA, ['consolidado'])).map(chave).sort(), [...caMl, ...(await rows(CA, ['shopee']))].map(chave).sort());
+await adsCampanhas(10, 8);
+eq('ruido: sobra de 8 continua aparecendo (tabela por modelo e campanhas)',
+  [(await nulaAm('shopee')).map((x) => x.i), (await rows(CA, ['shopee'])).filter((x) => x.campanha_id === 'conta').map((x) => x.i)], [[8], [8]]);
+eq('ruido: consolidado com a sobra de 8 = ML + 8', (await nulaAm('consolidado'))[0].i, r2((await nulaAm('mercadolivre'))[0].i + 8));
+
+// ---------------- Anuncio da Shopee que vendeu dois modelos (2:1): Ads repartido 2:1 ----------------
+await db.exec(`
+insert into mkt.items (channel, item_id, title, sku, status) values ('shopee','SH4','Kit Shopee','HHH88-AZU','active');
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, tags, raw) values
+ ('shopee','S7','paid','2026-10-21 10:00-03','2026-10-21 10:05-03',20,array['shopee:COMPLETED'],'{"order_status":"COMPLETED"}'),
+ ('shopee','S8','paid','2026-10-22 10:00-03','2026-10-22 10:05-03',10,array['shopee:COMPLETED'],'{"order_status":"COMPLETED"}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('shopee','S7',1,'SH4','HHH88-AZU','Kit Shopee',2,10), ('shopee','S8',1,'SH4','III99-AZU','Kit Shopee',1,10);`);
+await gravarAds(['2026-10-27'], JSON.stringify([K(MP('SH4', '2026-10-27', 9, 30, 30, 3), 'k2')]), JSON.stringify([{ day: '2026-10-27', cost: 9, raw: {} }]));
+const am21 = await rows(AM33, ['shopee']);
+eq('2:1: SH4 (2 HHH88 e 1 III99 vendidos) reparte R$ 9 em 6 e 3', am21.filter((x) => ['HHH88', 'III99'].includes(x.modelo)).map((x) => [x.modelo, x.i]),
+  [['HHH88', 6], ['III99', 3]]);
+eq('2:1: nenhum investimento negativo; soma da tabela = cartao (119)', [am21.every((x) => x.i >= 0), r2(am21.reduce((s, x) => s + x.i, 0)), await adsP('shopee')],
+  [true, 119, 119]);
+eq('2:1: sugestoes com o mesmo rateio (vendas e unidades por Ads 2:1)',
+  (await rows(SG, ['shopee'])).filter((x) => ['HHH88', 'III99'].includes(x.modelo)).map((x) => [x.modelo, x.i, x.v, x.u]),
+  [['HHH88', 6, 20, 2], ['III99', 3, 10, 1]]);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

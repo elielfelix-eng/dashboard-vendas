@@ -1,4 +1,5 @@
 import { test, afterEach } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import {
   MAX_PAGINAS,
@@ -188,7 +189,7 @@ test('mapeamento das tarifas (exemplo da revisão): frete líquido do subsídio 
   assert.equal(Math.round((59.9 - tarifas - 41.7) * 100) / 100, 0);
 });
 
-test('demais categorias: campanha, processamento, devolução, taxa de cartão; seller_discount e cupom da Shopee ficam fora', () => {
+test('demais categorias: campanha, processamento, devolução; taxa de cartão, seller_discount e cupom da Shopee ficam fora', () => {
   const linhas = tarifasDoEscrow({
     orderSn: 'X',
     income: {
@@ -199,7 +200,7 @@ test('demais categorias: campanha, processamento, devolução, taxa de cartão; 
     },
   });
   assert.deepEqual(linhas, [
-    { categoria: 'taxa_transacao', valor: 1.5 },
+    { categoria: 'taxa_transacao', valor: 1.1 }, // credit_card_transaction_fee NÃO é descontada (rodada 3)
     { categoria: 'frete', valor: 6 },
     { categoria: 'campanha', valor: 2 },
     { categoria: 'processamento', valor: 1 },
@@ -537,4 +538,59 @@ test('campos numéricos não mudam o mapeamento das tarifas', () => {
     { categoria: 'comissao', valor: 8.5 },
     { categoria: 'liquido', valor: 41.21 },
   ]);
+});
+
+// ------------------------------------------------------------------------
+// Rodada 3: proteção do frete, reembolso e taxa de cartão fora (dados reais)
+// ------------------------------------------------------------------------
+
+interface Fixture { order_sn: string; itens: number; income: Record<string, number>; linhas: { categoria: string; valor: number }[] }
+const reais = (JSON.parse(readFileSync(new URL('./fixtures/escrow-reais.json', import.meta.url), 'utf8')) as { pedidos: Fixture[] }).pedidos;
+
+for (const f of reais) {
+  test(`pedido ${f.order_sn}: categorias esperadas e conferência fecha em 0,00`, () => {
+    const linhas = tarifasDoEscrow({ orderSn: f.order_sn, income: f.income })!;
+    assert.deepEqual(linhas, f.linhas);
+    const tarifas = linhas.filter((l) => l.categoria !== 'liquido').reduce((s, l) => s + l.valor, 0);
+    const liquido = linhas.find((l) => l.categoria === 'liquido')?.valor ?? 0;
+    assert.ok(Math.abs(f.itens - tarifas - liquido) < 0.005, `diferença ${f.itens - tarifas - liquido}`);
+  });
+}
+
+test('comissão e serviço usam commission_fee e service_fee, nunca os campos net_*', () => {
+  const linhas = tarifasDoEscrow({
+    orderSn: 'X',
+    income: { escrow_amount: 1, commission_fee: 37.72, net_commission_fee: 21.05, service_fee: 5, net_service_fee: 3 },
+  });
+  assert.deepEqual(linhas, [
+    { categoria: 'comissao', valor: 37.72 },
+    { categoria: 'taxa_servico', valor: 5 },
+    { categoria: 'liquido', valor: 1 },
+  ]);
+});
+
+test('taxa de cartão sozinha não vira tarifa', () => {
+  assert.deepEqual(tarifasDoEscrow({ orderSn: 'X', income: { escrow_amount: 10, credit_card_transaction_fee: 30.54 } }),
+    [{ categoria: 'liquido', valor: 10 }]);
+});
+
+test('reembolso: seller_return_refund negativo vira custo positivo; líquido negativo é mantido', () => {
+  assert.deepEqual(tarifasDoEscrow({ orderSn: 'X', income: { escrow_amount: -0.49, seller_return_refund: -157.89 } }), [
+    { categoria: 'reembolso', valor: 157.89 },
+    { categoria: 'liquido', valor: -0.49 },
+  ]);
+});
+
+test('getEscrowBatch leva os campos de proteção e de reembolso para o mapeamento', async () => {
+  servidor({
+    '/api/v2/payment/get_escrow_detail_batch': () => json({ error: '', response: [{ escrow_detail: { order_sn: 'A', order_income: {
+      escrow_amount: -0.49, seller_return_refund: -157.89, shipping_seller_protection_fee_amount: 0.49,
+      delivery_seller_protection_fee_premium_amount: 1,
+    } } }] }),
+  });
+  const { provider } = tokens();
+  const [e] = await new ShopeeConnector(app, SHOP_ID, provider).getEscrowBatch(['A']);
+  assert.deepEqual(e.income, {
+    escrow_amount: -0.49, shipping_seller_protection_fee_amount: 0.49, delivery_seller_protection_fee_premium_amount: 1, seller_return_refund: -157.89,
+  });
 });

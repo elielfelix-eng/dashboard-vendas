@@ -3,10 +3,11 @@ import { brl, dataBr } from '@/lib/formato';
 import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
 import { CAMPOS_LIMITES, situacaoVigencias } from '@/lib/ads-limites';
+import { CAMPOS_CRESCIMENTO, PARAMETROS_CRESCIMENTO_PADRAO } from '@/lib/crescimento';
 import { hojeBrasilia } from '@/lib/periodo';
 import {
-  adicionarFeriado, excluirFeriado, excluirLimiteReputacao, excluirLimitesAds, excluirParametro,
-  salvarLimiteReputacao, salvarLimitesAds, salvarParametro, salvarParametrosAlertas,
+  adicionarFeriado, excluirFeriado, excluirLimiteReputacao, excluirLimitesAds, excluirParametro, excluirParametrosCrescimento,
+  salvarLimiteReputacao, salvarLimitesAds, salvarParametro, salvarParametrosAlertas, salvarParametrosCrescimento,
 } from './actions';
 
 type SP = Promise<Record<string, string | string[] | undefined>>;
@@ -25,6 +26,10 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
   const { data: ads } = await supabase.schema('core').from('parametros_ads').select('*')
     .order('channel').order('vigente_desde', { ascending: false });
   const limites = (ads ?? []) as Array<Record<string, string | number>>;
+  const { data: cresc } = await supabase.schema('core').from('parametros_crescimento')
+    .select('channel, vigente_desde, pct_crescimento, pct_queda')
+    .order('channel').order('vigente_desde', { ascending: false });
+  const crescimento = (cresc ?? []) as Array<Record<string, string | number>>;
   const hoje = hojeBrasilia();
   const situacao = (lista: Array<Record<string, unknown>>, d: unknown) =>
     situacaoVigencias(lista.map((x) => String(x.vigente_desde)), hoje)[lista.findIndex((x) => x.vigente_desde === d)];
@@ -176,6 +181,74 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
               <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limites</button>
             </div>
             <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores em vigor deste canal. Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
+          </form>
+        );
+      })}
+
+      <h2 className="mb-1 mt-10 text-xl font-semibold">Crescimento por canal</h2>
+      <p className="mb-4 text-sm text-muted">
+        Percentuais da sugestão por canal: investir mais quando as vendas crescem pelo menos o percentual nos comparativos (período
+        anterior e mesmo período do ano passado) com a margem depois do Ads positiva e sem cair; reduzir quando caem pelo menos o
+        percentual em algum comparativo ou a margem fica negativa. Cada período usa a vigência mais recente com data igual ou anterior
+        ao último dia analisado.{!ehAdmin && ' Só o administrador pode alterar.'}
+      </p>
+      {['mercadolivre', 'shopee'].map((canal) => {
+        const hist = crescimento.filter((l) => l.channel === canal);
+        return (
+          <div key={canal} className="mb-4 overflow-x-auto rounded-xl border border-border bg-surface">
+            <h3 className="px-3 pt-3 text-sm font-semibold">{CANAL[canal]}</h3>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-xs text-muted">
+                  <th className="px-3 py-2 text-left font-medium">Vale a partir de</th>
+                  {CAMPOS_CRESCIMENTO.map((c) => <th key={c.chave} className="px-3 py-2 text-right font-medium">{c.rotulo}</th>)}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {hist.map((l) => (
+                  <tr key={String(l.vigente_desde)} className="border-b border-border last:border-0">
+                    <td className="whitespace-nowrap px-3 py-1.5">{dataBr(String(l.vigente_desde))}{rotuloSit(situacao(hist, l.vigente_desde))}</td>
+                    {CAMPOS_CRESCIMENTO.map((c) => (
+                      <td key={c.chave} className="px-3 py-1.5 text-right tabular-nums">{Number(l[c.chave]).toLocaleString('pt-BR')}%</td>
+                    ))}
+                    <td className="px-3 py-1.5 text-right">
+                      {ehAdmin && (
+                        <form action={excluirParametrosCrescimento}>
+                          <input type="hidden" name="channel" value={canal} />
+                          <input type="hidden" name="vigente_desde" value={String(l.vigente_desde)} />
+                          <button className="text-xs text-muted hover:text-bad">Excluir</button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
+
+      {ehAdmin && ['mercadolivre', 'shopee'].map((canal) => {
+        const base = crescimento.find((l) => l.channel === canal && String(l.vigente_desde) <= hoje);
+        return (
+          <form key={canal} action={salvarParametrosCrescimento} className="mt-6 grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">
+            <h2 className="font-semibold sm:col-span-3">+ Nova vigência de crescimento — {CANAL[canal]}</h2>
+            <input type="hidden" name="channel" value={canal} />
+            <label className="flex flex-col gap-1">Vale a partir de
+              <input type="date" name="vigente_desde" required className="rounded border border-border bg-surface px-2 py-1" />
+            </label>
+            {CAMPOS_CRESCIMENTO.map((c) => (
+              <label key={c.chave} className="flex flex-col gap-1">{c.rotulo}
+                <input name={c.chave} inputMode="decimal" required
+                  defaultValue={String(base?.[c.chave] ?? PARAMETROS_CRESCIMENTO_PADRAO[c.chave]).replace('.', ',')}
+                  className="rounded border border-border bg-surface px-2 py-1" />
+              </label>
+            ))}
+            <div className="flex items-end">
+              <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar percentuais</button>
+            </div>
+            <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores em vigor deste canal. O limite exato conta (10% conta; 9,99% não). Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
           </form>
         );
       })}

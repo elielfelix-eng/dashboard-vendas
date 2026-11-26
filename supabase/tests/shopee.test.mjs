@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 // Shopee (migration 0032): Ads da conta e por anuncio sem somar o dia 2x; "sem modelo" e tabela = cartao.
 // Shopee (migration 0021): funcoes do painel com vendas, tarifas, margem e Ads da Shopee; ML identico antes/depois.
 // Shopee (migration 0033): Ads por produto da Shopee (ranking e sugestoes, limites do ML); ML identico antes/depois.
+// Crescimento (migration 0022): crescimento_canal por canal, margens nulas sem custos, parametros com vigencia e RLS.
 const repo = fileURLToPath(new URL('../..', import.meta.url));
 let db = new PGlite(); // trocado por um banco novo na secao da 0032 (Ads), que precisa das funcoes do painel
 let fails = 0;
@@ -810,6 +811,97 @@ eq('2:1: nenhum investimento negativo; soma da tabela = cartao (119)', [am21.eve
 eq('2:1: sugestoes com o mesmo rateio (vendas e unidades por Ads 2:1)',
   (await rows(SG, ['shopee'])).filter((x) => ['HHH88', 'III99'].includes(x.modelo)).map((x) => [x.modelo, x.i, x.v, x.u]),
   [['HHH88', 6, 20, 2], ['III99', 3, 10, 1]]);
+
+// =====================================================================
+// 0022: crescimento por canal e parametros editaveis (Tarefa 6). Mesmo banco (ML e Shopee em outubro/2026).
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee,crm');
+// Uma venda do ML em outubro/2025 (ano passado); a Shopee nao tem venda no ano passado (comeca em 06/2026).
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw, shipment_id) values
+ ('mercadolivre','PA1','paid','2025-10-10 12:00+00','2025-10-10 12:00+00',150,'{}','sa1');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price, sale_fee) values
+ ('mercadolivre','PA1',1,'MLB1','AAA11-AZU','Produto A',1,150,10);`);
+await db.exec(mig('0022_crescimento_canal.sql'));
+await db.exec(mig('0022_crescimento_canal.sql')); // reexecutavel
+console.log('0022 aplicada (2x)');
+
+const CC = `select canal, vendas_atual::float as va, vendas_anterior::float as vp, vendas_ano_passado::float as vy,
+  margem_pos_ads_atual::float as ma, margem_pos_ads_anterior::float as mp, pct_crescimento::float as pc, pct_queda::float as pq
+  from analytics.crescimento_canal($1, $2, $3, $4, $5) order by canal`;
+const cc = (c, de = '2026-10-01', ate = '2026-10-31', ade = '2026-09-01', aate = '2026-09-30') => rows(CC, [c, de, ate, ade, aate]);
+const resumo = async (c, de, ate) => (await rows(`select vendas_brutas::float as vb, receita::float as r, margem_contribuicao::float as m
+  from analytics.dash_resumo($1, $2, $3)`, [c, de, ate]))[0];
+const pctM = (x) => (x.r > 0 ? Math.round((x.m / x.r) * 100 * 10000) / 10000 : null);
+const r4 = (x) => (x == null ? null : Math.round(x * 10000) / 10000);
+
+eq('parametros: 10 e 10 nos dois canais, vigentes desde 2025-01-01',
+  await rows(`select channel, vigente_desde::text as v, pct_crescimento::float as c, pct_queda::float as q from core.parametros_crescimento order by channel`),
+  [{ channel: 'mercadolivre', v: '2025-01-01', c: 10, q: 10 }, { channel: 'shopee', v: '2025-01-01', c: 10, q: 10 }]);
+
+const esperado = async (c) => {
+  const [a, p, y] = [await resumo(c, '2026-10-01', '2026-10-31'), await resumo(c, '2026-09-01', '2026-09-30'), await resumo(c, '2025-10-01', '2025-10-31')];
+  return { canal: c, va: a.vb, vp: p.vb, vy: y.vb, ma: pctM(a), mp: pctM(p), pc: 10, pq: 10 };
+};
+const ccCons = (await cc('consolidado')).map((x) => ({ ...x, ma: r4(x.ma), mp: r4(x.mp) }));
+const espMl = await esperado('mercadolivre'); const espSh = await esperado('shopee');
+eq('crescimento consolidado: uma linha por canal, com vendas brutas e margem depois do Ads (% da receita) de dash_resumo',
+  ccCons, [espMl, espSh]);
+eq('crescimento: ML com venda no ano passado (150) e no periodo anterior; Shopee sem ano passado',
+  [espMl.vy, espMl.vp > 0, espSh.vy, espSh.va > 0], [150, true, 0, true]);
+eq('margem depois do Ads = margem de contribuicao (dash_resumo ja desconta o Ads): Shopee de outubro',
+  await (async () => { const x = (await rows(`select margem_contribuicao::float as m, receita::float as r, product_ads::float as a,
+    (receita - comissao - frete - parcelamento - seguidores - estornos - difal - outras - custo_produto - imposto - embalagem)::float as antes
+    from analytics.dash_resumo('shopee', '2026-10-01', '2026-10-31')`))[0];
+    return [r4(ccCons[1].ma), x.a > 0, r2(x.antes - x.a) === r2(x.m)]; })(),
+  [r4(espSh.ma), true, true]);
+eq('crescimento por canal: so a linha do canal pedido', (await cc('shopee')).map((x) => x.canal), ['shopee']);
+eq('crescimento: canal invalido nao devolve linha', (await cc('brindedobem')).length, 0);
+
+// Step 4: a mudanca de parametro vale a partir da vigencia; quem nao e admin nao grava
+const tentaLinhas = async (sql) => { try { return (await db.query(sql)).affectedRows ?? 0; } catch (e) { return /row-level security|permission denied/i.test(e.message) ? 'negado' : e.message; } };
+eq('admin grava nova vigencia da Shopee (RLS)', await comoAuth(() => tentaLinhas(
+  `insert into core.parametros_crescimento (channel, vigente_desde, pct_crescimento, pct_queda) values ('shopee', '2026-10-15', 20, 5)`)), 1);
+eq('vigencia: periodo que termina antes de 15/10 usa os parametros antigos',
+  (await cc('shopee', '2026-10-01', '2026-10-14', '2026-09-17', '2026-09-30')).map((x) => [x.pc, x.pq]), [[10, 10]]);
+eq('vigencia: periodo que termina depois de 15/10 usa os novos; o ML nao muda',
+  (await cc('consolidado')).map((x) => [x.canal, x.pc, x.pq]), [['mercadolivre', 10, 10], ['shopee', 20, 5]]);
+await perfil('gestor'); // tem 'vendas' e 'custos', nao e admin
+eq('gestor nao grava (insert)', await comoAuth(() => tentaLinhas(
+  `insert into core.parametros_crescimento (channel, vigente_desde, pct_crescimento, pct_queda) values ('shopee', '2026-11-01', 50, 50)`)), 'negado');
+eq('gestor nao altera (update sem efeito)', await comoAuth(() => tentaLinhas(`update core.parametros_crescimento set pct_crescimento = 99`)), 0);
+eq('gestor nao apaga (delete sem efeito)', await comoAuth(() => tentaLinhas(`delete from core.parametros_crescimento`)), 0);
+eq('gestor le os parametros (tem vendas)', await comoAuth(() => val(`select count(*)::int from core.parametros_crescimento`)), 3);
+await perfil('admin');
+eq('parametros intactos depois das tentativas do gestor',
+  await rows(`select channel, vigente_desde::text as v, pct_crescimento::float as c from core.parametros_crescimento order by channel, vigente_desde`),
+  [{ channel: 'mercadolivre', v: '2025-01-01', c: 10 }, { channel: 'shopee', v: '2025-01-01', c: 10 }, { channel: 'shopee', v: '2026-10-15', c: 20 }]);
+await erro('queda acima de 100% recusada', `insert into core.parametros_crescimento (channel, vigente_desde, pct_crescimento, pct_queda) values ('shopee', '2026-12-01', 10, 101)`, /check/i);
+await erro('crescimento zero recusado', `insert into core.parametros_crescimento (channel, vigente_desde, pct_crescimento, pct_queda) values ('shopee', '2026-12-01', 0, 10)`, /check/i);
+await erro('canal desconhecido recusado', `insert into core.parametros_crescimento (channel, vigente_desde, pct_crescimento, pct_queda) values ('outro', '2026-12-01', 10, 10)`, /check/i);
+await db.exec(`update core.parametros_crescimento set pct_crescimento = 12 where channel = 'mercadolivre'`);
+await db.exec(mig('0022_crescimento_canal.sql'));
+eq('reexecutar a 0022 preserva o que o admin mudou', await val(`select pct_crescimento::float from core.parametros_crescimento where channel = 'mercadolivre'`), 12);
+await db.exec(`update core.parametros_crescimento set pct_crescimento = 10 where channel = 'mercadolivre'`);
+
+// Step 4b: sem 'custos', as margens vem nulas (as vendas continuam visiveis)
+await perfil('comercial'); // vendas, sem custos
+const ccCom = await comoAuth(() => cc('consolidado'));
+eq('comercial: margens nulas, vendas iguais as do admin', ccCom.map((x) => [x.canal, x.va, x.vp, x.vy, x.ma, x.mp]),
+  [['mercadolivre', espMl.va, espMl.vp, espMl.vy, null, null], ['shopee', espSh.va, espSh.vp, espSh.vy, null, null]]);
+eq('comercial le os parametros (tem vendas)', await comoAuth(() => val(`select count(*)::int from core.parametros_crescimento`)), 3);
+await perfil('visualizador'); // sem vendas
+eq('visualizador (sem vendas): sem linhas e sem parametros', await comoAuth(async () => [(await cc('consolidado')).length,
+  await val(`select count(*)::int from core.parametros_crescimento`)]), [0, 0]);
+await perfil('admin');
+await canais('mercadolivre');
+eq('sem o canal Shopee: consolidado so com o ML; shopee vazio', await comoAuth(async () => [(await cc('consolidado')).map((x) => x.canal), (await cc('shopee')).length]),
+  [['mercadolivre'], 0]);
+await canais('mercadolivre,shopee,crm');
+eq('RLS: politicas usam (select ...)', await val(`select bool_and(coalesce(qual, '') ~* 'SELECT core\\.' or coalesce(with_check, '') ~* 'SELECT core\\.') from pg_policies where schemaname = 'core' and tablename = 'parametros_crescimento'`), true);
+eq('crescimento_canal: search_path vazio e sem execucao para anon', await rows(`select array_to_string(p.proconfig, ',') as c, has_function_privilege('anon', p.oid, 'execute') as anon
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'analytics' and p.proname = 'crescimento_canal'`),
+  [{ c: 'search_path=""', anon: false }]);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

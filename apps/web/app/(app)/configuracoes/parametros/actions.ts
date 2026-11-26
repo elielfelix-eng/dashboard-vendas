@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
 import { validarLimites } from '@/lib/ads-limites';
+import { validarParametrosCrescimento } from '@/lib/crescimento';
 import { exigirPermissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
 
@@ -93,6 +94,47 @@ export async function excluirLimitesAds(form: FormData): Promise<void> {
   if (error) voltar('Não foi possível excluir agora.', 'erro');
   if (!apagadas || apagadas.length === 0) voltar('Nada excluído: a vigência não foi encontrada.', 'erro');
   voltar('Vigência de limites excluída.', 'ok');
+}
+
+// ---------------------------------------------------------------------
+// Crescimento por canal: percentuais da sugestao (so o administrador, como os limites de Ads)
+// ---------------------------------------------------------------------
+export async function salvarParametrosCrescimento(form: FormData): Promise<void> {
+  const { profile } = await requireUser();
+  if (profile?.role !== 'admin') voltar('Só o administrador altera os parâmetros.', 'erro');
+  const channel = String(form.get('channel') ?? '');
+  const vigente = String(form.get('vigente_desde') ?? '');
+  if (!CANAIS.includes(channel)) voltar('Escolha o canal.', 'erro');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vigente)) voltar('Informe a data a partir da qual vale.', 'erro');
+  const r = validarParametrosCrescimento(Object.fromEntries(form.entries()));
+  if (!r.ok) voltar(r.erro, 'erro');
+  const valores = r.ok ? r.valores : {};
+
+  const supabase = await createClient();
+  const { error } = await supabase.schema('core').from('parametros_crescimento').upsert(
+    { channel, vigente_desde: vigente, ...valores },
+    { onConflict: 'channel,vigente_desde' },
+  );
+  if (error) voltar('Não foi possível salvar os percentuais de crescimento agora.', 'erro');
+  voltar('Percentuais de crescimento salvos.', 'ok');
+}
+
+export async function excluirParametrosCrescimento(form: FormData): Promise<void> {
+  const { profile } = await requireUser();
+  if (profile?.role !== 'admin') voltar('Só o administrador altera os parâmetros.', 'erro');
+  const channel = String(form.get('channel') ?? '');
+  const vigente = String(form.get('vigente_desde') ?? '');
+  if (!CANAIS.includes(channel)) voltar('Canal inválido.', 'erro');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(vigente)) voltar('Data da vigência inválida.', 'erro');
+  const supabase = await createClient();
+  const { count } = await supabase.schema('core').from('parametros_crescimento')
+    .select('channel', { count: 'exact', head: true }).eq('channel', channel);
+  if ((count ?? 0) <= 1) voltar('O canal precisa de pelo menos uma vigência de percentuais de crescimento.', 'erro');
+  const { error, data: apagadas } = await supabase.schema('core').from('parametros_crescimento').delete()
+    .eq('channel', channel).eq('vigente_desde', vigente).select('channel');
+  if (error) voltar('Não foi possível excluir agora.', 'erro');
+  if (!apagadas || apagadas.length === 0) voltar('Nada excluído: a vigência não foi encontrada.', 'erro');
+  voltar('Vigência de crescimento excluída.', 'ok');
 }
 
 // ---------------------------------------------------------------------

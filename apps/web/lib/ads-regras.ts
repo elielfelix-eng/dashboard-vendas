@@ -60,14 +60,15 @@ export function avisoFalhaAds(stats: Record<string, unknown> | null | undefined,
 }
 
 /**
- * Ruído de centavos da Shopee (decisão do dono, 26/11): na Shopee e no consolidado, a linha "não atribuído"
- * some quando o investimento fica abaixo de R$ 0,05 (inclusive negativo) e as vendas também; investimento
- * negativo nunca aparece (vira 0). No Mercado Livre a linha volta exatamente como veio.
+ * Ruído de centavos da Shopee (decisão do dono, 26/11): só na Shopee, a linha "não atribuído" some quando o
+ * investimento fica abaixo de R$ 0,05 (inclusive negativo) e as vendas também; investimento negativo nunca
+ * aparece (vira 0). No Mercado Livre e no consolidado a linha volta exatamente como veio: no consolidado a
+ * parte da Shopee já chega sem ruído do banco (0033), e um negativo do ML continua visível como antes.
  */
 export function ocultarRuidoNaoAtribuido<T extends { investimento: number; vendas_ads: number }>(
   canal: 'consolidado' | 'mercadolivre' | 'shopee', linha: T,
 ): T | null {
-  if (canal === 'mercadolivre') return linha;
+  if (canal !== 'shopee') return linha;
   if (linha.investimento < 0.05 && Math.abs(linha.vendas_ads) < 0.05) return null;
   return linha.investimento < 0 ? { ...linha, investimento: 0 } : linha;
 }

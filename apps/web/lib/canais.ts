@@ -14,6 +14,8 @@ export interface CoberturaShopee {
   ultimoSucesso: string | null;
   /** Primeiro dia (Brasília) com venda da Shopee no banco; nulo sem nenhuma venda. */
   inicio: string | null;
+  /** O perfil do usuário vê o canal Shopee (core.can_see_channel): sem isso, nenhum aviso da Shopee aparece. */
+  visivel: boolean;
 }
 
 /** A Shopee aparece nos filtros quando há loja conectada e ao menos uma sincronização bem-sucedida. */
@@ -33,6 +35,7 @@ export function avisoSemDadosShopee(
   c: CoberturaShopee,
 ): { semDados: boolean; texto: string } | null {
   if (canal === 'mercadolivre') return null;
+  if (!c.visivel) return canal === 'shopee' ? { semDados: true, texto: 'Sem vendas no período.' } : null;
   const ativa = shopeeAtiva(c) && !!c.inicio;
   if (canal === 'consolidado') {
     if (!c.conectada) return null; // sem loja: o consolidado é só o Mercado Livre
@@ -47,6 +50,40 @@ export function avisoSemDadosShopee(
     return { semDados: false, texto: `A Shopee tem dados a partir de ${br(c.inicio!)}: a comparação com o período anterior fica sem base.` };
   }
   return null;
+}
+
+/** Mesmo dia do ano anterior ('YYYY-MM-DD'); 29/02 vira 28/02, como o "- interval '1 year'" do banco. */
+const anoAntes = (iso: string) => {
+  const y = Number(iso.slice(0, 4)) - 1;
+  const md = iso.slice(5) === '02-29' ? '02-28' : iso.slice(5);
+  return `${y}-${md}`;
+};
+
+/**
+ * Cartões da Shopee: o período anterior começa antes da 1ª venda da Shopee, então a comparação não tem base
+ * (a seta vira "—" em vez de comparar com um zero que não é real). Consolidado e Mercado Livre não mudam.
+ */
+export function semBaseAnteriorShopee(canal: Canal, periodo: { anteriorDe: string }, c: CoberturaShopee): boolean {
+  return canal === 'shopee' && c.visivel && !!c.inicio && periodo.anteriorDe < c.inicio;
+}
+
+/**
+ * Crescimento da Shopee com base real: comparação cujo período começa antes da 1ª venda da Shopee (`inicio`)
+ * vira nula (período anterior, com a margem anterior; mesmo período do ano passado). A sugestão então segue a
+ * regra do dono: sem ano passado usa só o anterior; sem anterior, sem_historico. Mercado Livre não muda.
+ */
+export function crescimentoComBase<T extends {
+  canal: string; vendas_anterior: number | null; vendas_ano_passado: number | null; margem_pos_ads_anterior: number | null;
+}>(linha: T, periodo: { de: string; anteriorDe: string }, inicio: string | null): T {
+  if (linha.canal !== 'shopee') return linha;
+  const semAnterior = !inicio || periodo.anteriorDe < inicio;
+  const semAno = !inicio || anoAntes(periodo.de) < inicio;
+  return {
+    ...linha,
+    vendas_anterior: semAnterior ? null : linha.vendas_anterior,
+    margem_pos_ads_anterior: semAnterior ? null : linha.margem_pos_ads_anterior,
+    vendas_ano_passado: semAno ? null : linha.vendas_ano_passado,
+  };
 }
 
 type Sinc = Record<string, { ultimoSucesso: string | null } | undefined>;

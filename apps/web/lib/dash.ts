@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { createClient } from './supabase/server';
 import type { Canal } from './periodo';
 import { shopeeAtiva, type CoberturaShopee } from './canais';
@@ -87,15 +88,24 @@ export interface Sincronizacao {
   erro: string | null;
 }
 
-/** Última sincronização de cada fonte (para o selo "Atualizado às" e o aviso de falha). */
-export async function sincronizacoes(): Promise<Record<string, Sincronizacao>> {
+const ERRO_CARGA = 'Não foi possível carregar os dados agora. Tente de novo em alguns minutos.';
+
+/**
+ * Última sincronização de cada fonte (para o selo "Atualizado às" e o aviso de falha). Uma consulta por
+ * requisição (o layout e a página usam a mesma). Erro do banco vira exceção, como em rpc().
+ */
+export const sincronizacoes = cache(async (): Promise<Record<string, Sincronizacao>> => {
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .schema('core')
     .from('sync_runs')
     .select('source, status, started_at, finished_at, stats, error')
     .order('started_at', { ascending: false })
     .limit(60);
+  if (error) {
+    console.error('[dash] sync_runs:', error.message);
+    throw new Error(ERRO_CARGA);
+  }
   const out: Record<string, Sincronizacao> = {};
   for (const r of data ?? []) {
     const quando = (r.finished_at ?? r.started_at) as string | null;
@@ -105,39 +115,53 @@ export async function sincronizacoes(): Promise<Record<string, Sincronizacao>> {
     if (r.status === 'success' && !out[r.source].ultimoSucesso) out[r.source].ultimoSucesso = quando;
   }
   return out;
-}
+});
 
 /** Data (Brasília) de um timestamp ISO. */
 const diaBrasilia = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(iso));
 
 /**
- * Situação da Shopee no painel: loja conectada (core.accounts), última sincronização bem-sucedida e o primeiro
- * dia com venda guardada (para mostrar "sem dados da Shopee" em vez de zero antes disso).
+ * Loja da Shopee conectada (core.accounts), canal liberado para o perfil (core.can_see_channel) e o primeiro dia
+ * com venda guardada (para mostrar "sem dados da Shopee" em vez de zero antes disso). Uma vez por requisição.
+ * Erro do banco vira exceção (a tela mostra o erro, nunca "sem dados").
  */
-export async function coberturaShopee(sinc: Record<string, Sincronizacao>): Promise<CoberturaShopee> {
+const lojaShopee = cache(async (): Promise<Omit<CoberturaShopee, 'ultimoSucesso'>> => {
   const supabase = await createClient();
-  const [{ data: contas }, { data: primeira }] = await Promise.all([
+  const [contas, primeira, canal] = await Promise.all([
     supabase.schema('core').from('accounts').select('id').eq('channel', 'shopee').eq('active', true).limit(1),
     supabase.schema('mkt').from('orders').select('date_created').eq('channel', 'shopee')
       .order('date_created', { ascending: true }).limit(1),
+    supabase.schema('core').rpc('can_see_channel', { ch: 'shopee' }),
   ]);
-  const inicio = primeira?.[0]?.date_created ? diaBrasilia(primeira[0].date_created as string) : null;
-  return { conectada: (contas ?? []).length > 0, ultimoSucesso: sinc.shopee?.ultimoSucesso ?? null, inicio };
+  const erro = contas.error ?? primeira.error ?? canal.error;
+  if (erro) {
+    console.error('[dash] cobertura da Shopee:', erro.message);
+    throw new Error(ERRO_CARGA);
+  }
+  const d = primeira.data?.[0]?.date_created as string | undefined;
+  return { conectada: (contas.data ?? []).length > 0, inicio: d ? diaBrasilia(d) : null, visivel: canal.data === true };
+});
+
+/** O perfil vê o canal Shopee (para os avisos da Shopee no layout). */
+export const veShopee = async () => (await lojaShopee()).visivel;
+
+/**
+ * Sincronizações e situação da Shopee de uma vez (consultas em paralelo, para entrar no Promise.all da tela).
+ * `ativa`: o botão da Shopee aparece nos filtros (loja conectada, sincronizada, canal liberado e com vendas).
+ */
+export async function sincEShopee(): Promise<{ sinc: Record<string, Sincronizacao>; shopee: { cob: CoberturaShopee; ativa: boolean } }> {
+  const [sinc, loja] = await Promise.all([sincronizacoes(), lojaShopee()]);
+  const cob: CoberturaShopee = { ...loja, ultimoSucesso: sinc.shopee?.ultimoSucesso ?? null };
+  return { sinc, shopee: { cob, ativa: shopeeAtiva(cob) && !!cob.inicio && cob.visivel } };
 }
 
 /** Crescimento por canal (analytics.crescimento_canal, migration 0022). Uma chamada por tela: no consolidado
  *  o banco calcula 3 períodos × 2 canais de uma vez. */
 export interface LinhaCrescimento {
   canal: 'mercadolivre' | 'shopee';
-  vendas_atual: number; vendas_anterior: number; vendas_ano_passado: number;
+  vendas_atual: number; vendas_anterior: number | null; vendas_ano_passado: number | null;
   margem_pos_ads_atual: number | null; margem_pos_ads_anterior: number | null;
   pct_crescimento: number | null; pct_queda: number | null;
 }
 export const crescimentoCanal = (canal: Canal, de: string, ate: string, anteriorDe: string, anteriorAte: string) =>
   rpc<LinhaCrescimento>('crescimento_canal', { p_canal: canal, p_de: de, p_ate: ate, p_anterior_de: anteriorDe, p_anterior_ate: anteriorAte });
-
-/** Cobertura da Shopee e se o botão da Shopee aparece nos filtros (loja conectada, sincronizada e com vendas visíveis). */
-export async function contextoShopee(sinc: Record<string, Sincronizacao>): Promise<{ cob: CoberturaShopee; ativa: boolean }> {
-  const cob = await coberturaShopee(sinc);
-  return { cob, ativa: shopeeAtiva(cob) && !!cob.inicio };
-}

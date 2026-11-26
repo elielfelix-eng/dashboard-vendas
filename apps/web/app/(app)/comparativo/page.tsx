@@ -6,8 +6,8 @@ import { GraficoAnos } from '@/components/grafico-mensal';
 import { TabelaDados, type CelulaSugestao, type Coluna } from '@/components/tabela-dados';
 import * as ads from '@/lib/ads';
 import { agregarAnual, type LinhaAno } from '@/lib/anual';
-import { atualizadoEmCanal, avisoSemDadosShopee, nomeCanal } from '@/lib/canais';
-import { rotuloSugestaoCanal, sugestaoParaTela, textoCrescimento, tomSugestaoCanal } from '@/lib/crescimento';
+import { atualizadoEmCanal, avisoSemDadosShopee, crescimentoComBase, nomeCanal } from '@/lib/canais';
+import { rotuloSugestaoCanal, sugestaoParaTela, textoCrescimento, textoMargem, tomSugestaoCanal } from '@/lib/crescimento';
 import * as dash from '@/lib/dash';
 import type { Canal } from '@/lib/periodo';
 import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -56,8 +56,7 @@ async function AbaAnual({ sp, perms }: { sp: Record<string, string | string[] | 
 
   let mensal, shopee;
   try {
-    const sinc = await dash.sincronizacoes();
-    [mensal, shopee] = await Promise.all([dash.resultadoMensal(canal, inicio, hoje), dash.contextoShopee(sinc)]);
+    [mensal, { shopee }] = await Promise.all([dash.resultadoMensal(canal, inicio, hoje), dash.sincEShopee()]);
   } catch (e) {
     return <ErroDados mensagem={(e as Error).message} />;
   }
@@ -133,7 +132,7 @@ async function AbaAnual({ sp, perms }: { sp: Record<string, string | string[] | 
 // ---------------------------------------------------------------------
 interface LinhaTabelaCanal {
   canal: string; vendas: number | null; anterior: { valor: number | null; rotulo: string }; ano: { valor: number | null; rotulo: string };
-  margem: number | null; investimento: number | null; tacos: number | null; sugestao: CelulaSugestao | null;
+  margem: string | null; investimento: number | null; tacos: number | null; sugestao: CelulaSugestao | null;
 }
 
 async function AbaCanais({ sp, perms }: { sp: Record<string, string | string[] | undefined>; perms: Set<Permissao> }) {
@@ -144,10 +143,9 @@ async function AbaCanais({ sp, perms }: { sp: Record<string, string | string[] |
 
   let d;
   try {
-    const sinc = await dash.sincronizacoes();
-    const [cresc, shopee, adsMl, adsSh] = await Promise.all([
+    const [cresc, { sinc, shopee }, adsMl, adsSh] = await Promise.all([
       dash.crescimentoCanal('consolidado', periodo.de, periodo.ate, periodo.anteriorDe, periodo.anteriorAte),
-      dash.contextoShopee(sinc),
+      dash.sincEShopee(),
       verAds ? ads.adsResumo('mercadolivre', periodo.de, periodo.ate, false) : Promise.resolve(null),
       verAds ? ads.adsResumo('shopee', periodo.de, periodo.ate, false) : Promise.resolve(null),
     ]);
@@ -156,7 +154,9 @@ async function AbaCanais({ sp, perms }: { sp: Record<string, string | string[] |
     return <ErroDados mensagem={(e as Error).message} />;
   }
 
-  const cartoes: { canal: 'mercadolivre' | 'shopee'; dados: DadosCartaoCanal }[] = d.cresc.map((l) => {
+  // Shopee: comparação cujo período começa antes da 1ª venda da Shopee vira "sem dado" (nunca uma base vazia).
+  const cartoes: { canal: 'mercadolivre' | 'shopee'; dados: DadosCartaoCanal }[] = d.cresc.map((l0) => {
+    const l = crescimentoComBase(l0, periodo, d.shopee.cob.inicio);
     const aviso = l.canal === 'shopee' ? avisoSemDadosShopee('shopee', periodo, d.shopee.cob) : null;
     const semDados = aviso?.semDados ? aviso.texto : null;
     const r = l.canal === 'shopee' ? d.adsSh : d.adsMl;
@@ -184,7 +184,7 @@ async function AbaCanais({ sp, perms }: { sp: Record<string, string | string[] |
       vendas: x.semDados ? null : x.vendasAtual,
       anterior: x.semDados ? sem : textoCrescimento(x.vendasAtual, x.vendasAnterior),
       ano: x.semDados ? sem : textoCrescimento(x.vendasAtual, x.vendasAnoPassado),
-      margem: x.semDados ? null : x.margemAtual,
+      margem: x.semDados ? null : textoMargem(x.margemAtual),
       investimento: x.semDados ? null : x.ads?.investimento ?? null,
       tacos: x.semDados ? null : x.ads?.tacos ?? null,
       sugestao: x.sugestao
@@ -197,7 +197,7 @@ async function AbaCanais({ sp, perms }: { sp: Record<string, string | string[] |
     { chave: 'vendas', titulo: 'Vendas brutas', tipo: 'brl' },
     { chave: 'anterior', titulo: 'Sobre o período anterior', tipo: 'variacao' },
     { chave: 'ano', titulo: 'Sobre o ano passado', tipo: 'variacao' },
-    ...(verCustos ? [{ chave: 'margem', titulo: 'Margem depois do Ads %', tipo: 'pct' }] as Coluna<LinhaTabelaCanal>[] : []),
+    ...(verCustos ? [{ chave: 'margem', titulo: 'Margem depois do Ads', tipo: 'texto' }] as Coluna<LinhaTabelaCanal>[] : []),
     ...(verAds ? [
       { chave: 'investimento', titulo: 'Investimento em Ads', tipo: 'brl' },
       { chave: 'tacos', titulo: 'TACOS', tipo: 'pct' },

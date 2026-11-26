@@ -214,11 +214,13 @@ test('avisoSemDetalhe: texto do canal (ML igual ao de antes)', () => {
   assert.equal(avisoSemDetalhe(true, 'shopee'), null);
 });
 
-test('ruido de centavos: Shopee e consolidado escondem nao atribuido < R$ 0,05 ou negativo; ML nao muda', () => {
+test('ruido de centavos: so a Shopee esconde nao atribuido < R$ 0,05 ou negativo; ML e consolidado nao mudam', () => {
   const l = (investimento: number, vendas_ads = 0) => ({ investimento, vendas_ads, outro: 'x' });
   assert.equal(ocultarRuidoNaoAtribuido('shopee', l(-0.01)), null);
   assert.equal(ocultarRuidoNaoAtribuido('shopee', l(0.04)), null);
-  assert.equal(ocultarRuidoNaoAtribuido('consolidado', l(0.03, 0.02)), null);
+  // consolidado: a parte da Shopee ja vem sem ruido do SQL (0033); o negativo do ML continua visivel
+  assert.deepEqual(ocultarRuidoNaoAtribuido('consolidado', l(0.03, 0.02)), l(0.03, 0.02));
+  assert.deepEqual(ocultarRuidoNaoAtribuido('consolidado', l(-0.01)), l(-0.01));
   assert.deepEqual(ocultarRuidoNaoAtribuido('shopee', l(0.05)), l(0.05));
   assert.deepEqual(ocultarRuidoNaoAtribuido('shopee', l(8, 40)), l(8, 40));
   // investimento negativo nunca aparece; com vendas de verdade a linha fica, com investimento 0

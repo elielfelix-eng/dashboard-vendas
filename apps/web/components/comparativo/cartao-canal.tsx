@@ -16,8 +16,9 @@ export const CLASSE_TOM: Record<TomSugestaoCanal, string> = {
 export interface DadosCartaoCanal {
   nome: string;
   vendasAtual: number;
-  vendasAnterior: number;
-  vendasAnoPassado: number;
+  /** Nulo quando o período de comparação começa antes dos dados do canal (aparece "sem dado"). */
+  vendasAnterior: number | null;
+  vendasAnoPassado: number | null;
   /** Margem depois do Ads (% da receita); nula sem a permissão de custos ou sem receita. */
   margemAtual: number | null;
   margemAnterior: number | null;
@@ -32,7 +33,7 @@ export interface DadosCartaoCanal {
   verCustos: boolean;
 }
 
-function Crescimento({ rotulo, atual, referencia }: { rotulo: string; atual: number; referencia: number }) {
+function Crescimento({ rotulo, atual, referencia }: { rotulo: string; atual: number; referencia: number | null }) {
   const v = textoCrescimento(atual, referencia);
   const cor = v.valor == null || v.valor === 0 ? 'text-muted' : v.valor > 0 ? 'text-good' : 'text-bad';
   return (

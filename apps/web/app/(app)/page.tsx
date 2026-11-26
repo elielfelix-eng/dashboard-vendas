@@ -6,7 +6,7 @@ import { FotoProduto } from '@/components/foto-produto';
 import { FiltroTopo } from '@/components/filtro-topo';
 import { GraficoSerie } from '@/components/grafico-serie';
 import { PainelAtencao } from '@/components/painel-atencao';
-import { atualizadoEmCanal, avisoSemDadosShopee, canaisDaMeta, metaDoMes } from '@/lib/canais';
+import { atualizadoEmCanal, avisoSemDadosShopee, canaisDaMeta, metaDoMes, semBaseAnteriorShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, dataBr, num, pct, variacao } from '@/lib/formato';
 import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros, resolverPeriodo } from '@/lib/periodo';
@@ -25,19 +25,22 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
   let dados;
   try {
     const ontem = resolverPeriodo('hoje', hoje).anteriorDe;
-    const sinc = await dash.sincronizacoes();
-    const shopee = await dash.contextoShopee(sinc);
     const ano = Number(hoje.slice(0, 4));
-    const [atual, anterior, serieAtual, serieAnterior, modelos, metas, rHoje, rOntem] = await Promise.all([
+    const metasDe = (comShopee: boolean) => Promise.all(canaisDaMeta(canal, comShopee).map((c) => dash.metas(c, ano)));
+    // Metas: ML e Shopee buscadas junto com o resto; a da Shopee só entra quando a Shopee está ativa (abaixo).
+    const [atual, anterior, serieAtual, serieAnterior, modelos, metasTodas, rHoje, rOntem, { sinc, shopee }] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
       dash.serie(canal, periodo.de, periodo.ate, granularidadeDoPeriodo(chave)),
       dash.serie(canal, periodo.anteriorDe, periodo.anteriorAte, granularidadeDoPeriodo(chave)),
       dash.modelos(canal, periodo.de, periodo.ate),
-      perms.has('metas') ? Promise.all(canaisDaMeta(canal, shopee.ativa).map((c) => dash.metas(c, ano))) : Promise.resolve([]),
+      perms.has('metas') ? metasDe(true) : Promise.resolve([]),
       dash.resumo(canal, hoje, hoje),
       dash.resumo(canal, ontem, ontem),
+      dash.sincEShopee(),
     ]);
+    // canaisDaMeta(…, true) devolve [ML, Shopee] no consolidado: sem a Shopee ativa, fica só o ML.
+    const metas = canal === 'consolidado' && !shopee.ativa ? metasTodas.slice(0, 1) : metasTodas;
     dados = { atual, anterior, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem, shopee };
   } catch (e) {
     return (
@@ -47,7 +50,11 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
       </div>
     );
   }
-  const { atual: a, anterior: p, serieAtual, serieAnterior, modelos, sinc, metas, rHoje, rOntem, shopee } = dados;
+  const { atual: a, anterior, serieAtual, modelos, sinc, metas, rHoje, rOntem, shopee } = dados;
+  // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—", sem linha anterior).
+  const semBase = semBaseAnteriorShopee(canal, periodo, shopee.cob);
+  const p = semBase ? null : anterior;
+  const serieAnterior = semBase ? [] : dados.serieAnterior;
   const mes = `${hoje.slice(0, 7)}-01`;
   // Meta do mês: no consolidado, soma as metas do Mercado Livre e da Shopee (só canais com meta cadastrada).
   const mesAtual = metaDoMes(metas.map((linhas) => linhas.find((m) => m.mes === mes) ?? { realizado: null, meta: null }));
@@ -83,22 +90,22 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
       ) : (
         <>
           <GradeArrastavel id="visao-geral" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" itens={[
-            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p.vendas_brutas)}
+            { chave: 'vendas-brutas', node: <CartaoIndicador titulo="Vendas brutas" valor={brl(a.vendas_brutas)} variacao={variacao(a.vendas_brutas, p?.vendas_brutas)}
               ajuda={canal === 'mercadolivre' ? 'Pedidos pagos, cancelados e devolvidos (sem divididos), igual ao painel do Mercado Livre.'
                 : canal === 'shopee' ? 'Pedidos pagos e cancelados depois do pagamento.'
                 : 'Mercado Livre: pedidos pagos, cancelados e devolvidos (sem divididos). Shopee: pedidos pagos e cancelados depois do pagamento.'} /> },
-            { chave: 'pedidos', node: <CartaoIndicador titulo="Pedidos" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p.pedidos)} /> },
-            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades" valor={num(a.unidades)} variacao={variacao(a.unidades, p.unidades)} /> },
-            { chave: 'ticket-medio', node: <CartaoIndicador titulo="Ticket médio" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p.ticket_medio)} /> },
-            ...(verCustos && a.margem_bruta != null ? [{ chave: 'margem-bruta', node: <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)} variacao={variacao(a.margem_bruta, p.margem_bruta)}
+            { chave: 'pedidos', node: <CartaoIndicador titulo="Pedidos" valor={num(a.pedidos)} variacao={variacao(a.pedidos, p?.pedidos)} /> },
+            { chave: 'unidades', node: <CartaoIndicador titulo="Unidades" valor={num(a.unidades)} variacao={variacao(a.unidades, p?.unidades)} /> },
+            { chave: 'ticket-medio', node: <CartaoIndicador titulo="Ticket médio" valor={brl(a.ticket_medio)} variacao={variacao(a.ticket_medio, p?.ticket_medio)} /> },
+            ...(verCustos && a.margem_bruta != null ? [{ chave: 'margem-bruta', node: <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)} variacao={variacao(a.margem_bruta, p?.margem_bruta)}
               detalhe={pct(margemPct(a.margem_bruta, a.receita))} ajuda="Receita (pedidos pagos) menos o custo dos produtos." /> }] : []),
             ...(verCustos && a.margem_contribuicao != null ? [{ chave: 'margem-contribuicao', node: <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
-              variacao={variacao(a.margem_contribuicao, p.margem_contribuicao)} detalhe={pct(margemPct(a.margem_contribuicao, a.receita))}
+              variacao={variacao(a.margem_contribuicao, p?.margem_contribuicao)} detalhe={pct(margemPct(a.margem_contribuicao, a.receita))}
               ajuda={`Receita menos tarifas ${canal === 'mercadolivre' ? 'do Mercado Livre' : canal === 'shopee' ? 'da Shopee' : 'do Mercado Livre e da Shopee'}, frete, Ads, imposto, embalagem e custo dos produtos.`} /> }] : []),
-            { chave: 'ads', node: <CartaoIndicador titulo="Ads" valor={brl(a.product_ads)} variacao={variacao(a.product_ads, p.product_ads)} inverterCores
+            { chave: 'ads', node: <CartaoIndicador titulo="Ads" valor={brl(a.product_ads)} variacao={variacao(a.product_ads, p?.product_ads)} inverterCores
               detalhe={`TACOS ${pct(tacos)}`} ajuda="Investimento em Product Ads. TACOS = Ads ÷ vendas brutas." /> },
             { chave: 'cancelados', node: <CartaoIndicador titulo="Cancelados e devolvidos" valor={num(a.cancelados + a.devolvidos)}
-              variacao={variacao(a.cancelados + a.devolvidos, p.cancelados + p.devolvidos)} inverterCores
+              variacao={variacao(a.cancelados + a.devolvidos, p ? p.cancelados + p.devolvidos : null)} inverterCores
               detalhe={`${pct(a.pct_cancel_devol)} dos pedidos`} /> },
             ...(mesAtual != null && mesAtual.meta !== 0 ? [{ chave: 'meta-mes', node: <CartaoIndicador titulo="Mês atual: realizado × meta" valor={`${pct((mesAtual.realizado / mesAtual.meta) * 100)}`}
               detalhe={`${brl(mesAtual.realizado)} de ${brl(mesAtual.meta)}`} ajuda="Receita (pedidos pagos) do mês até hoje ÷ meta do mês." /> }] : []),
@@ -133,7 +140,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
                 </tbody>
               </table>
             </div>
-            <PainelAtencao pedidosSemCusto={verCustos ? a.pedidos_sem_custo : null} sincronizacoes={sinc} comShopee={shopee.cob.conectada} />
+            <PainelAtencao pedidosSemCusto={verCustos ? a.pedidos_sem_custo : null} sincronizacoes={sinc} comShopee={shopee.cob.conectada && shopee.cob.visivel} />
           </section>
           <ComoCalculamos verCustos={verCustos} canal={canal} />
         </>

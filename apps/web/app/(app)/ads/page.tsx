@@ -14,7 +14,7 @@ import {
   avisoFalhaAds, avisoSemDetalhe, contarSugestoes, ocultarRuidoNaoAtribuido, primeiroDiaProximoMes, lerSugestao, ordemSugestao, ORDEM_SUGESTOES, ROTULO_NAO_ATRIBUIDO, ROTULO_SEM_CAMPANHA, roas, rotuloModelo, rotuloSugestao,
   tomSugestao, type SugestaoAds,
 } from '@/lib/ads-regras';
-import { atualizadoEmCanal, avisoSemDadosShopee } from '@/lib/canais';
+import { atualizadoEmCanal, avisoSemDadosShopee, semBaseAnteriorShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, pct as pctTxt, variacao, variacaoPp } from '@/lib/formato';
 import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros, type Canal } from '@/lib/periodo';
@@ -145,8 +145,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   try {
     // Os cartões não usam nao_atribuido (a tabela tem a linha própria): detalhe = false pula a atribuição
     // por modelo nas duas chamadas. Tabelas só da aba aberta. Seguidores só existem no Mercado Livre.
-    const sinc = await dash.sincronizacoes();
-    const [atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, shopee] = await Promise.all([
+    const [atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, { sinc, shopee }] = await Promise.all([
       ads.adsResumo(canal, periodo.de, periodo.ate, false),
       ads.adsResumo(canal, periodo.anteriorDe, periodo.anteriorAte, false),
       canal !== 'shopee' ? ads.adsSeguidores(canal, periodo.de, periodo.ate) : Promise.resolve(0),
@@ -154,7 +153,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
       ads.adsSerie(canal, periodo.de, periodo.ate),
       aba === 'modelos' ? ads.adsModelos(canal, periodo.de, periodo.ate) : Promise.resolve([]),
       aba === 'campanhas' ? ads.adsCampanhas(canal, periodo.de, periodo.ate) : Promise.resolve([]),
-      dash.contextoShopee(sinc),
+      dash.sincEShopee(),
     ]);
     // Orçamento: só com a aba aberta; sempre do mês corrente.
     const [orcamento, vigencias] = aba === 'orcamento'
@@ -164,7 +163,9 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const { atual: a, anterior: p, segAtual, segAnterior } = d;
+  const { atual: a, segAtual, segAnterior } = d;
+  // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
+  const p = semBaseAnteriorShopee(canal, periodo, d.shopee.cob) ? undefined : d.anterior;
   // Cartão Investimento = Product Ads + Seguidores. ACOS, ROAS e TACOS continuam só com Product Ads.
   const investimentoTotal = a ? Math.round((a.investimento + segAtual) * 100) / 100 : 0;
   const investimentoAnterior = p ? Math.round((p.investimento + segAnterior) * 100) / 100 : undefined;
@@ -177,7 +178,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const semInvestimento = !a || (a.investimento === 0 && a.vendas_ads === 0);
   const falhas = [
     canal !== 'shopee' ? avisoFalhaAds(d.sinc.mercadolivre?.stats ?? null, 'mercadolivre') : null,
-    canal !== 'mercadolivre' && d.shopee.cob.conectada ? avisoFalhaAds(d.sinc.shopee?.stats ?? null, 'shopee') : null,
+    canal !== 'mercadolivre' && d.shopee.cob.conectada && d.shopee.cob.visivel ? avisoFalhaAds(d.sinc.shopee?.stats ?? null, 'shopee') : null,
   ].filter((x): x is string => !!x);
   const semDetalhe = a ? avisoSemDetalhe(a.tem_detalhe, canal) : null;
   const EXPLICACOES = explicacoes(canal);
@@ -251,7 +252,9 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               direita={{ titulo: 'Seguidores', valor: brl(segAtual), variacao: variacao(segAtual, segAnterior),
                 participacao: pctTxt(investimentoTotal > 0 ? (segAtual / investimentoTotal) * 100 : null), rotulo: '' }} /> }]),
             { chave: 'vendas-ads-organicas', node: <CartaoDuplo inverterCores={false}
-              ajuda={`Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo: ${canal === 'mercadolivre' ? 'Mercado Livre' : canal === 'shopee' ? 'Shopee' : 'Mercado Livre e Shopee'}). A participação é sobre as vendas brutas do canal.`}
+              ajuda={canal === 'mercadolivre'
+                ? 'Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo atual: Mercado Livre). A participação é sobre as vendas brutas do canal.'
+                : `Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo: ${canal === 'shopee' ? 'Shopee' : 'Mercado Livre e Shopee'}). A participação é sobre as vendas brutas do canal.`}
               esquerda={{ titulo: 'Vendas por Ads', valor: brl(a.vendas_ads), variacao: variacao(a.vendas_ads, p?.vendas_ads),
                 participacao: pctTxt(a.pct_vendas_ads), rotulo: '' }}
               direita={{ titulo: 'Vendas orgânicas', valor: brl(orgVendas), variacao: variacao(orgVendas, orgAnterior),

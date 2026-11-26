@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { precisaReconectarShopee } from '@/lib/canais';
-import { sincronizacoes } from '@/lib/dash';
+import { sincronizacoes, veShopee } from '@/lib/dash';
 
 const NOMES: Record<string, string> = { mercadolivre: 'Mercado Livre', shopee: 'Shopee', erp: 'ERP (custos)' };
 
@@ -12,9 +12,10 @@ export async function AvisoSincronizacao() {
   let falhas: string[] = [];
   let reconectar = false;
   try {
-    const s = await sincronizacoes();
-    reconectar = precisaReconectarShopee(s.shopee);
-    falhas = Object.keys(NOMES).filter((k) => s[k]?.status === 'error' && !(k === 'shopee' && reconectar));
+    const [s, ve] = await Promise.all([sincronizacoes(), veShopee()]);
+    // Avisos da Shopee só para quem vê o canal Shopee.
+    reconectar = ve && precisaReconectarShopee(s.shopee);
+    falhas = Object.keys(NOMES).filter((k) => s[k]?.status === 'error' && !(k === 'shopee' && (reconectar || !ve)));
   } catch {
     return null;
   }

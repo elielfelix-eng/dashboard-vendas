@@ -8,7 +8,7 @@ import { GraficoMensal } from '@/components/grafico-mensal';
 import { queryFiltros } from '@/components/seletor-grao';
 import { TabelaAbc } from '@/components/tabela-abc';
 import { TabelaDados, type Coluna } from '@/components/tabela-dados';
-import { atualizadoEmCanal, avisoSemDadosShopee, textosEstimados } from '@/lib/canais';
+import { atualizadoEmCanal, avisoSemDadosShopee, semBaseAnteriorShopee, textosEstimados } from '@/lib/canais';
 import * as dash from '@/lib/dash';
 import { brl, num, pct, variacao, variacaoPp } from '@/lib/formato';
 import { hojeBrasilia, lerFiltros } from '@/lib/periodo';
@@ -100,21 +100,22 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
 
   let d;
   try {
-    const sinc = await dash.sincronizacoes();
-    const [atual, anterior, modelos, skus, mensal, alertas, shopee] = await Promise.all([
+    const [atual, anterior, modelos, skus, mensal, alertas, { sinc, shopee }] = await Promise.all([
       dash.resumo(canal, periodo.de, periodo.ate),
       dash.resumo(canal, periodo.anteriorDe, periodo.anteriorAte),
       dash.modelos(canal, periodo.de, periodo.ate),
       dash.skus(canal, periodo.de, periodo.ate, null),
       dash.resultadoMensal(canal, inicioAno, periodo.ate),
       dash.alertas(canal, periodo.de, periodo.ate),
-      dash.contextoShopee(sinc),
+      dash.sincEShopee(),
     ]);
     d = { atual, anterior, modelos, skus, mensal, alertas, sinc, shopee };
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Rentabilidade</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
-  const { atual: a, anterior: p } = d;
+  // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
+  const a = d.atual;
+  const p = semBaseAnteriorShopee(canal, periodo, d.shopee.cob) ? null : d.anterior;
   const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
   const est = textosEstimados(canal);
   const soShopee = canal === 'shopee';
@@ -173,12 +174,12 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
       {aviso?.semDados ? <SemDados texto={aviso.texto} /> : a.pedidos === 0 ? <SemDados /> : (
         <>
           <GradeArrastavel id="rentabilidade" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5" itens={[
-            { chave: 'receita', node: <CartaoIndicador titulo="Receita (vendas líquidas)" valor={brl(a.receita)} variacao={variacao(a.receita, p.receita)} ajuda="Só pedidos pagos." /> },
+            { chave: 'receita', node: <CartaoIndicador titulo="Receita (vendas líquidas)" valor={brl(a.receita)} variacao={variacao(a.receita, p?.receita)} ajuda="Só pedidos pagos." /> },
             { chave: 'margem-bruta', node: <CartaoIndicador titulo="Margem bruta" valor={brl(a.margem_bruta)}
-              variacao={variacaoPp(pctDe(a.margem_bruta, a.receita), pctDe(p.margem_bruta, p.receita))}
+              variacao={variacaoPp(pctDe(a.margem_bruta, a.receita), p ? pctDe(p.margem_bruta, p.receita) : null)}
               detalhe={pct(pctDe(a.margem_bruta, a.receita))} /> },
             { chave: 'margem-contribuicao', node: <CartaoIndicador titulo="Margem de contribuição" valor={brl(a.margem_contribuicao)}
-              variacao={variacaoPp(pctDe(a.margem_contribuicao, a.receita), pctDe(p.margem_contribuicao, p.receita))}
+              variacao={variacaoPp(pctDe(a.margem_contribuicao, a.receita), p ? pctDe(p.margem_contribuicao, p.receita) : null)}
               detalhe={pct(pctDe(a.margem_contribuicao, a.receita))} /> },
             { chave: 'aguardando-fatura', node: <CartaoIndicador titulo={est.titulo} valor={`${num(a.estimados)} pedidos`}
               detalhe={est.detalhe} ajuda={est.ajuda} /> },

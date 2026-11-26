@@ -23,12 +23,11 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
 
   let skus, pedidos, sinc, modelos, shopee;
   try {
-    sinc = await dash.sincronizacoes();
-    [skus, pedidos, modelos, shopee] = await Promise.all([
+    [skus, pedidos, modelos, { sinc, shopee }] = await Promise.all([
       dash.skus(canal, periodo.de, periodo.ate, modelo),
       dash.pedidos(canal, periodo.de, periodo.ate, modelo),
       dash.modelos(canal, periodo.de, periodo.ate),
-      dash.contextoShopee(sinc),
+      dash.sincEShopee(),
     ]);
   } catch (e) {
     return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">{modelo}</h1><ErroDados mensagem={(e as Error).message} /></div>;

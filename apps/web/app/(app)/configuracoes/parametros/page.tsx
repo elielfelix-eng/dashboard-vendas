@@ -194,7 +194,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
         percentual em algum comparativo ou a margem fica negativa. Cada período usa a vigência mais recente com data igual ou anterior
         ao último dia analisado.{!ehAdmin && ' Só o administrador pode alterar.'}
       </p>
-      {!verCrescimento && (
+      {!verCrescimento && !ehAdmin && (
         <p className="mb-4 rounded-lg border border-border bg-surface px-4 py-2 text-sm text-muted">
           Os percentuais de crescimento aparecem só para perfis com a permissão Vendas. Peça ao administrador para liberar,
           se precisar ver ou conferir estes números.
@@ -237,7 +237,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
         );
       })}
 
-      {ehAdmin && verCrescimento && ['mercadolivre', 'shopee'].map((canal) => {
+      {ehAdmin && ['mercadolivre', 'shopee'].map((canal) => {
         const base = crescimento.find((l) => l.channel === canal && String(l.vigente_desde) <= hoje);
         return (
           <form key={canal} action={salvarParametrosCrescimento} className="mt-6 grid gap-3 rounded-xl border border-border bg-surface p-4 text-sm sm:grid-cols-3">

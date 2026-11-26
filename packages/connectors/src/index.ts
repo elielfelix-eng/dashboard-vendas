@@ -22,5 +22,13 @@ export {
   tarifasDoEscrow,
   camposNumericos,
   toShopeeOrder,
+  toShopeeItem,
+  ADS_CONTA,
+  combinarAdsShopee,
+  dataShopeeAds,
+  diaShopeeAds,
+  metricaAdsShopee,
 } from './shopee/connector.ts';
-export type { ShopeeAppCredentials, ShopeeCategoria, ShopeeEscrow, ShopeeTarifa } from './shopee/connector.ts';
+export type {
+  ShopeeAdsCampanha, ShopeeAdsDia, ShopeeAdsProdutos, ShopeeAppCredentials, ShopeeCategoria, ShopeeEscrow, ShopeeTarifa,
+} from './shopee/connector.ts';

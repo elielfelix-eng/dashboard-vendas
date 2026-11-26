@@ -1,0 +1,26 @@
+name: Shopee - sonda da API
+
+# Rodado manualmente: levanta o que a API da Shopee entrega e mede o histórico (só leitura).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sondar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Sondar a API da Shopee
+        run: npm run shopee:sonda -w jobs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SHOPEE_PARTNER_ID: ${{ secrets.SHOPEE_PARTNER_ID }}
+          SHOPEE_PARTNER_KEY: ${{ secrets.SHOPEE_PARTNER_KEY }}

@@ -7,6 +7,7 @@
     "sync": "tsx --env-file-if-exists=../.env src/index.ts",
     "bitrix:config": "tsx --env-file-if-exists=../.env src/bitrix-config.ts",
     "ml:levantamento": "tsx --env-file-if-exists=../.env src/ml-levantamento-envios.ts",
+    "shopee:sonda": "tsx --env-file-if-exists=../.env src/shopee-sonda.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

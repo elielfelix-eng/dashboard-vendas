@@ -2,9 +2,10 @@ import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// Shopee (migration 0020): pagamentos (escrow), view analytics.shopee_fatura, pendentes e idempotencia.
+// Shopee (migrations 0020, 0030, 0031): pagamentos (escrow), view analytics.shopee_fatura, pendentes e idempotencia.
+// Shopee (migration 0032): Ads da conta e por anuncio sem somar o dia 2x; "sem modelo" e tabela = cartao.
 const repo = fileURLToPath(new URL('../..', import.meta.url));
-const db = new PGlite();
+let db = new PGlite(); // trocado por um banco novo na secao da 0032 (Ads), que precisa das funcoes do painel
 let fails = 0;
 const eq = (label, got, exp) => {
   const ok = JSON.stringify(got) === JSON.stringify(exp);
@@ -209,6 +210,86 @@ await db.exec(mig('0031_shopee_categorias.sql'));
 eq('0031 reexecutada: campos apagados', await val(`select count(*)::int from mkt.shopee_escrow_campos`), 0);
 eq('0031 reexecutada: escrow preservado', await val(`select count(*)::int from mkt.shopee_escrow where order_id = '260918B8KJMYJP'`), 3);
 eq('0031: P1 e os pedidos reais voltam a ser pendentes', (await rows(`select * from mkt.shopee_pedidos_pendentes(500) as p`)).length, 3 + reais.length);
+
+// =====================================================================
+// 0032: anuncios e Shopee Ads (Tarefa 4). Banco novo com as funcoes do painel (0002..0019) + 0020..0032.
+// =====================================================================
+db = new PGlite();
+await db.exec(readFileSync(`${repo}/supabase/tests/stubs.sql`, 'utf8'));
+for (const f of ['0002_marketplaces.sql', '0003_regras_v1.sql', '0006_custo_por_cotacao.sql', '0007_de_para_modelo.sql',
+  '0008_dashboard_admin.sql', '0009_dashboard_funcoes.sql', '0010_dashboard_metas.sql', '0011_rls_desempenho.sql',
+  '0012_crm.sql', '0013_crm_funcoes.sql', '0018_ads_tabelas.sql', '0019_ads_funcoes.sql',
+  '0020_shopee_pagamentos.sql', '0030_shopee_escrow_campos.sql', '0031_shopee_categorias.sql', '0032_shopee_ads.sql', '0032_shopee_ads.sql'])
+  await db.exec(mig(f));
+console.log('Banco novo: 0002..0019 + 0020, 0030, 0031 e 0032 (2x) aplicadas');
+await db.exec(`
+  create or replace function core.my_role() returns core.app_role language sql as $$ select 'admin'::core.app_role $$;
+  create or replace function core.can_see_channel(ch text) returns boolean language sql as $$ select ch = any (string_to_array(coalesce(nullif(current_setting('teste.canais', true), ''), 'mercadolivre,shopee,crm'), ',')) $$;
+  grant usage on schema core to authenticated;`);
+
+// Anuncios da Shopee (mesmo formato do job): SH1 com SKU (modelo AAA11), SH2 sem SKU no anuncio nem na variacao
+await db.exec(`
+insert into mkt.items (channel, item_id, title, sku, status) values
+ ('shopee','SH1','Caneca Shopee','AAA11-AZU','active'), ('shopee','SH2','Sem SKU',null,'active');
+insert into mkt.item_variations (channel, item_id, variation_id, sku) values ('shopee','SH2','21','');
+insert into mkt.ads_campaign_daily (channel, campaign_id, day, cost) values ('mercadolivre','c1','2026-11-05',100);`);
+
+const D5 = '2026-11-05';
+const M = (item, cost, extra = {}) => ({ item_id: item, day: D5, campaign_id: item === 'conta' ? 'conta' : 'c1', impressions: 10, clicks: 2, cost,
+  direct_amount: 5, indirect_amount: 1, direct_units: 1, indirect_units: 0, organic_units: 0, ...extra });
+const conta = JSON.stringify([{ day: D5, cost: 60, raw: { expense: 60 } }]);
+const porAnuncio = JSON.stringify([M('SH1', 30), M('SH2', 20), M('conta', 10)]);
+const gravarAds = (dias, m, c) => val(`select mkt.shopee_gravar_ads($1::date[], $2::jsonb, $3::jsonb)`, [dias, m, c]);
+const adsShopee = () => rows(`select item_id, campaign_id, cost::float as c from mkt.ads_metrics_daily where channel = 'shopee' order by item_id collate "C"`);
+
+eq('ads: grava as linhas por anuncio', await gravarAds([D5], porAnuncio, conta), 3);
+eq('ads: 2a gravacao do mesmo dia', await gravarAds([D5], porAnuncio, conta), 3);
+eq('ads: mesmo dia gravado 2x nao soma (Step 1)', await adsShopee(),
+  [{ item_id: 'SH1', campaign_id: 'c1', c: 30 }, { item_id: 'SH2', campaign_id: 'c1', c: 20 }, { item_id: 'conta', campaign_id: 'conta', c: 10 }]);
+eq('ads: conta na pseudo-campanha "conta" (investimento do dia), sem somar 2x', await rows(`select campaign_id, day::text as d, cost::float as c, raw from mkt.ads_campaign_daily where channel = 'shopee'`),
+  [{ campaign_id: 'conta', d: D5, c: 60, raw: { expense: 60 } }]);
+eq('ads: linha repetida no mesmo envio fica uma so', await gravarAds([D5], JSON.stringify([M('SH1', 30), M('SH1', 30)]), conta), 1);
+eq('ads: nova busca do dia substitui (anuncio que sumiu sai)', await adsShopee(), [{ item_id: 'SH1', campaign_id: 'c1', c: 30 }]);
+// Por anuncio indisponivel na nova busca: so a conta; nada do por-anuncio antigo fica somado junto
+await gravarAds([D5], JSON.stringify([M('conta', 60)]), conta);
+eq('ads: por anuncio indisponivel -> uma linha "conta" com o total do dia', await adsShopee(), [{ item_id: 'conta', campaign_id: 'conta', c: 60 }]);
+eq('ads: Mercado Livre intocado', await rows(`select channel, campaign_id, cost::float as c from mkt.ads_campaign_daily where channel = 'mercadolivre'`),
+  [{ channel: 'mercadolivre', campaign_id: 'c1', c: 100 }]);
+eq('ads: dia fora da lista nao e apagado nem gravado', await gravarAds(['2026-11-06'], porAnuncio, '[]'), 0);
+eq('ads: dia 05 preservado', (await adsShopee()).length, 1);
+eq('ads: pseudo-campanha "conta" cadastrada', await rows(`select name from mkt.ads_campaigns where channel = 'shopee' and campaign_id = 'conta'`),
+  [{ name: 'Shopee Ads (conta inteira)' }]);
+eq('ads: Mercado Livre nao recebe o Ads da Shopee (dash_ads_periodo ML)', await val(`select analytics.dash_ads_periodo('mercadolivre', '2026-11-01', '2026-11-30')::float`), 100);
+
+// ---------------- Step 2: anuncio sem SKU equivalente cai em "sem modelo"; tabela = cartao (Review Focus 4) ----------------
+await gravarAds([D5], porAnuncio, conta);
+eq('sem modelo: SH1 -> AAA11; SH2 (sem SKU) e o resto da conta -> modelo nulo',
+  await rows(`select modelo, investimento::float as inv, vendas_ads::float as v from analytics.ads_metricas_modelo('shopee', '2026-11-01', '2026-11-30') order by modelo nulls last`),
+  [{ modelo: 'AAA11', inv: 30, v: 6 }, { modelo: null, inv: 30, v: 12 }]);
+// Contrato para a Tarefa 5 (0021): o cartao de investimento da Shopee = soma de mkt.ads_campaign_daily ('conta').
+// Ate a 0021, dash_ads_periodo devolve 0 para a Shopee; aqui ele e simulado com esse contrato.
+await db.exec(`
+create or replace function analytics.dash_ads_periodo(p_canal text, p_de date, p_ate date) returns numeric
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select sum(a.cost) from mkt.ads_campaign_daily a
+                    where a.channel = 'shopee' and p_canal in ('consolidado', 'shopee') and a.day between p_de and p_ate), 0)
+$$;`);
+const cartao = await val(`select investimento::float from analytics.ads_resumo('shopee', '2026-11-01', '2026-11-30')`);
+eq('cartao: investimento da Shopee = conta do dia', cartao, 60);
+const tabela = await rows(`select modelo, investimento::float as inv from analytics.ads_modelos('shopee', '2026-11-01', '2026-11-30') order by modelo nulls last`);
+eq('tabela: AAA11 e a linha "sem modelo / nao atribuido"', tabela, [{ modelo: 'AAA11', inv: 30 }, { modelo: null, inv: 30 }]);
+eq('tabela: soma = cartao', tabela.reduce((s, r) => s + r.inv, 0), cartao);
+eq('resumo: vendas por Ads = vendas da conta (direta + indireta)', await val(`select vendas_ads::float from analytics.ads_resumo('shopee', '2026-11-01', '2026-11-30')`), 18);
+eq('campanhas: soma = cartao', (await rows(`select investimento::float as inv from analytics.ads_campanhas('shopee', '2026-11-01', '2026-11-30')`)).reduce((s, r) => s + r.inv, 0), cartao);
+// So a conta (por anuncio indisponivel): tudo "sem modelo", e a soma continua batendo
+await gravarAds([D5], JSON.stringify([M('conta', 60)]), conta);
+const tabela2 = await rows(`select modelo, investimento::float as inv from analytics.ads_modelos('shopee', '2026-11-01', '2026-11-30')`);
+eq('so a conta: uma linha "sem modelo" = cartao', tabela2, [{ modelo: null, inv: 60 }]);
+
+// ---------------- Seguranca e reexecucao ----------------
+eq('ads: authenticated nao executa a gravacao', await comoAuth(() => tenta(`select mkt.shopee_gravar_ads(array['2026-11-05']::date[], '[]'::jsonb, '[]'::jsonb)`)), 'negado');
+await db.exec(mig('0032_shopee_ads.sql'));
+eq('0032 reexecutada preserva o Ads', (await adsShopee()).length, 1);
 
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { toShopeeOrder } from '@dash/connectors';
-import { dataRefTarifas, precisaEscrow } from './sync-shopee.ts';
+import { dataRefTarifas, periodoAdsShopee, precisaEscrow } from './sync-shopee.ts';
+
+test('Ads: período de nova busca termina ontem (Brasília) e tem exatamente N dias', () => {
+  // 26/11 01:00 UTC = 25/11 22:00 em Brasília: "ontem" é 24/11
+  assert.deepEqual(periodoAdsShopee(30, new Date('2026-11-26T01:00:00Z')), { de: '2026-10-26', ate: '2026-11-24' });
+  assert.deepEqual(periodoAdsShopee(1, new Date('2026-11-26T12:00:00Z')), { de: '2026-11-25', ate: '2026-11-25' });
+  assert.deepEqual(periodoAdsShopee(89, new Date('2026-03-01T12:00:00Z')), { de: '2025-12-02', ate: '2026-02-28' });
+});
 
 const seg = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 const pedido = (status: string, pago: boolean) =>

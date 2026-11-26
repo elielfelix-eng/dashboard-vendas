@@ -7,7 +7,12 @@ import { ShopeeAuthError } from './auth.ts';
  * Shopee Open Platform v2 (somente leitura).
  *  - /api/v2/order/get_order_list + get_order_detail      -> pedidos (Tarefa 3)
  *  - /api/v2/payment/get_escrow_detail_batch              -> tarifas reais e frete (Tarefa 3)
- *  - anúncios, visitas e Ads: tarefas seguintes do projeto Shopee.
+ *  - /api/v2/product/get_item_list + get_item_base_info + get_model_list -> anúncios e variações (Tarefa 4)
+ *  - /api/v2/product/get_item_extra_info                  -> visualizações e vendas ACUMULADAS (sem série diária)
+ *  - /api/v2/ads/get_all_cpc_ads_daily_performance        -> Shopee Ads da conta, por dia (Tarefa 4)
+ *  - /api/v2/ads/get_product_level_campaign_id_list + get_product_level_campaign_setting_info
+ *    + get_product_campaign_daily_performance             -> Ads por campanha/anúncio, se a loja tiver acesso
+ * Só leitura: tudo GET, exceto o POST de leitura do escrow em lote.
  * Tokens: access 4h, refresh 30 dias (uso único).
  * Nenhuma mensagem de erro daqui leva token, partner key, assinatura, corpo de resposta ou dado de comprador.
  */
@@ -241,6 +246,255 @@ export function tarifasDoEscrow(e: ShopeeEscrow | undefined | null): ShopeeTarif
 }
 
 /* ------------------------------------------------------------------------ */
+/* Anúncios (itens)                                                          */
+/* ------------------------------------------------------------------------ */
+
+type Obj = Record<string, unknown>;
+const obj = (v: unknown): Obj => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Obj) : {});
+const lista = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const idTexto = (v: unknown): string | null => (num(v) !== null ? String(v) : texto(v));
+
+/** Status do anúncio -> vocabulário do painel (o mesmo do Mercado Livre). Os demais ficam em minúsculas. */
+function statusItem(s: unknown): string {
+  if (s === 'NORMAL') return 'active';
+  if (s === 'UNLIST') return 'paused';
+  return typeof s === 'string' && s ? s.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 40) : 'unknown';
+}
+
+const precoAtual = (v: unknown): number | null => {
+  const p = obj(lista(v)[0]);
+  return num(p.current_price) ?? num(p.original_price);
+};
+const estoque = (v: Obj): number | null =>
+  num(obj(obj(v.stock_info_v2).summary_info).total_available_stock)
+  ?? num(obj(lista(v.stock_info)[0]).current_stock);
+
+/** Campos do get_item_extra_info guardados no raw (só números). views = visualizações ACUMULADAS. */
+const CAMPOS_EXTRA = ['sale', 'views', 'likes', 'rating_star', 'comment_count'] as const;
+function extraInfo(e: Obj | null): Record<string, number> | undefined {
+  if (!e) return undefined;
+  const out: Record<string, number> = {};
+  for (const k of CAMPOS_EXTRA) {
+    const v = num(e[k]) ?? (k === 'views' ? num(e.view_count) : null);
+    if (v !== null) out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * Anúncio da Shopee -> anúncio do painel.
+ *  - sku = item_sku; nas variações, sku = model_sku (vazio vira null: cai em "sem modelo").
+ *  - status: NORMAL -> active, UNLIST -> paused (como no Mercado Livre); outros em minúsculas.
+ *  - listingType sempre null (a Shopee não tem clássico/premium).
+ *  - logisticType 'fulfillment' quando is_fulfillment_by_shopee (= Full do Mercado Livre); senão null.
+ *  - soldQty = sale do get_item_extra_info (acumulado); as visualizações acumuladas ficam em raw.extra_info.views.
+ *  - raw = base_info sem a descrição.
+ */
+export function toShopeeItem(b: Obj, modelos: Obj | null, extra: Obj | null, shopId: number): Item {
+  const itemId = String(b.item_id ?? '');
+  const tiers = lista(modelos?.tier_variation).map((t) => lista(obj(t).option_list).map((o) => texto(obj(o).option)));
+  const variations = lista(modelos?.model).map((m0) => {
+    const m = obj(m0);
+    const idx = lista(m.tier_index).map((i) => num(i) ?? -1);
+    return {
+      variationId: String(m.model_id ?? ''),
+      sku: texto(m.model_sku),
+      price: precoAtual(m.price_info),
+      availableQty: estoque(m),
+      soldQty: null,
+      attributes: { tier_index: idx, opcoes: idx.map((i, t) => tiers[t]?.[i] ?? null) },
+    };
+  }).filter((v) => v.variationId);
+  const precos = variations.map((v) => v.price).filter((p): p is number => p !== null);
+  const estoques = variations.map((v) => v.availableQty).filter((q): q is number => q !== null);
+  const ex = extraInfo(extra);
+  const { description: _d, description_info: _di, ...resto } = b;
+  return {
+    channel: 'shopee',
+    itemId,
+    title: texto(b.item_name) ?? '',
+    sku: texto(b.item_sku),
+    price: precoAtual(b.price_info) ?? (precos.length ? Math.min(...precos) : null),
+    status: statusItem(b.item_status),
+    categoryId: idTexto(b.category_id),
+    listingType: null,
+    logisticType: b.is_fulfillment_by_shopee === true ? 'fulfillment' : null,
+    availableQty: estoque(b) ?? (estoques.length ? estoques.reduce((s, q) => s + q, 0) : null),
+    soldQty: ex?.sale ?? null,
+    health: null,
+    permalink: itemId ? `https://shopee.com.br/product/${shopId}/${itemId}` : null,
+    thumbnail: texto(lista(obj(b.image).image_url_list)[0]),
+    dateCreated: iso(b.create_time),
+    variations,
+    raw: ex ? { ...resto, extra_info: ex } : resto,
+  };
+}
+
+/* ------------------------------------------------------------------------ */
+/* Shopee Ads                                                                */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Pseudo-campanha e pseudo-anúncio do Ads da CONTA. A Shopee garante o desempenho do Ads só no nível da
+ * conta (get_all_cpc_ads_daily_performance). Ele é gravado:
+ *  - em mkt.ads_campaign_daily como campaign_id 'conta' (investimento do dia: fonte do cartão);
+ *  - em mkt.ads_metrics_daily como item_id 'conta' com o que não foi atribuído a anúncio (sem anúncio
+ *    no cadastro: cai em "sem modelo" nas funções do Ads).
+ */
+export const ADS_CONTA = 'conta';
+
+/** 'AAAA-MM-DD' -> 'DD-MM-AAAA' (formato das datas do Ads da Shopee). */
+export function dataShopeeAds(dia: string): string {
+  const [a, m, d] = dia.split('-');
+  return `${d}-${m}-${a}`;
+}
+
+/** Data do Ads da Shopee ('DD-MM-AAAA' ou 'AAAA-MM-DD') -> 'AAAA-MM-DD'; inválida -> null. */
+export function diaShopeeAds(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  let m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(v.trim());
+  const ymd = m ? `${m[3]}-${m[2]}-${m[1]}` : (m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim())) ? m[0] : null;
+  if (!ymd) return null;
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== ymd ? null : ymd;
+}
+
+/** Um dia de desempenho do Ads (conta ou campanha). */
+export interface ShopeeAdsDia {
+  day: string;
+  impressions: number;
+  clicks: number;
+  cost: number;
+  /** direct_gmv: vendas do próprio anúncio. */
+  directAmount: number;
+  /** broad_gmv: todas as vendas atribuídas (inclui as diretas). */
+  broadAmount: number;
+  directUnits: number;
+  broadUnits: number;
+  /** Demais números da Shopee (pedidos, ROAS, CTR, custo por conversão), para conferência. */
+  raw: Record<string, number>;
+}
+
+const CAMPOS_ADS_USADOS = new Set(['date', 'expense', 'impression', 'clicks', 'direct_gmv', 'broad_gmv',
+  'direct_item_sold', 'broad_item_sold', 'direct_order_amount', 'broad_order_amount']);
+
+/** Linha diária do Ads da Shopee -> ShopeeAdsDia (sem data válida: null). */
+export function metricaAdsShopee(r: unknown): ShopeeAdsDia | null {
+  const o = obj(r);
+  const day = diaShopeeAds(o.date);
+  if (!day) return null;
+  const n = (k: string) => num(o[k]) ?? 0;
+  const raw: Record<string, number> = {};
+  for (const [k, v] of Object.entries(o)) if (!CAMPOS_ADS_USADOS.has(k) && num(v) !== null) raw[k] = v as number;
+  return {
+    day,
+    impressions: Math.round(n('impression')),
+    clicks: Math.round(n('clicks')),
+    cost: r2(n('expense')),
+    directAmount: r2(n('direct_gmv')),
+    broadAmount: r2(n('broad_gmv')),
+    directUnits: Math.round(num(o.direct_item_sold) ?? n('direct_order_amount')),
+    broadUnits: Math.round(num(o.broad_item_sold) ?? n('broad_order_amount')),
+    raw,
+  };
+}
+
+/** ShopeeAdsDia -> métrica do painel. Indireta = ampla - direta (nunca negativa). */
+function paraMetrica(d: ShopeeAdsDia, itemId: string, campaignId: string | null): AdsDailyMetric {
+  return {
+    itemId, day: d.day, campaignId, status: null,
+    impressions: d.impressions, clicks: d.clicks, cost: d.cost,
+    directAmount: d.directAmount, indirectAmount: r2(Math.max(d.broadAmount - d.directAmount, 0)),
+    directUnits: d.directUnits, indirectUnits: Math.max(d.broadUnits - d.directUnits, 0), organicUnits: 0,
+  };
+}
+
+const temValor = (m: AdsDailyMetric) =>
+  m.cost !== 0 || m.impressions !== 0 || m.clicks !== 0 || m.directAmount !== 0 || m.indirectAmount !== 0 || m.directUnits !== 0 || m.indirectUnits !== 0;
+
+/**
+ * Linhas de mkt.ads_metrics_daily dos dias que a CONTA devolveu, sem somar o mesmo dia duas vezes:
+ *  - conta: um registro por dia (dia repetido na resposta: vale o último);
+ *  - por anúncio (se houver): mesma campanha + anúncio + dia repetido vale uma vez; campanhas diferentes do
+ *    mesmo anúncio no mesmo dia somam (fica a campanha de maior gasto). Dias que a conta não devolveu saem;
+ *  - item 'conta' = conta - soma dos anúncios do dia, por métrica, nunca negativa (Ads de loja etc.).
+ *    Sem dados por anúncio, é o dia inteiro da conta.
+ * Linhas totalmente zeradas não entram.
+ */
+export function combinarAdsShopee(conta: ShopeeAdsDia[], produtos: AdsDailyMetric[] | null): AdsDailyMetric[] {
+  const porDia = new Map(conta.map((d) => [d.day, d]));
+  const unicos = new Map<string, AdsDailyMetric>();
+  for (const m of produtos ?? []) if (porDia.has(m.day)) unicos.set(`${m.campaignId}|${m.itemId}|${m.day}`, m);
+  const porAnuncio = new Map<string, { m: AdsDailyMetric; maior: number }>();
+  for (const m of unicos.values()) {
+    const k = `${m.itemId}|${m.day}`;
+    const cur = porAnuncio.get(k);
+    if (!cur) { porAnuncio.set(k, { m: { ...m, status: m.status ?? null }, maior: m.cost }); continue; }
+    const a = cur.m;
+    if (m.cost > cur.maior) { cur.maior = m.cost; a.campaignId = m.campaignId; }
+    a.impressions += m.impressions; a.clicks += m.clicks; a.cost = r2(a.cost + m.cost);
+    a.directAmount = r2(a.directAmount + m.directAmount); a.indirectAmount = r2(a.indirectAmount + m.indirectAmount);
+    a.directUnits += m.directUnits; a.indirectUnits += m.indirectUnits; a.organicUnits += m.organicUnits;
+  }
+  const out: AdsDailyMetric[] = [];
+  for (const d of [...porDia.values()].sort((a, b) => a.day.localeCompare(b.day))) {
+    const doDia = [...porAnuncio.values()].map((x) => x.m).filter((m) => m.day === d.day)
+      .sort((a, b) => a.itemId.localeCompare(b.itemId));
+    const total = paraMetrica(d, ADS_CONTA, ADS_CONTA);
+    const s = (k: keyof AdsDailyMetric) => doDia.reduce((t, m) => t + (m[k] as number), 0);
+    const resto: AdsDailyMetric = {
+      ...total,
+      impressions: Math.max(total.impressions - s('impressions'), 0),
+      clicks: Math.max(total.clicks - s('clicks'), 0),
+      cost: r2(Math.max(total.cost - s('cost'), 0)),
+      directAmount: r2(Math.max(total.directAmount - s('directAmount'), 0)),
+      indirectAmount: r2(Math.max(total.indirectAmount - s('indirectAmount'), 0)),
+      directUnits: Math.max(total.directUnits - s('directUnits'), 0),
+      indirectUnits: Math.max(total.indirectUnits - s('indirectUnits'), 0),
+    };
+    for (const m of [...doDia, resto]) if (temValor(m)) out.push(m);
+  }
+  return out;
+}
+
+/** Cadastro de uma campanha de Ads por produto. */
+export interface ShopeeAdsCampanha {
+  campaignId: string;
+  name: string | null;
+  /** ongoing -> active (vocabulário do painel); os demais em minúsculas (paused, ended...). */
+  status: string | null;
+  budget: number | null;
+  automatica: boolean | null;
+  itemIds: string[];
+  raw: unknown;
+}
+
+export interface ShopeeAdsProdutos {
+  /** Uma linha por campanha, anúncio e dia. Campanha com 0 ou vários anúncios: itemId 'campanha:<id>'. */
+  metricas: AdsDailyMetric[];
+  campanhas: ShopeeAdsCampanha[];
+}
+
+const statusCampanha = (s: unknown): string | null => {
+  const t = texto(s)?.toLowerCase().replace(/[^a-z0-9_]/g, '').slice(0, 40) ?? null;
+  return t === 'ongoing' ? 'active' : t;
+};
+
+/** Janelas [de, ate] (AAAA-MM-DD) de até `max` dias, sem sobreposição. */
+function janelasDias(de: string, ate: string, max = 30): [string, string][] {
+  const out: [string, string][] = [];
+  const fim = Date.parse(`${ate}T00:00:00Z`);
+  for (let a = Date.parse(`${de}T00:00:00Z`); a <= fim; a += max * 86_400_000) {
+    const b = Math.min(a + (max - 1) * 86_400_000, fim);
+    out.push([new Date(a).toISOString().slice(0, 10), new Date(b).toISOString().slice(0, 10)]);
+  }
+  return out;
+}
+
+/** Data em Brasília (AAAA-MM-DD). */
+const diaSP = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+
+/* ------------------------------------------------------------------------ */
 /* Conector                                                                  */
 /* ------------------------------------------------------------------------ */
 
@@ -393,14 +647,178 @@ export class ShopeeConnector implements MarketplaceConnector {
     return out;
   }
 
-  private notReady(): never {
-    throw new Error('Conector Shopee: recurso ainda não ativado (tarefas seguintes).');
+  /**
+   * Partes opcionais que falharam nesta execução (só rótulos fixos: 'visitas', 'modelos', 'ads_produto',
+   * 'ads_campanhas'). A mensagem de cada falha vai para o log com o rótulo e o código da Shopee, nunca o corpo.
+   */
+  readonly avisos: string[] = [];
+
+  private avisar(rotulo: string, err: unknown) {
+    if (!this.avisos.includes(rotulo)) this.avisos.push(rotulo);
+    console.warn(`[Shopee] ${rotulo} indisponível (segue sem esse dado): ${(err as Error).message}`);
   }
 
-  // eslint-disable-next-line require-yield
-  async *listItems(): AsyncIterable<Item[]> { this.notReady(); }
-  async getShipmentSellerCost(_id: string): Promise<number | null> { this.notReady(); }
-  async getVisits(_itemId: string, _days: number): Promise<VisitsDaily[]> { this.notReady(); }
-  // eslint-disable-next-line require-yield
-  async *listAdsMetrics(_from: Date, _to: Date): AsyncIterable<AdsDailyMetric[]> { this.notReady(); }
+  /* ---------------------------- Anúncios ---------------------------- */
+
+  /** IDs dos anúncios com o status pedido (get_item_list, 100 por página, por offset). */
+  private async idsDosItens(status: 'NORMAL' | 'UNLIST'): Promise<number[]> {
+    const ids: number[] = [];
+    for (let offset = 0, pagina = 1; ; pagina++) {
+      const r = obj(await this.call<unknown>('/api/v2/product/get_item_list', { offset, page_size: 100, item_status: status }));
+      for (const it of lista(r.item)) {
+        const id = num(obj(it).item_id);
+        if (id !== null) ids.push(id);
+      }
+      const prox = num(r.next_offset);
+      if (r.has_next_page !== true || prox === null || prox <= offset || pagina >= MAX_PAGINAS) break;
+      offset = prox;
+    }
+    return ids;
+  }
+
+  /**
+   * Anúncios ativos (NORMAL) e pausados (UNLIST), em lotes de 50 (get_item_base_info), com as variações
+   * (get_model_list, só de quem tem has_model) e as visualizações/vendas acumuladas (get_item_extra_info).
+   * Falha das variações ou das visualizações não derruba os anúncios (fica em `avisos`).
+   */
+  async *listItems(): AsyncIterable<Item[]> {
+    const ids = [...new Set([...(await this.idsDosItens('NORMAL')), ...(await this.idsDosItens('UNLIST'))])];
+    for (const lote of chunk(ids, 50)) {
+      const r = obj(await this.call<unknown>('/api/v2/product/get_item_base_info', { item_id_list: lote.join(',') }));
+      const bases = lista(r.item_list).map(obj).filter((b) => num(b.item_id) !== null);
+      let extras = new Map<number, Obj>();
+      if (!this.avisos.includes('visitas')) {
+        try {
+          const e = obj(await this.call<unknown>('/api/v2/product/get_item_extra_info', { item_id_list: lote.join(',') }));
+          extras = new Map(lista(e.item_list).map(obj).filter((x) => num(x.item_id) !== null).map((x) => [num(x.item_id)!, x]));
+        } catch (err) {
+          this.avisar('visitas', err);
+        }
+      }
+      const itens: Item[] = [];
+      for (const b of bases) {
+        let modelos: Obj | null = null;
+        if (b.has_model === true) {
+          try {
+            modelos = obj(await this.call<unknown>('/api/v2/product/get_model_list', { item_id: num(b.item_id)! }));
+          } catch (err) {
+            this.avisar('modelos', err);
+          }
+        }
+        itens.push(toShopeeItem(b, modelos, extras.get(num(b.item_id)!) ?? null, this.shopId));
+      }
+      if (itens.length) yield itens;
+    }
+  }
+
+  async getShipmentSellerCost(_id: string): Promise<number | null> {
+    throw new Error('Conector Shopee: o frete vem do pagamento (escrow), não do envio.');
+  }
+
+  /**
+   * A Shopee não tem visitas por dia: get_item_extra_info dá só as visualizações ACUMULADAS, que ficam em
+   * mkt.items.raw.extra_info.views (listItems). Nenhuma série diária é inventada.
+   */
+  async getVisits(_itemId: string, _days: number): Promise<VisitsDaily[]> {
+    return [];
+  }
+
+  /* ---------------------------- Shopee Ads ---------------------------- */
+
+  /** Ads da conta por dia, de `de` a `ate` (AAAA-MM-DD, inclusive), em janelas de até 30 dias. Dia repetido: vale o último. */
+  async getAdsConta(de: string, ate: string): Promise<ShopeeAdsDia[]> {
+    const dias = new Map<string, ShopeeAdsDia>();
+    for (const [a, b] of janelasDias(de, ate)) {
+      const r = await this.call<unknown>('/api/v2/ads/get_all_cpc_ads_daily_performance',
+        { start_date: dataShopeeAds(a), end_date: dataShopeeAds(b) });
+      const linhas = Array.isArray(r) ? r : lista(obj(r).result_list ?? obj(r).list);
+      for (const l of linhas) {
+        const d = metricaAdsShopee(l);
+        if (d) dias.set(d.day, d);
+      }
+    }
+    return [...dias.values()].sort((x, y) => x.day.localeCompare(y.day));
+  }
+
+  /**
+   * Ads por campanha de produto (se a loja tiver acesso):
+   *  1. get_product_level_campaign_id_list (todas as campanhas, por offset);
+   *  2. get_product_level_campaign_setting_info (nome, status, orçamento e anúncios; 100 por chamada) — opcional;
+   *  3. get_product_campaign_daily_performance (100 campanhas por chamada, janelas de até 30 dias).
+   * Campanha com exatamente 1 anúncio: a métrica vai para o anúncio. Com 0 ou vários (ou sem cadastro):
+   * itemId 'campanha:<id>' (não é dividida; cai em "sem modelo").
+   * Erro nos passos 1 ou 3 (404, sem permissão...) é lançado: quem chama decide seguir só com a conta.
+   */
+  async getAdsProdutos(de: string, ate: string): Promise<ShopeeAdsProdutos> {
+    const ids: string[] = [];
+    for (let offset = 0, pagina = 1; ; pagina++) {
+      const r = obj(await this.call<unknown>('/api/v2/ads/get_product_level_campaign_id_list', { offset, limit: 100 }));
+      const l = lista(r.campaign_list).map((c) => idTexto(obj(c).campaign_id)).filter((x): x is string => !!x);
+      ids.push(...l);
+      if (r.has_next_page !== true || !l.length || pagina >= MAX_PAGINAS) break;
+      offset += l.length;
+    }
+    const unicos = [...new Set(ids)];
+    const campanhas: ShopeeAdsCampanha[] = [];
+    try {
+      for (const lote of chunk(unicos, 100)) {
+        const r = obj(await this.call<unknown>('/api/v2/ads/get_product_level_campaign_setting_info',
+          { info_type_list: '1', campaign_id_list: lote.join(',') }));
+        for (const c0 of lista(r.campaign_list)) {
+          const c = obj(c0);
+          const ci = obj(c.common_info);
+          const id = idTexto(c.campaign_id);
+          if (!id) continue;
+          const tipo = texto(ci.ad_type);
+          campanhas.push({
+            campaignId: id,
+            name: texto(ci.ad_name),
+            status: statusCampanha(ci.campaign_status),
+            budget: num(ci.campaign_budget),
+            automatica: tipo ? tipo === 'auto' : null,
+            itemIds: lista(ci.item_id_list).map(idTexto).filter((x): x is string => !!x),
+            raw: ci,
+          });
+        }
+      }
+    } catch (err) {
+      this.avisar('ads_campanhas', err);
+      campanhas.length = 0;
+    }
+    const anuncio = new Map(campanhas.map((c) => [c.campaignId, c.itemIds.length === 1 ? c.itemIds[0] : null]));
+    const metricas: AdsDailyMetric[] = [];
+    for (const lote of chunk(unicos, 100)) {
+      for (const [a, b] of janelasDias(de, ate)) {
+        const r = obj(await this.call<unknown>('/api/v2/ads/get_product_campaign_daily_performance',
+          { start_date: dataShopeeAds(a), end_date: dataShopeeAds(b), campaign_id_list: lote.join(',') }));
+        for (const c0 of lista(r.campaign_list)) {
+          const c = obj(c0);
+          const id = idTexto(c.campaign_id);
+          if (!id) continue;
+          for (const l of lista(c.metrics_list)) {
+            const d = metricaAdsShopee(l);
+            if (d) metricas.push(paraMetrica(d, anuncio.get(id) ?? `campanha:${id}`, id));
+          }
+        }
+      }
+    }
+    return { metricas, campanhas };
+  }
+
+  /**
+   * Métricas diárias do Ads para mkt.ads_metrics_daily (contrato comum): por anúncio quando a Shopee permitir,
+   * mais o resto da conta no item 'conta' (ver combinarAdsShopee). Sem acesso por anúncio: só a conta.
+   */
+  async *listAdsMetrics(from: Date, to: Date): AsyncIterable<AdsDailyMetric[]> {
+    const de = diaSP(from);
+    const ate = diaSP(to);
+    const conta = await this.getAdsConta(de, ate);
+    let produtos: AdsDailyMetric[] | null = null;
+    try {
+      produtos = (await this.getAdsProdutos(de, ate)).metricas;
+    } catch (err) {
+      this.avisar('ads_produto', err);
+    }
+    yield combinarAdsShopee(conta, produtos);
+  }
 }

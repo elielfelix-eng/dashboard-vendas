@@ -19,10 +19,13 @@ const ETAPAS: Record<string, string> = {
   'shopee-banco': 'gravação da loja da Shopee no banco de dados (confira a DATABASE_URL na Vercel)',
 };
 
-export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string; etapa?: string; detalhe?: string }> }) {
+export default async function ConexoesPage({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; faltando?: string; etapa?: string; detalhe?: string; codigo?: string }> }) {
   await requireAdmin();
   const params = await searchParams;
-  const msg = params.erro === 'falha' && params.etapa
+  const codigoShopee = (params.codigo ?? '').replace(/[^a-z0-9_]/gi, '').slice(0, 60);
+  const msg = params.erro === 'recusado-shopee' && codigoShopee
+    ? { text: `A Shopee recusou a autorização (código da Shopee: ${codigoShopee}). Tente conectar de novo.`, ok: false }
+    : params.erro === 'falha' && params.etapa
     ? {
         text: `Não foi possível concluir a conexão. Etapa: ${ETAPAS[params.etapa] ?? params.etapa}. Detalhe: ${params.detalhe ?? '—'}`,
         ok: false,

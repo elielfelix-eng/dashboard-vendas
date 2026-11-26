@@ -49,8 +49,10 @@ export async function GET(req: NextRequest, { params: routeParams }: { params: P
   } catch (err) {
     // Na conexão, recusa da Shopee não é "autorização vencida": é tentar conectar de novo.
     if (err instanceof ShopeeAuthError) {
-      console.error(`Falha na conexão da Shopee (etapa ${etapa}): autorização recusada`);
-      return done('erro=recusado-shopee');
+      // O código da Shopee (ex.: error_sign) não é segredo e diz o que corrigir.
+      const codigo = err.codigo.replace(/[^a-z0-9_]/gi, '').slice(0, 60);
+      console.error(`Falha na conexão da Shopee (etapa ${etapa}): autorização recusada (código ${codigo || 'não informado'})`);
+      return done(new URLSearchParams({ erro: 'recusado-shopee', ...(codigo ? { codigo } : {}) }).toString());
     }
     const detalhe = safeDetail(err);
     console.error(`Falha na conexão da Shopee (etapa ${etapa}):`, detalhe);

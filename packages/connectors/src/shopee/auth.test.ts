@@ -105,23 +105,34 @@ const semSegredo = (e: unknown) => {
   return true;
 };
 
-const casosAuth: [string, () => Response][] = [
-  ['HTTP 401', () => json({ error: 'error_auth', message: 'refresh ref-velho invalido' }, 401)],
-  ['HTTP 403', () => json({ error: 'error_permission', message: 'sem permissao' }, 403)],
-  ['error_auth com HTTP 200', () => json({ error: 'error_auth', message: 'Invalid refresh_token ref-velho' })],
-  ['invalid_acceess_token com HTTP 200', () => json({ error: 'invalid_acceess_token', message: 'x' })],
-  ['error_auth com HTTP 400', () => json({ error: 'error_auth', message: 'x' }, 400)],
+const casosAuth: [string, () => Response, string][] = [
+  ['HTTP 401', () => json({ error: 'error_auth', message: 'refresh ref-velho invalido' }, 401), 'error_auth'],
+  ['HTTP 403', () => json({ error: 'error_permission', message: 'sem permissao' }, 403), 'error_permission'],
+  ['HTTP 403 sem corpo JSON', () => new Response('forbidden', { status: 403 }), 'http_403'],
+  ['error_auth com HTTP 200', () => json({ error: 'error_auth', message: 'Invalid refresh_token ref-velho' }), 'error_auth'],
+  ['invalid_acceess_token com HTTP 200', () => json({ error: 'invalid_acceess_token', message: 'x' }), 'invalid_acceess_token'],
+  ['error_auth com HTTP 400', () => json({ error: 'error_auth', message: 'x' }, 400), 'error_auth'],
 ];
 
-for (const [nome, resposta] of casosAuth) {
-  test(`autorização vencida (${nome}) vira o aviso de reconexão, sem token no texto`, async () => {
+for (const [nome, resposta, codigo] of casosAuth) {
+  test(`autorização vencida (${nome}) vira o aviso de reconexão, com o código da Shopee e sem token no texto`, async () => {
     responder([resposta()]);
     await assert.rejects(
       () => refreshShopeeTokens(app, SHOP_ID, 'ref-velho'),
-      (e: unknown) => e instanceof ShopeeAuthError && (e as Error).message === SHOPEE_AUTH_EXPIRED && semSegredo(e),
+      (e: unknown) => e instanceof ShopeeAuthError && (e as Error).message === SHOPEE_AUTH_EXPIRED
+        && (e as ShopeeAuthError).codigo === codigo && semSegredo(e),
     );
   });
 }
+
+test('troca do código recusada guarda o código da Shopee (ex.: error_sign), sem o código de autorização', async () => {
+  responder([json({ error: 'error_sign', message: 'Wrong sign codigo-ficticio' }, 403)]);
+  await assert.rejects(
+    () => exchangeShopeeCode(app, 'codigo-ficticio', SHOP_ID),
+    (e: unknown) => e instanceof ShopeeAuthError && (e as ShopeeAuthError).codigo === 'error_sign'
+      && !(e as ShopeeAuthError).codigo.includes('codigo-ficticio') && semSegredo(e),
+  );
+});
 
 test('mensagem de autorização vencida é a combinada', () => {
   assert.equal(SHOPEE_AUTH_EXPIRED, 'Autorização da Shopee vencida: reconecte em Configurações › Conexões');

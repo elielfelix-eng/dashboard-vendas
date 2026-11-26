@@ -151,7 +151,7 @@ export async function syncShopee(sql: Sql): Promise<number> {
       }
       if (shopee.avisos.includes('visitas')) stats.visitas_indisponiveis = 1;
       if (shopee.avisos.includes('modelos')) stats.variacoes_falhas = 1;
-      Object.assign(stats, await syncAdsShopee(sql, shopee));
+      Object.assign(stats, await etapaAdsShopee(sql, shopee)); // só com SHOPEE_ADS=1 (ver etapaAdsShopee)
 
       await sql`update core.sync_runs set status = 'success', finished_at = now(), stats = ${sql.json(stats)} where id = ${run.id}`;
       console.log(`[Shopee ${nome}] OK`, stats);
@@ -205,10 +205,36 @@ const linhaAds = (m: AdsDailyMetric) => ({
  *    mostra só o rótulo e o código da Shopee; segue só com a conta (tudo em "sem modelo").
  * Os dias lidos são apagados e regravados juntos (mkt.shopee_gravar_ads): nada é somado duas vezes.
  */
-async function syncAdsShopee(sql: Sql, shopee: ShopeeConnector): Promise<Record<string, number>> {
+/** Contrato mínimo do conector usado pela etapa de Ads (permite testar sem a API). */
+type AdsShopeeFonte = Pick<ShopeeConnector, 'getAdsConta' | 'getAdsProdutos' | 'avisos'>;
+
+/**
+ * Etapa opcional de Ads: só grava com SHOPEE_ADS=1 (padrão DESLIGADO; não está no sync.yml).
+ * Motivo: até a Tarefa 5, analytics.dash_ads_periodo só soma o investimento do Mercado Livre; gravar o Ads da
+ * Shopee já mudaria a tela Ads no consolidado (vendas por Ads e atribuição da Shopee sem o investimento:
+ * ROAS/ACOS inflados, "não atribuído" negativo). A Tarefa 5 deve:
+ *  (a) incluir o investimento da Shopee (mkt.ads_campaign_daily, 'conta') em dash_ads_periodo e ads_serie;
+ *  (b) tratar campanhas, modelos e "não atribuído" no consolidado (ads_resumo, ads_campanhas, ads_modelos, ads_sugestoes);
+ *  (c) só então ligar SHOPEE_ADS=1 (a 1ª execução, sem Ads da Shopee no banco, relê 89 dias e recupera o histórico).
+ * Qualquer erro aqui (API ou banco) fica nas estatísticas; nunca marca a execução da Shopee como falha.
+ */
+export async function etapaAdsShopee(sql: Sql, shopee: AdsShopeeFonte, env: Record<string, string | undefined> = process.env): Promise<Record<string, number>> {
+  if (env.SHOPEE_ADS !== '1') {
+    console.log('[Shopee] Shopee Ads: desligado até a Tarefa 5');
+    return { ads_desligado: 1 };
+  }
+  try {
+    return await syncAdsShopee(sql, shopee, env);
+  } catch (err) {
+    console.warn('[Shopee] Falha no Ads (será tentada de novo):', (err as Error).message);
+    return { ads_conta: -1 };
+  }
+}
+
+async function syncAdsShopee(sql: Sql, shopee: AdsShopeeFonte, env: Record<string, string | undefined>): Promise<Record<string, number>> {
   const st: Record<string, number> = {};
   const [{ n }] = await sql<{ n: number }[]>`select count(*)::int as n from mkt.ads_campaign_daily where channel = 'shopee'`;
-  const { de, ate } = periodoAdsShopee(diasRebuscaAds(process.env.ADS_REFETCH_DAYS, n === 0));
+  const { de, ate } = periodoAdsShopee(diasRebuscaAds(env.ADS_REFETCH_DAYS, n === 0));
   let conta;
   try {
     conta = await shopee.getAdsConta(de, ate);

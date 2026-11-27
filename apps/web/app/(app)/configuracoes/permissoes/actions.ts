@@ -1,6 +1,7 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import { TAG_PAINEL } from '@/lib/cache-chave';
 import { requireUser, type Role } from '@/lib/auth';
 import { PERMISSOES, type Permissao } from '@/lib/permissoes';
 import { createClient } from '@/lib/supabase/server';
@@ -21,5 +22,6 @@ export async function alterarPermissao(role: Role, permissao: Permissao, allowed
     return { erro: /configuracoes/.test(error.message) ? 'O administrador precisa manter o acesso à Administração.' : 'Não foi possível salvar agora.' };
   }
   revalidatePath('/', 'layout');
+  revalidateTag(TAG_PAINEL);
   return {};
 }

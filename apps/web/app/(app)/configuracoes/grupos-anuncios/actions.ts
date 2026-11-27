@@ -1,6 +1,7 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import { TAG_PAINEL } from '@/lib/cache-chave';
 import { redirect } from 'next/navigation';
 import { mesmoNome, validarGrupo } from '@/lib/grupos';
 import { exigirPermissao } from '@/lib/permissoes';
@@ -10,6 +11,7 @@ const CANAL = 'mercadolivre';
 
 function voltar(msg: string, tipo: 'ok' | 'erro'): never {
   revalidatePath('/configuracoes/grupos-anuncios');
+  revalidateTag(TAG_PAINEL);
   redirect(`/configuracoes/grupos-anuncios?${new URLSearchParams({ [tipo]: msg }).toString()}`);
 }
 

@@ -1,6 +1,7 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import { TAG_PAINEL } from '@/lib/cache-chave';
 import { createClient } from '@/lib/supabase/server';
 import { getPermissoes } from '@/lib/permissoes';
 import type { LinhaMetaValida } from '@/lib/metas-planilha';
@@ -23,5 +24,6 @@ export async function gravarMetas(linhas: LinhaMetaValida[]): Promise<{ gravadas
   }
   revalidatePath('/metas');
   revalidatePath('/');
+  revalidateTag(TAG_PAINEL);
   return { gravadas: Number(data) };
 }

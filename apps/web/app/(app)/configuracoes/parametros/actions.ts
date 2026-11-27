@@ -1,6 +1,7 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
+import { TAG_PAINEL } from '@/lib/cache-chave';
 import { redirect } from 'next/navigation';
 import { requireUser } from '@/lib/auth';
 import { validarLimites } from '@/lib/ads-limites';
@@ -19,6 +20,7 @@ const numero = (v: FormDataEntryValue | null) => {
 
 function voltar(msg: string, tipo: 'ok' | 'erro'): never {
   revalidatePath('/', 'layout');
+  revalidateTag(TAG_PAINEL);
   redirect(`/configuracoes/parametros?${new URLSearchParams({ [tipo]: msg }).toString()}`);
 }
 

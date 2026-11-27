@@ -1,6 +1,7 @@
 import { cache } from 'react';
 import { createClient } from './supabase/server';
 import { medir } from './tempo';
+import { rpcComCache } from './rpc-cache';
 import type { Canal } from './periodo';
 import { shopeeAtiva, type CoberturaShopee } from './canais';
 
@@ -55,14 +56,13 @@ function numeros<T>(linha: Record<string, unknown>): T {
   return out as T;
 }
 
+// Cache por identidade de acesso, data de Brasília e janela de 10 minutos do relógio (lib/rpc-cache.ts):
+// resultado servido no máximo até o fim da janela em que foi calculado; erro do banco não é guardado.
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
-  const supabase = await createClient();
-  const { data, error } = await medir(fn, async () => supabase.schema('analytics').rpc(fn, args));
-  if (error) {
-    console.error(`[dash] ${fn}:`, error.message);
-    throw new Error('Não foi possível carregar os dados agora. Tente de novo em alguns minutos.');
-  }
-  return ((data as Record<string, unknown>[] | null) ?? []).map((l) => numeros<T>(l));
+  const linhas = await rpcComCache(fn, args, {
+    prefixo: '[dash]', mensagem: 'Não foi possível carregar os dados agora. Tente de novo em alguns minutos.', logarDetalhe: true,
+  });
+  return linhas.map((l) => numeros<T>(l));
 }
 
 export async function resumo(canal: Canal, de: string, ate: string): Promise<Resumo> {

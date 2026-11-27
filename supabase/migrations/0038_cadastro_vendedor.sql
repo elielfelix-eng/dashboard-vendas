@@ -21,8 +21,9 @@ revoke all on function core.pode_cadastrar_vendedor(text) from public, anon, aut
 grant execute on function core.pode_cadastrar_vendedor(text) to service_role;
 
 -- A API do Supabase so expoe o schema public: o servico chama este wrapper, que so delega.
+-- security definer: o service_role nao precisa de acesso ao schema core para chamar a funcao interna.
 create or replace function public.pode_cadastrar_vendedor(p_email text) returns boolean
-language sql stable security invoker set search_path = '' as $$
+language sql stable security definer set search_path = '' as $$
   select core.pode_cadastrar_vendedor(p_email)
 $$;
 

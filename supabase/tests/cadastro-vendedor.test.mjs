@@ -91,6 +91,12 @@ async function val(sql) {
 
 eq('wrapper public: elegivel', await val(`select public.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`), true);
 eq('wrapper public: outro dominio', await val(`select public.pode_cadastrar_vendedor('externa@gmail.com')`), false);
+// Como a API chama: papel service_role, sem acesso ao schema core (o erro 42501 da producao)
+await db.exec(`create role service_role nologin`).catch(() => {});
+await db.exec(`grant usage on schema public to service_role`);
+await db.exec(`set role service_role`);
+eq('service_role chama o wrapper public', await val(`select public.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`), true);
+await db.exec(`reset role`);
 await db.exec(`grant usage on schema core, public to authenticated`);
 await erro('authenticated nao executa o wrapper public', `set role authenticated; select public.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`, /permission denied for function/);
 await db.exec(`reset role`);

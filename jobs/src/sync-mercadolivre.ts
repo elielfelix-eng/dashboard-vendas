@@ -189,32 +189,49 @@ async function syncCancelledShipments(sql: Sql, ml: MercadoLivreConnector) {
  * Fatura do ML: relê sempre os 2 períodos mais recentes (ainda podem mudar)
  * e busca os mais antigos só se ainda não estiverem no banco.
  */
+/**
+ * A API da fatura às vezes devolve um período vazio ou incompleto (em 27/11/2026 o período 2026-11-01 voltou
+ * com 0 linhas e apagou 261 cobranças). Um período já gravado só é substituído por uma leitura com pelo menos
+ * o mesmo número de linhas; senão o gravado fica e a próxima execução tenta de novo.
+ */
+export function manterPeriodoGravado(linhasLidas: number, linhasGravadas: number | undefined): boolean {
+  return linhasGravadas != null && linhasLidas < linhasGravadas;
+}
+
 async function syncBilling(sql: Sql, ml: MercadoLivreConnector) {
   const periods = (await ml.listBillingPeriods()).sort((a, b) => b.key.localeCompare(a.key));
-  const stored = new Set(
-    (await sql<{ period_key: string }[]>`select period_key from mkt.billing_periods where channel = 'mercadolivre'`)
-      .map((r) => r.period_key),
+  const gravados = new Map(
+    (await sql<{ period_key: string; n: number }[]>`
+      select p.period_key, (select count(*)::int from mkt.billing_details d
+                             where d.channel = 'mercadolivre' and d.period_key = p.period_key) as n
+        from mkt.billing_periods p where p.channel = 'mercadolivre'`)
+      .map((r) => [r.period_key, r.n] as const),
   );
   let total = 0;
   for (const [i, p] of periods.entries()) {
-    if (i >= 2 && stored.has(p.key)) continue;
+    if (i >= 2 && gravados.has(p.key)) continue;
     const rows = await ml.getBillingDetails(p.key);
+    // Linha idêntica repetida na resposta: descarta. Mesmo id com conteúdo
+    // diferente: mantém as duas (com sufixo), para não perder cobranças.
+    const seen = new Map<string, string>();
+    const unique: typeof rows = [];
+    for (const r of rows) {
+      const body = JSON.stringify(r.raw);
+      let id = r.detailId;
+      let n = 1;
+      while (seen.has(id) && seen.get(id) !== body) id = `${r.detailId}#${++n}`;
+      if (seen.get(id) === body) continue;
+      seen.set(id, body);
+      unique.push({ ...r, detailId: id });
+    }
+    const jaGravadas = gravados.get(p.key);
+    if (manterPeriodoGravado(unique.length, jaGravadas)) {
+      console.warn(`[ML] fatura ${p.key}: leitura com ${unique.length} linhas, menos que as ${jaGravadas} gravadas; mantém o gravado`);
+      continue;
+    }
     await sql.begin(async (tx) => {
       const t = tx as unknown as Sql;
       await t`delete from mkt.billing_details where channel = 'mercadolivre' and period_key = ${p.key}`;
-      // Linha idêntica repetida na resposta: descarta. Mesmo id com conteúdo
-      // diferente: mantém as duas (com sufixo), para não perder cobranças.
-      const seen = new Map<string, string>();
-      const unique: typeof rows = [];
-      for (const r of rows) {
-        const body = JSON.stringify(r.raw);
-        let id = r.detailId;
-        let n = 1;
-        while (seen.has(id) && seen.get(id) !== body) id = `${r.detailId}#${++n}`;
-        if (seen.get(id) === body) continue;
-        seen.set(id, body);
-        unique.push({ ...r, detailId: id });
-      }
       await upsert(t, 'mkt.billing_details', unique.map((r) => ({
         channel: 'mercadolivre', period_key: p.key, detail_id: r.detailId, created_at: r.createdAt,
         detail_type: r.detailType, code: r.code, amount: r.amount, order_id: r.orderId,

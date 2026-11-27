@@ -2,7 +2,8 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import type { CookieToSet } from '@/lib/supabase/server';
 
-const PUBLIC_PATHS = ['/login'];
+// Rotas sem login: entrar, pedir o primeiro acesso do vendedor e definir a senha pelo link do convite.
+const PUBLIC_PATHS = ['/login', '/cadastro', '/definir-senha'];
 
 /** Página simples explicando o que falta configurar (mostra só NOMES, nunca valores). */
 function configError(problems: string[]) {

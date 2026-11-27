@@ -20,6 +20,15 @@ $$;
 revoke all on function core.pode_cadastrar_vendedor(text) from public, anon, authenticated;
 grant execute on function core.pode_cadastrar_vendedor(text) to service_role;
 
+-- A API do Supabase so expoe o schema public: o servico chama este wrapper, que so delega.
+create or replace function public.pode_cadastrar_vendedor(p_email text) returns boolean
+language sql stable security invoker set search_path = '' as $$
+  select core.pode_cadastrar_vendedor(p_email)
+$$;
+
+revoke all on function public.pode_cadastrar_vendedor(text) from public, anon, authenticated;
+grant execute on function public.pode_cadastrar_vendedor(text) to service_role;
+
 -- ---------------------------------------------------------------------
 -- 2. Perfil criado no cadastro (o padrao continua visualizador)
 -- ---------------------------------------------------------------------

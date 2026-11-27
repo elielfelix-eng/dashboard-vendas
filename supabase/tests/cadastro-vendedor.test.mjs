@@ -89,6 +89,11 @@ async function val(sql) {
   return Object.values((await db.query(sql)).rows[0])[0];
 }
 
+eq('wrapper public: elegivel', await val(`select public.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`), true);
+eq('wrapper public: outro dominio', await val(`select public.pode_cadastrar_vendedor('externa@gmail.com')`), false);
+await db.exec(`grant usage on schema core, public to authenticated`);
+await erro('authenticated nao executa o wrapper public', `set role authenticated; select public.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`, /permission denied for function/);
+await db.exec(`reset role`);
 await db.exec(`grant usage on schema core to authenticated`);
 await db.exec(`set role authenticated`);
 await erro('authenticated nao executa a elegibilidade', `select core.pode_cadastrar_vendedor('allison.santos@brindedobem.com.br')`, /permission denied for function/);

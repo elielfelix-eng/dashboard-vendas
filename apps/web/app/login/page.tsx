@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState } from 'react';
 import { Logo } from '@/components/logo';
 import { login } from './actions';
@@ -27,6 +28,10 @@ export default function LoginPage() {
           className="mt-1 w-full rounded-lg border border-border bg-bg px-3 py-2 outline-none focus:border-brand-2" />
 
         {state?.error && <p className="mt-4 text-sm text-bad" role="alert">{state.error}</p>}
+
+        <p className="mt-6 text-center text-sm">
+          <Link href="/cadastro" className="text-link hover:underline">Primeiro acesso do vendedor</Link>
+        </p>
 
         <button type="submit" disabled={pending}
           className="mt-6 w-full rounded-lg bg-accent-strong px-4 py-2 font-semibold text-on-accent-strong disabled:opacity-60">

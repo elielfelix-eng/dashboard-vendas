@@ -245,3 +245,23 @@ test('fatura: leituras repetidas abaixo do total continuam tentando e ficam com 
   const linhas = await ml.getBillingDetails('2026-11-01');
   assert.equal(linhas.length, 3);
 });
+
+test('fatura: cada leitura traz um pedaço diferente: junta as leituras sem repetir até o total', async () => {
+  let chamada0 = 0;
+  const limites: string[] = [];
+  fakeAds({
+    '/billing/integration/periods/key/2026-11-01/group/ML/details': (c) => {
+      const offset = Number(c.params.get('offset'));
+      if (offset > 0) return json({ results: [], total: 3 })();
+      limites.push(c.params.get('limit') ?? '');
+      chamada0++;
+      // 1a leitura: linhas 1 e 2; 2a: 1 repetida (igual) e 3
+      return json({ results: chamada0 === 1 ? [linhaFatura(1), linhaFatura(2)] : [linhaFatura(1), linhaFatura(3)], total: 3 })();
+    },
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const linhas = await ml.getBillingDetails('2026-11-01');
+  assert.deepEqual(linhas.map((l) => l.detailId).sort(), ['1', '2', '3']);
+  assert.equal(chamada0, 2, 'para quando alcança o total');
+  assert.notEqual(limites[0], limites[1], 'a releitura usa outro tamanho de página');
+});

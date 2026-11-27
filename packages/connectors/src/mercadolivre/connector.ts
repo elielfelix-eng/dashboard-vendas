@@ -423,8 +423,7 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       .map((p) => ({ key: p.key!, dateFrom: p.period?.date_from ?? null, dateTo: p.period?.date_to ?? null, raw: p }));
   }
 
-  private async readBillingDetailsOnce(key: string): Promise<{ rows: MlBillingDetail[]; total: number | null }> {
-    const LIMIT = 1000;
+  private async readBillingDetailsOnce(key: string, LIMIT = 1000): Promise<{ rows: MlBillingDetail[]; total: number | null }> {
     const out: MlBillingDetail[] = [];
     let total: number | null = null;
     // Avança pelo que veio de fato (a API pode devolver menos que o limite por página)
@@ -452,20 +451,25 @@ export class MercadoLivreConnector implements MarketplaceConnector {
   }
 
   /**
-   * A API às vezes devolve um período incompleto: lê de novo e fica com a leitura mais completa.
-   * Para quando uma leitura alcança o total informado pela API; sem total, quando duas leituras
-   * seguidas têm o mesmo número de linhas.
+   * A API às vezes devolve um período incompleto, e cada leitura traz um pedaço diferente (em 27/11/2026:
+   * 211, 200 e 261 linhas do mesmo período). Lê de novo, com outro tamanho de página, e JUNTA as leituras:
+   * linha idêntica (mesmo id e mesmo conteúdo) conta uma vez; mesmo id com conteúdo diferente fica (a
+   * sincronização dá um sufixo). Para quando alcança o total informado; sem total, quando uma releitura
+   * não traz nada novo.
    */
   async getBillingDetails(key: string, maxReads = 5): Promise<MlBillingDetail[]> {
-    let best: MlBillingDetail[] = [];
-    let previous = -1;
+    const limites = [1000, 100, 50, 200, 1000];
+    const juntas = new Map<string, MlBillingDetail>();
     for (let i = 0; i < maxReads; i++) {
-      const { rows, total } = await this.readBillingDetailsOnce(key);
-      if (rows.length > best.length) best = rows;
-      if (total != null ? best.length >= total : rows.length === previous) break;
-      previous = rows.length;
+      const { rows, total } = await this.readBillingDetailsOnce(key, limites[i % limites.length]);
+      const antes = juntas.size;
+      for (const r of rows) {
+        const chave = `${r.detailId}|${JSON.stringify(r.raw)}`;
+        if (!juntas.has(chave)) juntas.set(chave, r);
+      }
+      if (total != null ? juntas.size >= total : i > 0 && juntas.size === antes) break;
     }
-    return best;
+    return [...juntas.values()];
   }
 }
 

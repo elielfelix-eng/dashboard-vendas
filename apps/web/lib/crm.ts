@@ -1,4 +1,5 @@
 import { createClient } from './supabase/server';
+import { medir } from './tempo';
 import type { lerFiltrosCrm } from './crm-filtros';
 
 // Chamadas tipadas às funções analytics.crm_* (o banco calcula; RLS e permissões valem).
@@ -40,7 +41,7 @@ function numeros<T>(linha: Record<string, unknown>): T {
 
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.schema('analytics').rpc(fn, args);
+  const { data, error } = await medir(fn, async () => supabase.schema('analytics').rpc(fn, args));
   if (error) {
     console.error(`[crm] ${fn}:`, error.message);
     throw new Error('Não foi possível carregar os dados agora. Tente de novo em alguns minutos.');

@@ -1,4 +1,5 @@
 import { createClient } from './supabase/server';
+import { medir } from './tempo';
 
 // Chamadas tipadas às funções analytics.alertas_* e analytics.reputacao_* (o banco calcula; permissão 'operacao').
 // Valores numeric chegam como string pela API: são convertidos para number aqui.
@@ -25,7 +26,7 @@ const num = (v: unknown): number | null => (v == null ? null : Number(v));
 
 async function rpc(fn: string, args: Record<string, unknown>): Promise<unknown> {
   const supabase = await createClient();
-  const { data, error } = await supabase.schema('analytics').rpc(fn, args);
+  const { data, error } = await medir(fn, async () => supabase.schema('analytics').rpc(fn, args));
   if (error) {
     console.error(`[alertas] ${fn}`);
     throw new Error('Não foi possível carregar os alertas agora. Tente de novo em alguns minutos.');

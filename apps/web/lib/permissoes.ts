@@ -2,6 +2,7 @@ import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import { createClient } from './supabase/server';
 import { requireUser } from './auth';
+import { medir } from './tempo';
 
 export type Permissao = 'visao_geral' | 'vendas' | 'rentabilidade' | 'metas' | 'custos' | 'editar_metas' | 'configuracoes'
   | 'ads' | 'editar_ads' | 'crm_funil' | 'crm_vendedores' | 'crm_origens'
@@ -29,12 +30,12 @@ export const getPermissoes = cache(async (): Promise<Set<Permissao>> => {
   const { profile } = await requireUser();
   if (!profile?.role) return new Set();
   const supabase = await createClient();
-  const { data } = await supabase
+  const { data } = await medir('permissoes', async () => supabase
     .schema('core')
     .from('role_permissions')
     .select('permission')
     .eq('role', profile.role)
-    .eq('allowed', true);
+    .eq('allowed', true));
   return new Set((data ?? []).map((r) => r.permission as Permissao));
 });
 

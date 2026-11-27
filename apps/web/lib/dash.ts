@@ -1,5 +1,6 @@
 import { cache } from 'react';
 import { createClient } from './supabase/server';
+import { medir } from './tempo';
 import type { Canal } from './periodo';
 import { shopeeAtiva, type CoberturaShopee } from './canais';
 
@@ -56,7 +57,7 @@ function numeros<T>(linha: Record<string, unknown>): T {
 
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.schema('analytics').rpc(fn, args);
+  const { data, error } = await medir(fn, async () => supabase.schema('analytics').rpc(fn, args));
   if (error) {
     console.error(`[dash] ${fn}:`, error.message);
     throw new Error('Não foi possível carregar os dados agora. Tente de novo em alguns minutos.');
@@ -96,12 +97,12 @@ const ERRO_CARGA = 'Não foi possível carregar os dados agora. Tente de novo em
  */
 export const sincronizacoes = cache(async (): Promise<Record<string, Sincronizacao>> => {
   const supabase = await createClient();
-  const { data, error } = await supabase
+  const { data, error } = await medir('sync_runs', async () => supabase
     .schema('core')
     .from('sync_runs')
     .select('source, status, started_at, finished_at, stats, error')
     .order('started_at', { ascending: false })
-    .limit(60);
+    .limit(60));
   if (error) {
     console.error('[dash] sync_runs:', error.message);
     throw new Error(ERRO_CARGA);
@@ -128,10 +129,10 @@ const diaBrasilia = (iso: string) => new Intl.DateTimeFormat('en-CA', { timeZone
 const lojaShopee = cache(async (): Promise<Omit<CoberturaShopee, 'ultimoSucesso'>> => {
   const supabase = await createClient();
   const [contas, primeira, canal] = await Promise.all([
-    supabase.schema('core').from('accounts').select('id').eq('channel', 'shopee').eq('active', true).limit(1),
-    supabase.schema('mkt').from('orders').select('date_created').eq('channel', 'shopee')
-      .order('date_created', { ascending: true }).limit(1),
-    supabase.schema('core').rpc('can_see_channel', { ch: 'shopee' }),
+    medir('shopee_conta', async () => supabase.schema('core').from('accounts').select('id').eq('channel', 'shopee').eq('active', true).limit(1)),
+    medir('shopee_primeira_venda', async () => supabase.schema('mkt').from('orders').select('date_created').eq('channel', 'shopee')
+      .order('date_created', { ascending: true }).limit(1)),
+    medir('can_see_channel', async () => supabase.schema('core').rpc('can_see_channel', { ch: 'shopee' })),
   ]);
   const erro = contas.error ?? primeira.error ?? canal.error;
   if (erro) {

@@ -1,7 +1,7 @@
 'use client';
 
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { PERIODOS, type Canal, type Periodo, type PeriodoChave } from '@/lib/periodo';
 
 const CANAIS: { chave: Canal; rotulo: string; ativo: boolean }[] = [
@@ -27,6 +27,8 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
   const params = useSearchParams();
   const [de, setDe] = useState(periodo.de);
   const [ate, setAte] = useState(periodo.ate);
+  // Enquanto o servidor calcula os números do novo filtro, a tela avisa que está atualizando.
+  const [carregando, iniciar] = useTransition();
 
   function ir(mudancas: Record<string, string | null>) {
     const p = new URLSearchParams(params.toString());
@@ -34,7 +36,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
       if (v === null) p.delete(k);
       else p.set(k, v);
     }
-    router.push(`${pathname}?${p.toString()}`);
+    iniciar(() => router.push(`${pathname}?${p.toString()}`));
   }
 
   const hora = atualizadoEm
@@ -42,7 +44,8 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
     : null;
 
   return (
-    <div className="mb-6 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 md:flex-row md:items-center md:justify-between">
+    <div className="relative mb-6 flex flex-col gap-3 rounded-xl border border-border bg-surface p-3 md:flex-row md:items-center md:justify-between" aria-busy={carregando}>
+      {carregando && <div className="fixed inset-x-0 top-0 z-50 h-1 animate-pulse bg-accent" role="progressbar" aria-label="Atualizando" />}
       <div className="flex flex-wrap items-center gap-2">
         {mostrarCanal && (
           <div className="flex overflow-hidden rounded-lg border border-border text-sm">
@@ -83,7 +86,9 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
       </div>
       <div className="flex flex-col text-xs text-muted md:items-end">
         <span>{periodo.rotulo}</span>
-        <span>{hora ? `● Atualizado em ${hora}` : '● Ainda sem atualização'}</span>
+        {carregando
+          ? <span className="font-medium text-accent">Atualizando os números…</span>
+          : <span>{hora ? `● Atualizado em ${hora}` : '● Ainda sem atualização'}</span>}
       </div>
     </div>
   );

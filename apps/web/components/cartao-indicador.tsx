@@ -13,7 +13,7 @@ export function CartaoIndicador({ titulo, valor, variacao, inverterCores = false
   const bom = v == null ? null : inverterCores ? v < 0 : v > 0;
   const cor = v == null || v === 0 ? 'text-muted' : bom ? 'text-good' : 'text-bad';
   return (
-    <div className="rounded-xl border border-border bg-surface p-4" title={ajuda}>
+    <div className="h-full rounded-xl border border-border bg-surface p-4" title={ajuda}>
       <p className="text-sm text-muted">{titulo}</p>
       <p className="mt-1 text-xl font-semibold tabular-nums">{valor}</p>
       <div className="mt-1 flex flex-wrap gap-x-2 text-xs">

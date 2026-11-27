@@ -92,7 +92,7 @@ test('reconectar a Shopee: so quando a ultima sincronizacao falhou por autorizac
 test('textos de tarifas estimadas por canal; o Mercado Livre continua igual', () => {
   const ml = textosEstimados('mercadolivre');
   assert.equal(ml.titulo, 'Aguardando a fatura do ML');
-  assert.equal(ml.detalhe, 'frete e comissão estimados; acertam sozinhos quando a fatura chegar');
+  assert.equal(ml.detalhe, 'estimados até a fatura chegar');
   assert.match(ml.atencao, /^ pedido\(s\) do período ainda não aparecem na fatura do Mercado Livre/);
   const sh = textosEstimados('shopee');
   assert.equal(sh.titulo, 'Aguardando o pagamento da Shopee');

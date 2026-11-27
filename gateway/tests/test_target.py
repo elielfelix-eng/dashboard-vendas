@@ -15,7 +15,8 @@ def ds(mode="replace_source"):
 
 @pytest.fixture
 def conn(target_cfg, clean_db, pg):
-    c = connect_target(target_cfg, pg["password"])
+    from conftest import conectar_target_pg
+    c = conectar_target_pg(target_cfg, pg["password"])
     yield c
     c.close()
 

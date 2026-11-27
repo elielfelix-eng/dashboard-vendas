@@ -2,6 +2,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import psycopg
@@ -12,6 +13,34 @@ if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
 SERVER = Path(__file__).resolve().parent / "pg_server.mjs"
+
+def conectar_pg(params: dict, tentativas: int = 5, **kwargs) -> psycopg.Connection:
+    """Abre uma conexao com o PGlite, repetindo se o servidor ainda estiver encerrando a sessao anterior.
+
+    O PGlite aceita uma conexao por vez; logo apos um close, uma nova pode ser recusada por instantes.
+    """
+    for i in range(tentativas):
+        try:
+            return psycopg.connect(**params, **kwargs)
+        except psycopg.OperationalError as exc:
+            if "closed the connection" not in str(exc) or i == tentativas - 1:
+                raise
+            time.sleep(0.2 * (i + 1))
+    raise AssertionError("inalcancavel")
+
+
+def conectar_target_pg(target_cfg, password: str):
+    """Mesmo retry para connect_target (usado nos testes de gravacao)."""
+    from brinde_gateway.target import connect_target
+
+    for i in range(5):
+        try:
+            return connect_target(target_cfg, password)
+        except psycopg.OperationalError as exc:
+            if "closed the connection" not in str(exc) or i == 4:
+                raise
+            time.sleep(0.2 * (i + 1))
+    raise AssertionError("inalcancavel")
 
 
 def _free_port() -> int:
@@ -71,7 +100,7 @@ def target_cfg(pg):
 @pytest.fixture
 def clean_db(pg):
     """Limpa erp.cost_tiers e core.sync_runs (e fecha a conexao: PGlite aceita uma por vez)."""
-    with psycopg.connect(**pg, prepare_threshold=None) as conn:
+    with conectar_pg(pg, prepare_threshold=None) as conn:
         conn.execute("truncate erp.cost_tiers restart identity")
         conn.execute("truncate core.sync_runs restart identity")
     yield
@@ -82,7 +111,7 @@ def query(pg):
     """Executa uma consulta numa conexao curta (chamar so com a do teste fechada)."""
 
     def _q(sql_text, params=None):
-        with psycopg.connect(**pg, prepare_threshold=None) as conn:
+        with conectar_pg(pg, prepare_threshold=None) as conn:
             return conn.execute(sql_text, params).fetchall()
 
     return _q

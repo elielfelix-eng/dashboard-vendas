@@ -265,3 +265,26 @@ test('fatura: cada leitura traz um pedaço diferente: junta as leituras sem repe
   assert.equal(chamada0, 2, 'para quando alcança o total');
   assert.notEqual(limites[0], limites[1], 'a releitura usa outro tamanho de página');
 });
+
+const erro500 = () => new Response('{"status":500,"type":"INTERNAL_ERROR"}', { status: 500, headers: { 'retry-after': '0.001' } });
+
+test('fatura: uma releitura que sempre dá erro 500 não perde o que as outras já trouxeram', async () => {
+  let leitura = 0;
+  fakeAds({
+    '/billing/integration/periods/key/2026-11-01/group/ML/details': (c) => {
+      if (c.params.get('limit') === '100') return erro500(); // 2a leitura: erro mesmo após as novas tentativas
+      if (Number(c.params.get('offset')) > 0) return json({ results: [], total: 3 })();
+      leitura++;
+      return json({ results: leitura === 1 ? [linhaFatura(1), linhaFatura(2)] : [linhaFatura(3)], total: 3 })();
+    },
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const linhas = await ml.getBillingDetails('2026-11-01');
+  assert.deepEqual(linhas.map((l) => l.detailId).sort(), ['1', '2', '3']);
+});
+
+test('fatura: todas as leituras com erro -> erro (nada é gravado)', async () => {
+  fakeAds({ '/billing/integration/periods/key/2026-11-01/group/ML/details': () => erro500() });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  await assert.rejects(ml.getBillingDetails('2026-11-01', 2));
+});

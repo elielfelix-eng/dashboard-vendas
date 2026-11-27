@@ -8,6 +8,16 @@ const repo = fileURLToPath(new URL('../..', import.meta.url));
 const port = Number(process.argv[2]);
 const sql = (f) => readFileSync(`${repo}/supabase/${f}`, 'utf8');
 
+// Erros do servidor vão para o stderr, que o pytest deixa aparecer no log do CI.
+process.on('uncaughtException', (e) => {
+  console.error('pg_server: uncaughtException', e);
+  process.exit(1);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('pg_server: unhandledRejection', e);
+  process.exit(1);
+});
+
 const db = new PGlite();
 for (const f of ['tests/stubs.sql', 'migrations/0002_marketplaces.sql', 'migrations/0003_regras_v1.sql', 'migrations/0005_gateway.sql']) {
   await db.exec(sql(f));

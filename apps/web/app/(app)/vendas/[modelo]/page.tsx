@@ -30,7 +30,7 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
       dash.sincEShopee(),
     ]);
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">{modelo}</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">{modelo}</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
 
   const info = modelos.find((m) => m.modelo === modelo);
@@ -69,10 +69,10 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
       <div className="mb-4 flex items-center gap-4">
         <FotoProduto src={info?.foto} alt={modelo} tamanho={96} />
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold">{modelo}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{modelo}</h1>
           {info?.produto && <p className="text-sm text-muted">{info.produto}</p>}
           {info?.link && (
-            <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-accent hover:underline">
+            <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-link hover:underline">
               {rotuloLinkAnuncio(info.link)}
             </a>
           )}

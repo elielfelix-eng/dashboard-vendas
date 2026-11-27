@@ -1,3 +1,6 @@
+import type { LucideIcon } from 'lucide-react';
+import { iconeDoCartao } from '@/lib/icones';
+
 interface Props {
   titulo: string;
   valor: string;
@@ -6,18 +9,35 @@ interface Props {
   inverterCores?: boolean;
   detalhe?: string;
   ajuda?: string;
+  /** Ícone do cartão. Sem ele, vem de iconeDoCartao(titulo). */
+  icone?: LucideIcon;
 }
 
-export function CartaoIndicador({ titulo, valor, variacao, inverterCores = false, detalhe, ajuda }: Props) {
+// Ícone num quadrado suave da cor do papel (Manual de Marca p. 36: traço arredondado).
+export function IconeCartao({ icone: Icone }: { icone: LucideIcon }) {
+  return (
+    <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-brand-2" aria-hidden="true">
+      <Icone className="size-5" strokeWidth={2} />
+    </span>
+  );
+}
+
+export function CartaoIndicador({ titulo, valor, variacao, inverterCores = false, detalhe, ajuda, icone }: Props) {
   const v = variacao?.valor;
   const bom = v == null ? null : inverterCores ? v < 0 : v > 0;
   const cor = v == null || v === 0 ? 'text-muted' : bom ? 'text-good' : 'text-bad';
+  const Icone = icone ?? iconeDoCartao(titulo);
   return (
-    <div className="h-full rounded-xl border border-border bg-surface p-4" title={ajuda}>
-      <p className="text-sm text-muted">{titulo}</p>
-      <p className="mt-1 text-xl font-semibold tabular-nums">{valor}</p>
-      <div className="mt-1 flex flex-wrap gap-x-2 text-xs">
-        {variacao && <span className={cor}>{variacao.rotulo}</span>}
+    <div className="flex h-full flex-col rounded-xl border border-border bg-surface p-4 shadow-sm" title={ajuda}>
+      <div className="flex items-center gap-3">
+        <IconeCartao icone={Icone} />
+        <p className="min-w-0 text-sm font-semibold text-muted">{titulo}</p>
+      </div>
+      <p className="mt-3 text-2xl font-bold tabular-nums">{valor}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        {variacao && (
+          <span className={`rounded-full bg-bg px-2 py-0.5 font-semibold tabular-nums ${cor}`}>{variacao.rotulo}</span>
+        )}
         {detalhe && <span className="text-muted">{detalhe}</span>}
       </div>
     </div>

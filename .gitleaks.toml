@@ -1,0 +1,14 @@
+# Configuração do Gitleaks (verificação "Procurar senhas/tokens no codigo").
+# Mantém as regras padrão e libera só dois arquivos de teste com valores falsos:
+# - apps/web/lib/cache-chave.test.ts: token de exemplo (JWT falso) para testar a chave do cache;
+# - supabase/tests/catalogo.test.mjs: lista de nomes de arquivos de migração, que parece uma chave.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Testes com valores falsos"
+paths = [
+  '''apps/web/lib/cache-chave\.test\.ts''',
+  '''supabase/tests/catalogo\.test\.mjs''',
+]

@@ -16,7 +16,7 @@ export function CascataCustos({ itens }: { itens: { rotulo: string; valor: numbe
       </div>
       {itens.map((i) => {
         const largura = Math.max((Math.abs(i.valor) / base) * 100, i.valor === 0 ? 0 : 0.5);
-        const cor = i.tipo === 'receita' ? 'bg-accent' : i.tipo === 'resultado' ? (i.valor >= 0 ? 'bg-good' : 'bg-bad') : 'bg-muted';
+        const cor = i.tipo === 'receita' ? 'bg-brand-2' : i.tipo === 'resultado' ? (i.valor >= 0 ? 'bg-good' : 'bg-bad') : 'bg-muted';
         const sinal = i.tipo === 'custo' ? '− ' : i.tipo === 'resultado' ? '= ' : '';
         const cada100 = receita ? (i.valor / receita) * 100 : null;
         return (

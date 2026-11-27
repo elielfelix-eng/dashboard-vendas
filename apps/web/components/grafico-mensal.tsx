@@ -23,15 +23,15 @@ export function GraficoMensal({ linhas }: { linhas: { mes: string; receita: numb
           <YAxis tickFormatter={curto} tick={{ fontSize: 11, fill: 'var(--muted)' }} width={56} />
           <Tooltip formatter={(v) => (v == null ? '—' : BRL.format(Number(v)))} contentStyle={estilo} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="receita" name="Receita" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-          <Line dataKey="margem" name="Margem de contribuição" stroke="var(--good)" strokeWidth={2} dot={{ r: 3 }} />
+          <Bar dataKey="receita" name="Receita" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+          <Line dataKey="margem" name="Margem de contribuição" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 3 }} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-const CORES = ['var(--muted)', '#a78bfa', '#f59e0b', '#14b8a6', 'var(--accent)'];
+const CORES = ['var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)', 'var(--chart-3)', 'var(--chart-2)'];
 
 /** Uma linha por ano, de janeiro a dezembro, para comparar os anos. */
 export function GraficoAnos({ linhas, medida, rotulo }: {

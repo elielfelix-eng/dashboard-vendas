@@ -111,7 +111,7 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
     ]);
     d = { atual, anterior, modelos, skus, mensal, alertas, sinc, shopee };
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Rentabilidade</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">Rentabilidade</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
   // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
   const a = d.atual;
@@ -167,7 +167,7 @@ export default async function RentabilidadePage({ searchParams }: { searchParams
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Rentabilidade</h1>
+      <h1 className="mb-4 text-2xl font-bold tracking-tight">Rentabilidade</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
         atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
       {aviso && !aviso.semDados && <AvisoDados texto={aviso.texto} />}

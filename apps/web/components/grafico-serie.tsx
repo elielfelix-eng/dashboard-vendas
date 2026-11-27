@@ -37,7 +37,7 @@ export function GraficoSerie({ atual, anterior, medida = 'vendas_brutas', grao =
             contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="atual" name="Período atual" fill="var(--accent)" radius={[3, 3, 0, 0]} />
+          <Bar dataKey="atual" name="Período atual" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
           <Line dataKey="anterior" name="Período anterior" stroke="var(--muted)" strokeDasharray="4 3" dot={false} strokeWidth={2} />
         </ComposedChart>
       </ResponsiveContainer>

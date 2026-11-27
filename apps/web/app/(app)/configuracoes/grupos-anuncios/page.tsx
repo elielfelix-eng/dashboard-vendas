@@ -35,7 +35,7 @@ export default async function GruposAnunciosPage({ searchParams }: { searchParam
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h1 className="mb-1 text-2xl font-semibold">Grupos de anúncios</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Grupos de anúncios</h1>
       <p className="mb-4 text-sm text-muted">
         Cada grupo tem a sua antecedência (dias úteis antes do prazo de despacho para avisar o atraso). Um anúncio fica em no máximo
         um grupo; quem está sem grupo usa o padrão de {padrao} dias úteis (definido em Parâmetros).
@@ -63,7 +63,7 @@ export default async function GruposAnunciosPage({ searchParams }: { searchParam
                     <input type="hidden" name="id" value={g.id} />
                     <input name="nome" defaultValue={g.nome} required maxLength={60} className={`${campo} w-56`} />
                     <input name="antecedencia" type="number" min={0} max={30} step={1} defaultValue={g.antecedencia_dias} required className={`${campo} w-20`} />
-                    <button className="rounded-lg bg-accent px-3 py-1 text-xs text-white">Salvar</button>
+                    <button className="rounded-lg bg-accent-strong px-3 py-1 text-xs text-on-accent-strong">Salvar</button>
                   </form>
                 </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">{qtd.get(Number(g.id)) ?? 0}</td>
@@ -87,7 +87,7 @@ export default async function GruposAnunciosPage({ searchParams }: { searchParam
         <label className="flex flex-col gap-1">Antecedência (dias úteis)
           <input name="antecedencia" type="number" min={0} max={30} step={1} defaultValue={padrao} required className={`${campo} w-24`} />
         </label>
-        <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Criar grupo</button>
+        <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Criar grupo</button>
       </form>
 
       <h2 className="mb-2 mt-10 text-xl font-semibold">Anúncios ativos do Mercado Livre</h2>
@@ -108,7 +108,7 @@ export default async function GruposAnunciosPage({ searchParams }: { searchParam
             <option value="">Sem grupo (usar o padrão)</option>
             {grupos.map((g) => <option key={g.id} value={g.id}>{g.nome} ({g.antecedencia_dias} dias)</option>)}
           </select>
-          <button className="rounded-lg bg-accent px-3 py-1 text-white">Aplicar</button>
+          <button className="rounded-lg bg-accent-strong px-3 py-1 text-on-accent-strong">Aplicar</button>
         </div>
         <div className="overflow-x-auto rounded-xl border border-border bg-surface">
           <table className="w-full text-sm">

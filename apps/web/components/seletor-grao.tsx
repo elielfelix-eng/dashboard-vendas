@@ -14,7 +14,7 @@ export function SeletorGrao({ atual, params, caminho }: { atual: string; params:
         p.set('grao', o.chave);
         return (
           <Link key={o.chave} href={`${caminho}?${p.toString()}`}
-            className={`px-2 py-1 ${atual === o.chave ? 'bg-accent text-white' : 'hover:bg-accent-soft'}`}>
+            className={`px-2 py-1 ${atual === o.chave ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'}`}>
             {o.rotulo}
           </Link>
         );

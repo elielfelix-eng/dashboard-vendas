@@ -20,8 +20,8 @@ export function GraficoAds({ serie, grao = 'dia' }: { serie: AdsSeriePonto[]; gr
           <YAxis tickFormatter={curto} tick={{ fontSize: 11, fill: 'var(--muted)' }} width={56} />
           <Tooltip formatter={(v) => (v == null ? '—' : BRL.format(Number(v)))} contentStyle={estilo} />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="investimento" name="Investimento" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-          <Line dataKey="vendas" name="Vendas por Ads" stroke="var(--good)" strokeWidth={2} dot={false} />
+          <Bar dataKey="investimento" name="Investimento" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+          <Line dataKey="vendas" name="Vendas por Ads" stroke="var(--chart-3)" strokeWidth={2} dot={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

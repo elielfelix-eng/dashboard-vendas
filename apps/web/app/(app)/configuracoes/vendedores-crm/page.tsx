@@ -27,7 +27,7 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
 
   return (
     <div className="mx-auto max-w-5xl">
-      <h1 className="mb-1 text-2xl font-semibold">Vendedores do CRM</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Vendedores do CRM</h1>
       <p className="mb-4 text-sm text-muted">
         Ligue cada vendedor do Bitrix ao usuário dele no painel. Quando o e-mail é igual, a ligação é automática.
       </p>
@@ -78,7 +78,7 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
                             <option value="" disabled>Escolha o usuário</option>
                             {usuarios.map((u) => <option key={u.id} value={u.id}>{u.rotulo}</option>)}
                           </select>
-                          <button className="rounded-lg bg-accent px-2.5 py-1 text-white">Ligar</button>
+                          <button className="rounded-lg bg-accent-strong px-2.5 py-1 text-on-accent-strong">Ligar</button>
                         </form>
                         {ligado && (
                           <form action={desvincular}>
@@ -120,7 +120,7 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
                         <input type="hidden" name="source_id" value={o.source_id} />
                         <input type="hidden" name="ativo" value={on ? 'false' : 'true'} />
                         <span>{on ? 'Sim' : 'Não'}</span>
-                        <button className="text-xs text-accent hover:underline">{on ? 'Desativar' : 'Ativar'}</button>
+                        <button className="text-xs text-link hover:underline">{on ? 'Desativar' : 'Ativar'}</button>
                       </form>
                     </td>
                   </tr>

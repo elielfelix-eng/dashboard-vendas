@@ -16,7 +16,7 @@ import {
 } from '@/lib/ads-regras';
 import { atualizadoEmCanal, avisoSemDadosShopee, semBaseAnteriorShopee } from '@/lib/canais';
 import * as dash from '@/lib/dash';
-import { brl, pct as pctTxt, variacao, variacaoPp } from '@/lib/formato';
+import { brl, pct as pctTxt, variacao, variacaoOrganicas, variacaoPp } from '@/lib/formato';
 import { granularidadeDoPeriodo, hojeBrasilia, lerFiltros, type Canal } from '@/lib/periodo';
 import { exigirPermissao } from '@/lib/permissoes';
 
@@ -171,7 +171,8 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
   const investimentoAnterior = p ? Math.round((p.investimento + segAnterior) * 100) / 100 : undefined;
   // Vendas orgânicas = vendas brutas do canal − vendas por Ads (mesmo escopo do cartão de vendas brutas).
   const orgVendas = a ? Math.max(0, Math.round((a.vendas_brutas_canal - a.vendas_ads) * 100) / 100) : 0;
-  const orgAnterior = p ? Math.max(0, Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100) : undefined;
+  // Sem truncar em zero: anterior <= 0 (comum na Shopee, que atribui quase tudo ao Ads) mostra "sem base", não "novo".
+  const orgAnterior = p ? Math.round((p.vendas_brutas_canal - p.vendas_ads) * 100) / 100 : undefined;
   const pctOrg = a && a.pct_vendas_ads != null ? Math.round((100 - a.pct_vendas_ads) * 100) / 100 : null;
   const soShopee = canal === 'shopee';
   const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
@@ -257,7 +258,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
                 : `Vendas por Ads (anúncios patrocinados) e vendas orgânicas (vendas brutas do canal menos as vendas por Ads; escopo: ${canal === 'shopee' ? 'Shopee' : 'Mercado Livre e Shopee'}). A participação é sobre as vendas brutas do canal.`}
               esquerda={{ titulo: 'Vendas por Ads', valor: brl(a.vendas_ads), variacao: variacao(a.vendas_ads, p?.vendas_ads),
                 participacao: pctTxt(a.pct_vendas_ads), rotulo: '' }}
-              direita={{ titulo: 'Vendas orgânicas', valor: brl(orgVendas), variacao: variacao(orgVendas, orgAnterior),
+              direita={{ titulo: 'Vendas orgânicas', valor: brl(orgVendas), variacao: variacaoOrganicas(orgVendas, orgAnterior),
                 participacao: pctTxt(pctOrg), rotulo: '' }} /> },
             { chave: 'roas', node: <CartaoIndicador titulo="ROAS" valor={roas(a.roas)} variacao={variacao(a.roas, p?.roas)}
               ajuda="Vendas por Ads para cada R$ 1 investido." /> },

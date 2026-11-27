@@ -126,8 +126,8 @@ export function textosEstimados(canal: Canal): { titulo: string; detalhe: string
     return {
       titulo: 'Aguardando a fatura do ML',
       detalhe: 'frete e comissão estimados; acertam sozinhos quando a fatura chegar',
-      ajuda: 'Pedidos pagos que ainda não aparecem na fatura do Mercado Livre. Até lá, o frete e a comissão vêm do próprio pedido.',
-      atencao: ' pedido(s) do período ainda não aparecem na fatura do Mercado Livre: o frete e a comissão deles foram estimados pelo próprio pedido e serão trocados pelos valores faturados nas próximas atualizações.',
+      ajuda: 'Pedidos pagos que ainda não aparecem na fatura do Mercado Livre. Até lá, o frete e a comissão vêm do próprio pedido. Pedidos de meses já fechados sem fatura usam o frete que o ML descontou na própria venda e não entram aqui.',
+      atencao: ' pedido(s) do período ainda não aparecem na fatura do Mercado Livre: o frete e a comissão deles foram estimados pelo próprio pedido e serão trocados pelos valores faturados nas próximas atualizações. Pedidos de meses já fechados sem fatura já usam o valor que o ML descontou na venda e não são contados.',
     };
   }
   if (canal === 'shopee') {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { brl, num, pct, variacao } from './formato.ts';
+import { brl, num, pct, variacao, variacaoOrganicas } from './formato.ts';
 
 const limpo = (s: string) => s.replace(/\s/g, ' ');
 
@@ -28,4 +28,16 @@ test('variacao: periodo anterior zerado vira "novo"', () => {
 test('variacao: os dois zerados ou nulos', () => {
   assert.deepEqual(variacao(0, 0), { valor: null, rotulo: '—' });
   assert.deepEqual(variacao(null, 100), { valor: null, rotulo: '—' });
+});
+
+test('variacaoOrganicas: anterior zero ou negativo vira "sem base", nunca "novo"', () => {
+  assert.deepEqual(variacaoOrganicas(500, 0), { valor: null, rotulo: 'sem base' });
+  assert.deepEqual(variacaoOrganicas(500, -120.5), { valor: null, rotulo: 'sem base' });
+  assert.deepEqual(variacaoOrganicas(0, 0), { valor: null, rotulo: 'sem base' });
+});
+
+test('variacaoOrganicas: com base positiva ou sem periodo anterior, igual a variacao', () => {
+  assert.deepEqual(variacaoOrganicas(108, 100), variacao(108, 100));
+  assert.deepEqual(variacaoOrganicas(108, undefined), { valor: null, rotulo: '—' });
+  assert.deepEqual(variacaoOrganicas(null, 100), { valor: null, rotulo: '—' });
 });

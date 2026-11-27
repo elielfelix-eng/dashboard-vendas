@@ -1,8 +1,18 @@
 name: ML - levantamento de envios
 
-# Rodado manualmente: mostra de onde vêm os prazos de envio e a reputação no Mercado Livre (só leitura).
+# Rodado manualmente, só leitura:
+#   envios     - de onde vêm os prazos de envio e a reputação no Mercado Livre;
+#   seguidores - se a API dá o gasto diário das campanhas de "Seguidores" (outubro/2026).
 on:
   workflow_dispatch:
+    inputs:
+      tipo:
+        description: 'Levantamento a rodar'
+        type: choice
+        options:
+          - envios
+          - seguidores
+        default: envios
 
 permissions:
   contents: read
@@ -19,7 +29,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Levantar prazos de envio e reputacao
+        if: ${{ inputs.tipo != 'seguidores' }}
         run: npm run ml:levantamento -w jobs
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}
+          ML_CLIENT_SECRET: ${{ secrets.ML_CLIENT_SECRET }}
+      - name: Sondar gasto diario de Seguidores
+        if: ${{ inputs.tipo == 'seguidores' }}
+        run: npm run ml:seguidores -w jobs
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ML_CLIENT_ID: ${{ secrets.ML_CLIENT_ID }}

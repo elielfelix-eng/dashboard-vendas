@@ -18,7 +18,15 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR" className={raleway.variable}>
+    <html lang="pt-BR" className={raleway.variable} suppressHydrationWarning>
+      <head>
+        {/* Aplica a escolha de tema salva antes de desenhar a página, para não piscar. Sem escolha, vale o sistema. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "try{var t=localStorage.getItem('bdb-tema');if(t==='claro'||t==='escuro'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}",
+          }}
+        />
+      </head>
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );

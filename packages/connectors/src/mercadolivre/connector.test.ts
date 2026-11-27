@@ -212,3 +212,36 @@ test('somente leitura: nenhuma escrita HTTP no conector do ML nem no cliente HTT
   }
   assert.deepEqual(achados, []);
 });
+
+/* ---------------- Fatura: páginas que voltam vazias (27/11/2026) ---------------- */
+const linhaFatura = (id: number) => ({ charge_info: { detail_id: id, detail_sub_type: 'CDLIT', detail_type: 'CHARGE', detail_amount: 1, creation_date_time: '2026-10-10T07:00:00' } });
+
+test('fatura: página do meio que volta vazia é lida de novo até completar o total', async () => {
+  let vazias = 1;
+  fakeAds({
+    '/billing/integration/periods/key/2026-11-01/group/ML/details': (c) => {
+      const offset = Number(c.params.get('offset'));
+      if (offset === 0) return json({ results: [linhaFatura(1), linhaFatura(2)], total: 3 })();
+      if (vazias-- > 0) return json({ results: [], total: 3 })();
+      return json({ results: [linhaFatura(3)], total: 3 })();
+    },
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const linhas = await ml.getBillingDetails('2026-11-01');
+  assert.deepEqual(linhas.map((l) => l.detailId), ['1', '2', '3']);
+});
+
+test('fatura: leituras repetidas abaixo do total continuam tentando e ficam com a mais completa', async () => {
+  let leitura = 0;
+  fakeAds({
+    '/billing/integration/periods/key/2026-11-01/group/ML/details': (c) => {
+      const offset = Number(c.params.get('offset'));
+      if (offset === 0) { leitura++; return json({ results: [linhaFatura(1), linhaFatura(2)], total: 3 })(); }
+      // a 2a página só vem nas leituras 3 em diante (as anteriores voltam vazias mesmo após tentar de novo)
+      return leitura >= 3 ? json({ results: [linhaFatura(3)], total: 3 })() : json({ results: [], total: 3 })();
+    },
+  });
+  const ml = new MercadoLivreConnector('1', async () => 'token');
+  const linhas = await ml.getBillingDetails('2026-11-01');
+  assert.equal(linhas.length, 3);
+});

@@ -37,7 +37,8 @@ function numeros<T>(linha: Record<string, unknown>): T {
   return out as T;
 }
 
-// Cache de 10 minutos por identidade de acesso (lib/rpc-cache.ts); erro do banco não é guardado.
+// Cache por identidade de acesso, data de Brasília e janela de 10 minutos do relógio (lib/rpc-cache.ts):
+// resultado servido no máximo até o fim da janela em que foi calculado; erro do banco não é guardado.
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
   const linhas = await rpcComCache(fn, args, {
     prefixo: '[ads]', mensagem: 'Não foi possível carregar os dados de Ads agora. Tente de novo em alguns minutos.', logarDetalhe: false,

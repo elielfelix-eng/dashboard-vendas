@@ -25,19 +25,25 @@ export const PERMISSOES: { chave: Permissao; rotulo: string }[] = [
   { chave: 'editar_grupos', rotulo: 'Editar grupos de anúncios' },
 ];
 
-/** Permissões do perfil do usuário logado (uma consulta por requisição). */
-export const getPermissoes = cache(async (): Promise<Set<Permissao>> => {
+/**
+ * Permissões do perfil do usuário logado e se a consulta falhou (uma consulta por requisição).
+ * O cache do painel (rpc-cache.ts) usa `erro` para não guardar nada quando as permissões não foram lidas.
+ */
+export const getPermissoesComErro = cache(async (): Promise<{ permissoes: Set<Permissao>; erro: boolean }> => {
   const { profile } = await requireUser();
-  if (!profile?.role) return new Set();
+  if (!profile?.role) return { permissoes: new Set(), erro: false };
   const supabase = await createClient();
-  const { data } = await medir('permissoes', async () => supabase
+  const { data, error } = await medir('permissoes', async () => supabase
     .schema('core')
     .from('role_permissions')
     .select('permission')
     .eq('role', profile.role)
     .eq('allowed', true));
-  return new Set((data ?? []).map((r) => r.permission as Permissao));
+  return { permissoes: new Set((data ?? []).map((r) => r.permission as Permissao)), erro: !!error };
 });
+
+/** Permissões do perfil do usuário logado (uma consulta por requisição). Erro na consulta = nenhuma (como antes). */
+export const getPermissoes = cache(async (): Promise<Set<Permissao>> => (await getPermissoesComErro()).permissoes);
 
 const ORDEM_TELAS: [Permissao, string][] = [
   ['visao_geral', '/'], ['vendas', '/vendas'], ['rentabilidade', '/rentabilidade'], ['ads', '/ads'], ['operacao', '/alertas'], ['metas', '/metas'],

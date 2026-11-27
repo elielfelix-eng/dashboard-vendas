@@ -1,39 +1,40 @@
 import { unstable_cache } from 'next/cache';
 import { createClient as clienteSupabase, type SupabaseClient } from '@supabase/supabase-js';
 import { getCurrentUser } from './auth';
-import { CACHE_SEGUNDOS, TAG_PAINEL, chaveCache, identidadeCache } from './cache-chave';
-import { getPermissoes } from './permissoes';
+import { CACHE_SEGUNDOS, LIMITE_BYTES_CACHE, TAG_PAINEL, chaveCache, decidirCache } from './cache-chave';
+import { getPermissoesComErro } from './permissoes';
 import { createClient } from './supabase/server';
 import { medir } from './tempo';
 
-// Chamada às funções analytics.* do painel com cache de 10 minutos por identidade de acesso (cache-chave.ts).
-// A sessão (cookies) é lida FORA do cache; dentro dele, um cliente Supabase usa só o token do usuário
-// (cabeçalho Authorization), então RLS e permissões continuam valendo no banco. O token não entra na
-// chave nem no log. Erro do banco é lançado (com a mensagem da tela) e não é guardado no cache.
+// Só no servidor. O pacote 'server-only' não está instalado no projeto: guarda equivalente em tempo de execução
+// (e este módulo já depende de next/headers via ./supabase/server, que não compila em componente de cliente).
+if (typeof window !== 'undefined') throw new Error('lib/rpc-cache.ts só pode ser usado no servidor');
+
+// Chamada às funções analytics.* do painel com cache por identidade de acesso, data de Brasília e janela de
+// 10 minutos do relógio (cache-chave.ts): um resultado nunca é servido depois do fim da janela de 10 minutos
+// em que foi calculado. A sessão (cookies) é lida FORA do cache; dentro dele, um cliente Supabase usa só o
+// token do usuário (cabeçalho Authorization), então RLS e permissões continuam valendo no banco. O token não
+// entra na chave nem no log. Erro do banco é lançado (com a mensagem da tela) e não é guardado no cache.
 
 type Linhas = Record<string, unknown>[];
 
-/** Usuário dono do token (campo sub do JWT), para conferir que o token é da mesma sessão do perfil. */
-function donoDoToken(token: string): string | null {
-  try {
-    const sub = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'))?.sub;
-    return typeof sub === 'string' ? sub : null;
-  } catch {
-    return null;
-  }
+/** Resultado grande demais para o cache do Next: sai do unstable_cache por exceção (não é guardado). */
+class GrandeDemais extends Error {
+  constructor(readonly linhas: Linhas) { super('resultado grande demais para o cache'); }
 }
 
 /** Token e identidade da requisição atual; null quando não dá para usar o cache com segurança. */
 async function acesso(): Promise<{ token: string; identidade: string } | null> {
   const ctx = await getCurrentUser();
   if (!ctx?.profile?.role) return null;
-  const identidade = identidadeCache(ctx.profile.role, ctx.profile.channels, await getPermissoes());
-  if (!identidade) return null;
-  const supabase = await createClient();
+  const [{ permissoes, erro }, supabase] = await Promise.all([getPermissoesComErro(), createClient()]);
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  if (!token || donoDoToken(token) !== ctx.user.id) return null;
-  return { token, identidade };
+  const identidade = decidirCache({
+    userId: ctx.user.id, role: ctx.profile.role, canais: ctx.profile.channels,
+    permissoes, erroPermissoes: erro, token,
+  });
+  return identidade && token ? { token, identidade } : null;
 }
 
 /**
@@ -53,7 +54,7 @@ export async function rpcComCache(fn: string, args: Record<string, unknown>,
   };
 
   const a = await acesso();
-  if (!a) return consultar(await createClient()); // sem perfil/sessão: como antes, sem cache
+  if (!a) return consultar(await createClient()); // sem perfil/sessão/permissões: como antes, sem cache
 
   const { token } = a;
   let doBanco = false;
@@ -65,12 +66,22 @@ export async function rpcComCache(fn: string, args: Record<string, unknown>,
         global: { headers: { Authorization: `Bearer ${token}` } },
         auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       });
-      return consultar(cliente);
+      const linhas = await consultar(cliente);
+      if (Buffer.byteLength(JSON.stringify(linhas), 'utf8') > LIMITE_BYTES_CACHE) throw new GrandeDemais(linhas);
+      return linhas;
     },
-    [chaveCache(fn, args, a.identidade)],
+    [chaveCache(fn, args, a.identidade, new Date())],
     { revalidate: CACHE_SEGUNDOS, tags: [TAG_PAINEL] },
   );
-  const linhas = await cacheado();
-  if (!doBanco) console.log(`[tempo] ${fn} cache ${Math.round(performance.now() - inicio)}ms`);
-  return linhas;
+  try {
+    const linhas = await cacheado();
+    if (!doBanco) console.log(`[tempo] ${fn} cache ${Math.round(performance.now() - inicio)}ms`);
+    return linhas;
+  } catch (e) {
+    if (e instanceof GrandeDemais) {
+      console.log(`[tempo] ${fn} grande demais para o cache`);
+      return e.linhas;
+    }
+    throw e;
+  }
 }

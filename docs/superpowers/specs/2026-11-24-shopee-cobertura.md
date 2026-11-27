@@ -62,7 +62,13 @@ Painel conferido com o Seller Center, o Shopee Ads e o Mercado Ads.
 - **Tarifas da Shopee:** o escrow de 327 pedidos fecha centavo a centavo com o valor repassado.
 - **Pontos anteriores ao projeto Shopee**, que não vêm desta mudança e ficam para decisão do dono:
   - **Pedidos sem fatura no ML:** com a comissão isenta desde 10/2026, muitos pedidos do ML nunca recebem linha de fatura. Conferido em 27/11 em 3 pedidos de outubro: o frete que o painel usa (`shipping_cost_seller`) é igual à "Tarifa do Mercado Envios (por sua conta)" descontada na própria venda. A margem está certa. Decisão do dono: depois que o mês fecha, esses pedidos contam como definitivos e saem de "Aguardando a fatura do ML".
-  - **Seguidores pela data da fatura:** o painel mostra R$ 52,12 em outubro. O Mercado Ads mostra R$ 539, contado pelo dia do gasto.
+  - **Seguidores e fatura do ML (resolvido em 27/11):** o painel mostrava R$ 52,12 de Seguidores em outubro, contra R$ 539 no Mercado Ads. A regra de data estava certa: o dia do gasto é a data da cobrança menos 1 dia. A causa foi outra. Em 27/11 a API da fatura devolveu o período 2026-11-01 vazio, e a sincronização apagou as 261 cobranças de 05/10 a 04/11. A API também devolvia o período incompleto (211 ou 200 linhas) e com HTTP 500. A sincronização foi corrigida em quatro pontos:
+    - nunca troca um período gravado por uma leitura menor;
+    - junta até 5 releituras, com tamanhos de página diferentes, até alcançar o total;
+    - relê uma página que vem vazia;
+    - ignora uma releitura ou um período com erro.
+
+    Depois da correção: o período tem 261 linhas; outubro mostra Seguidores R$ 537,71 e investimento R$ 8.762,12 (Mercado Ads: R$ 539 e R$ 8.763).
   - **Imposto e embalagem sem cadastro:** estão em 0% no ML, e a Shopee não tem cadastro.
 
 ## Decisões para o dono

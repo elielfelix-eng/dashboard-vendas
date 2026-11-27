@@ -1,5 +1,5 @@
 import { createClient } from './supabase/server';
-import { medir } from './tempo';
+import { rpcComCache } from './rpc-cache';
 import type { Canal } from './periodo';
 
 // Chamadas tipadas às funções analytics.ads_* (o banco calcula; RLS e permissões valem).
@@ -37,14 +37,12 @@ function numeros<T>(linha: Record<string, unknown>): T {
   return out as T;
 }
 
+// Cache de 10 minutos por identidade de acesso (lib/rpc-cache.ts); erro do banco não é guardado.
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T[]> {
-  const supabase = await createClient();
-  const { data, error } = await medir(fn, async () => supabase.schema('analytics').rpc(fn, args));
-  if (error) {
-    console.error(`[ads] ${fn}`);
-    throw new Error('Não foi possível carregar os dados de Ads agora. Tente de novo em alguns minutos.');
-  }
-  return ((data as Record<string, unknown>[] | null) ?? []).map((l) => numeros<T>(l));
+  const linhas = await rpcComCache(fn, args, {
+    prefixo: '[ads]', mensagem: 'Não foi possível carregar os dados de Ads agora. Tente de novo em alguns minutos.', logarDetalhe: false,
+  });
+  return linhas.map((l) => numeros<T>(l));
 }
 
 /** Cartões do período. `detalhe = false` pula o "não atribuído" (atribuição por modelo, cara): vem nulo. */

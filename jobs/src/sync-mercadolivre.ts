@@ -208,9 +208,20 @@ async function syncBilling(sql: Sql, ml: MercadoLivreConnector) {
       .map((r) => [r.period_key, r.n] as const),
   );
   let total = 0;
+  let falhas = 0;
+  let lidos = 0;
   for (const [i, p] of periods.entries()) {
     if (i >= 2 && gravados.has(p.key)) continue;
-    const rows = await ml.getBillingDetails(p.key);
+    lidos++;
+    // Erro num período (ex.: HTTP 500 do ML) não impede a leitura dos outros; o gravado fica.
+    let rows: Awaited<ReturnType<MercadoLivreConnector['getBillingDetails']>>;
+    try {
+      rows = await ml.getBillingDetails(p.key);
+    } catch (err) {
+      console.warn(`[ML] fatura ${p.key}: falha na leitura (${(err as Error).message.slice(0, 120)}); mantém o gravado`);
+      falhas++;
+      continue;
+    }
     // Linha idêntica repetida na resposta: descarta. Mesmo id com conteúdo
     // diferente: mantém as duas (com sufixo), para não perder cobranças.
     const seen = new Map<string, string>();
@@ -246,6 +257,8 @@ async function syncBilling(sql: Sql, ml: MercadoLivreConnector) {
     total += rows.length;
     console.log(`[ML] fatura ${p.key}: ${rows.length} linhas`);
   }
+  // Todos os períodos lidos falharam: a etapa conta como falha (billing_rows = -1), como antes.
+  if (lidos > 0 && falhas === lidos) throw new Error(`as ${falhas} leituras de período da fatura falharam`);
   return total;
 }
 

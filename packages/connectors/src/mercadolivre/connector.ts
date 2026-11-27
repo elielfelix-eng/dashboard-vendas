@@ -460,8 +460,20 @@ export class MercadoLivreConnector implements MarketplaceConnector {
   async getBillingDetails(key: string, maxReads = 5): Promise<MlBillingDetail[]> {
     const limites = [1000, 100, 50, 200, 1000];
     const juntas = new Map<string, MlBillingDetail>();
+    let algumaLeu = false;
+    let ultimoErro: unknown = null;
     for (let i = 0; i < maxReads; i++) {
-      const { rows, total } = await this.readBillingDetailsOnce(key, limites[i % limites.length]);
+      // Uma releitura com erro (ex.: HTTP 500 mesmo depois das novas tentativas do cliente) não
+      // descarta o que as outras trouxeram; só falha se nenhuma leitura der certo.
+      let lida: { rows: MlBillingDetail[]; total: number | null };
+      try {
+        lida = await this.readBillingDetailsOnce(key, limites[i % limites.length]);
+      } catch (err) {
+        ultimoErro = err;
+        continue;
+      }
+      algumaLeu = true;
+      const { rows, total } = lida;
       const antes = juntas.size;
       for (const r of rows) {
         const chave = `${r.detailId}|${JSON.stringify(r.raw)}`;
@@ -469,6 +481,7 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       }
       if (total != null ? juntas.size >= total : i > 0 && juntas.size === antes) break;
     }
+    if (!algumaLeu) throw ultimoErro;
     return [...juntas.values()];
   }
 }

@@ -64,7 +64,7 @@ export function UploadMetas() {
               const r = await gravarMetas(validas);
               setMsg(r.erro ? { tipo: 'erro', texto: r.erro } : { tipo: 'ok', texto: `${r.gravadas} meta(s) gravada(s). As metas de ${anos.join(', ')} foram substituídas.` });
             })}
-            className="mt-4 rounded-lg bg-accent px-3 py-1.5 text-white disabled:opacity-50"
+            className="mt-4 rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong disabled:opacity-50"
           >
             {pendente ? 'Gravando…' : `Gravar (substitui as metas de ${anos.join(', ') || '—'})`}
           </button>

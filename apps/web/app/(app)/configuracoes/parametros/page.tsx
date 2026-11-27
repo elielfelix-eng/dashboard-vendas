@@ -49,7 +49,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
 
   return (
     <div className="mx-auto max-w-4xl">
-      <h1 className="mb-1 text-2xl font-semibold">Parâmetros de custo</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Parâmetros de custo</h1>
       <p className="mb-4 text-sm text-muted">
         Imposto (% sobre a receita) e embalagem entram na margem de contribuição dos pedidos pagos. Cada venda usa a vigência mais
         recente com data igual ou anterior à data da venda; mudar o valor a partir de uma data não altera os meses anteriores.
@@ -114,7 +114,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
             <input name="embalagem_peca" inputMode="decimal" placeholder="0,00" className="rounded border border-border bg-surface px-2 py-1" />
           </label>
           <div className="flex items-end">
-            <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar vigência</button>
+            <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar vigência</button>
           </div>
           <p className="text-xs text-muted sm:col-span-3">Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
         </form>
@@ -180,7 +180,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
               </label>
             ))}
             <div className="flex items-end">
-              <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limites</button>
+              <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar limites</button>
             </div>
             <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores em vigor deste canal. Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
           </form>
@@ -254,7 +254,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
               </label>
             ))}
             <div className="flex items-end">
-              <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar percentuais</button>
+              <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar percentuais</button>
             </div>
             <p className="text-xs text-muted sm:col-span-3">Os campos já vêm com os valores em vigor deste canal. O limite exato conta (10% conta; 9,99% não). Salvar uma data que já existe para o canal substitui os valores daquela vigência.</p>
           </form>
@@ -277,7 +277,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
               defaultValue={String(pa?.perto_limite_pct ?? 80).replace('.', ',')} className={campo} />
           </label>
           <div className="flex items-end">
-            <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar</button>
+            <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar</button>
           </div>
           <p className="text-xs text-muted sm:col-span-3">
             &quot;Perto do limite&quot; avisa quando um indicador de reputação chega a esse percentual do limite cadastrado.
@@ -317,7 +317,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
           <label className="flex flex-col gap-1">Nome
             <input name="nome" required maxLength={80} placeholder="Ex.: feriado municipal" className={`${campo} w-64`} />
           </label>
-          <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Adicionar feriado</button>
+          <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Adicionar feriado</button>
         </form>
       )}
 
@@ -372,7 +372,7 @@ export default async function ParametrosPage({ searchParams }: { searchParams: S
           <label className="flex flex-col gap-1">Limite (%)
             <input name="limite_pct" inputMode="decimal" required className={`${campo} w-24`} />
           </label>
-          <button className="rounded-lg bg-accent px-3 py-1.5 text-white">Salvar limite</button>
+          <button className="rounded-lg bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar limite</button>
           <p className="w-full text-xs text-muted">Salvar um nível e indicador que já existem substitui o limite.</p>
         </form>
       )}

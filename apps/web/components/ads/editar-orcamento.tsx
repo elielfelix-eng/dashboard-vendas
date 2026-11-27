@@ -29,7 +29,7 @@ export function EditarOrcamento({ canais, vigencias, hoje, sugestaoData, filtros
           <span className="text-xs text-muted">Vale a partir de</span>
           <input name="vigente_desde" type="date" required defaultValue={sugestaoData} className="rounded-md border border-border bg-bg px-2 py-1.5" />
         </label>
-        <button type="submit" className="rounded-md bg-accent px-3 py-1.5 text-white">Salvar</button>
+        <button type="submit" className="rounded-md bg-accent-strong px-3 py-1.5 text-on-accent-strong">Salvar</button>
       </form>
       <p className="mt-2 text-xs text-muted">Se já existe uma vigência com a mesma data no canal, o valor dela é substituído.</p>
 

@@ -30,7 +30,7 @@ export default async function ComparativoPage({ searchParams }: { searchParams: 
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-1 text-2xl font-semibold">Comparativo</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Comparativo</h1>
       <nav className="mb-4 mt-3 flex gap-1 border-b border-border text-sm" aria-label="Abas">
         {ABAS.map((x) => (
           <Link key={x.chave} href={`/comparativo?aba=${x.chave}`}
@@ -93,7 +93,7 @@ async function AbaAnual({ sp, perms }: { sp: Record<string, string | string[] | 
       <div className="mb-4 flex w-fit overflow-hidden rounded-lg border border-border text-sm">
         {canaisBotao.map((x) => (
           <Link key={x} href={`/comparativo?aba=anual&canal=${x}`}
-            className={`px-3 py-1.5 ${canal === x ? 'bg-accent text-white' : 'hover:bg-accent-soft'}`}>
+            className={`px-3 py-1.5 ${canal === x ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'}`}>
             {nomeCanal(x)}
           </Link>
         ))}

@@ -39,7 +39,7 @@ export default async function MetasPage({ searchParams }: { searchParams: SP }) 
   try {
     linhas = await dash.metas(canal, ano);
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Metas e Projeção</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">Metas e Projeção</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
 
   const padroes: Record<number, number | null> = {};
@@ -52,21 +52,21 @@ export default async function MetasPage({ searchParams }: { searchParams: SP }) 
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-1 text-2xl font-semibold">Metas e Projeção</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Metas e Projeção</h1>
       <p className="mb-4 text-sm text-muted">Realizado (receita dos pedidos pagos), projeção mês a mês até dezembro de {ano} e meta do orçamento.</p>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex overflow-hidden rounded-lg border border-border text-sm">
           {CANAIS.map((x) => (
             <Link key={x.chave} href={link({ canal: x.chave })}
-              className={`px-3 py-1.5 ${canal === x.chave ? 'bg-accent text-white' : 'hover:bg-accent-soft'}`}>{x.rotulo}</Link>
+              className={`px-3 py-1.5 ${canal === x.chave ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'}`}>{x.rotulo}</Link>
           ))}
         </div>
         {anos.length > 1 && (
           <div className="flex overflow-hidden rounded-lg border border-border text-sm">
             {anos.map((a) => (
               <Link key={a} href={link({ ano: String(a) })}
-                className={`px-3 py-1.5 ${ano === a ? 'bg-accent text-white' : 'hover:bg-accent-soft'}`}>{a}</Link>
+                className={`px-3 py-1.5 ${ano === a ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'}`}>{a}</Link>
             ))}
           </div>
         )}

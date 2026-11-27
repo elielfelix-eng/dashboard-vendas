@@ -50,7 +50,7 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
     ]);
     d = { atual, anterior, sAtual, sAnterior, mAtual, mAnterior, sinc, shopee };
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Vendas</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">Vendas</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
   const aviso = avisoSemDadosShopee(canal, periodo, d.shopee.cob);
   // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
@@ -72,7 +72,7 @@ export default async function VendasPage({ searchParams }: { searchParams: SP })
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Vendas</h1>
+      <h1 className="mb-4 text-2xl font-bold tracking-tight">Vendas</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
         atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
       {aviso && !aviso.semDados && <AvisoDados texto={aviso.texto} />}

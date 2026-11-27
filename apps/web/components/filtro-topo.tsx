@@ -56,7 +56,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
                 disabled={!c.ativo}
                 title={c.ativo ? undefined : 'A Shopee ainda não tem dados sincronizados no painel'}
                 onClick={() => ir({ canal: c.chave })}
-                className={`px-3 py-1.5 ${canal === c.chave ? 'bg-accent text-white' : 'hover:bg-accent-soft'} disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent`}
+                className={`px-3 py-1.5 ${canal === c.chave ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'} disabled:cursor-not-allowed disabled:text-muted disabled:hover:bg-transparent`}
               >
                 {c.rotulo}{!c.ativo && <span className="ml-1 text-[10px]">sem dados</span>}
               </button>
@@ -80,7 +80,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
             <input type="date" value={de} onChange={(e) => setDe(e.target.value)} className="rounded border border-border bg-surface px-1 py-1" />
             <span>a</span>
             <input type="date" value={ate} onChange={(e) => setAte(e.target.value)} className="rounded border border-border bg-surface px-1 py-1" />
-            <button className="rounded bg-accent px-2 py-1 text-white">Aplicar</button>
+            <button className="rounded bg-accent-strong px-2 py-1 text-on-accent-strong">Aplicar</button>
           </form>
         )}
       </div>

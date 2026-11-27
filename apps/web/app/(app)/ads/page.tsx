@@ -161,7 +161,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
       : [[], []];
     d = { atual, anterior, segAtual, segAnterior, serie, modelos, campanhas, sinc, orcamento, vigencias, shopee };
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">Ads</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
   const { atual: a, segAtual, segAnterior } = d;
   // Shopee com o período anterior antes da 1ª venda: sem base para a comparação (setas "—").
@@ -226,7 +226,7 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Ads</h1>
+      <h1 className="mb-4 text-2xl font-bold tracking-tight">Ads</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={d.shopee.ativa}
         atualizadoEm={atualizadoEmCanal(canal, d.sinc, d.shopee.ativa)} />
 
@@ -314,12 +314,12 @@ export default async function AdsPage({ searchParams }: { searchParams: SP }) {
               <>
               <div className="mb-3 flex flex-wrap items-center gap-1.5 text-xs" aria-label="Filtrar por sugestão">
                 <span className="mr-1 text-muted">Sugestão:</span>
-                <Link href={linkSug(null)} className={`rounded-full border px-2.5 py-1 ${!sug ? 'border-accent bg-accent text-white' : 'border-border hover:bg-accent-soft'}`}>
+                <Link href={linkSug(null)} className={`rounded-full border px-2.5 py-1 ${!sug ? 'border-accent bg-accent-strong text-on-accent-strong' : 'border-border hover:bg-accent-soft'}`}>
                   Todas
                 </Link>
                 {ORDEM_SUGESTOES.map((x) => (
                   <Link key={x} href={linkSug(x)}
-                    className={`rounded-full border px-2.5 py-1 ${sug === x ? 'border-accent bg-accent text-white' : 'border-border hover:bg-accent-soft'}`}>
+                    className={`rounded-full border px-2.5 py-1 ${sug === x ? 'border-accent bg-accent-strong text-on-accent-strong' : 'border-border hover:bg-accent-soft'}`}>
                     {rotuloSugestao(x)} ({contagem[x]})
                   </Link>
                 ))}

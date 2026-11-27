@@ -11,7 +11,7 @@ export function CartaoOrcamento({ o }: { o: LinhaOrcamento }) {
   const largura = (v: number) => (orc > 0 ? Math.min(100, (v / orc) * 100) : 0);
   const wPA = largura(o.gasto_product_ads);
   const wSeg = Math.min(largura(o.gasto_seguidores), 100 - wPA);
-  const cor = o.alerta === 'estouro' ? 'bg-bad' : 'bg-accent';
+  const cor = o.alerta === 'estouro' ? 'bg-bad' : 'bg-brand-2';
 
   return (
     <article className="rounded-xl border border-border bg-surface p-4" aria-label={`Orçamento ${NOMES[o.canal] ?? o.canal}`}>

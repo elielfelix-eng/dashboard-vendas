@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ErroDados, SemDados } from '@/components/cartao-indicador';
+import { Etiqueta } from '@/components/etiqueta';
 import * as alertas from '@/lib/alertas';
 import { corDoNivel, rotuloOrigem, rotuloStatusEnvio, separarProducao, textoFaltam } from '@/lib/alertas-formato';
 import { exigirPermissao } from '@/lib/permissoes';
@@ -8,9 +9,9 @@ type SP = Promise<Record<string, string | string[] | undefined>>;
 
 const ROTULO_INDICADOR: Record<string, string> = { reclamacoes: 'Reclamações', cancelamentos: 'Cancelamentos', atrasos: 'Atrasos' };
 const LINHAS = [
-  { chave: 'reclamacoes', rotulo: 'Reclamações', cor: '#b91c1c' },
-  { chave: 'cancelamentos', rotulo: 'Cancelamentos', cor: '#2563eb' },
-  { chave: 'atrasos', rotulo: 'Atrasos', cor: '#d97706' },
+  { chave: 'reclamacoes', rotulo: 'Reclamações', cor: 'var(--bad)' },
+  { chave: 'cancelamentos', rotulo: 'Cancelamentos', cor: 'var(--chart-3)' },
+  { chave: 'atrasos', rotulo: 'Atrasos', cor: 'var(--warn)' },
 ] as const;
 
 const hhmm = (iso: string | null) => {
@@ -78,7 +79,7 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
         </thead>
         <tbody>
           {normais.map((a) => (
-            <tr key={a.shipment_id} className={`border-b border-border last:border-0 ${a.situacao === 'atrasada' ? 'bg-red-50 text-bad dark:bg-red-950/30' : ''}`}>{celulas(a)}</tr>
+            <tr key={a.shipment_id} className={`border-b border-border last:border-0 ${a.situacao === 'atrasada' ? 'bg-bad/10 text-bad' : ''}`}>{celulas(a)}</tr>
           ))}
           {desconhecidas.length > 0 && (
             <>
@@ -139,7 +140,7 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
     ]);
     d = { despacho, entrega, reputacao, serie };
   } catch (e) {
-    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-semibold">Alertas e Reputação</h1><ErroDados mensagem={(e as Error).message} /></div>;
+    return <div className="mx-auto max-w-6xl"><h1 className="mb-4 text-2xl font-bold tracking-tight">Alertas e Reputação</h1><ErroDados mensagem={(e as Error).message} /></div>;
   }
 
   const { riscos: despachoRiscos, emProducao } = separarProducao(d.despacho);
@@ -155,21 +156,21 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
   return (
     <div className="mx-auto max-w-6xl">
       <div className="mb-4 flex flex-wrap items-baseline gap-3">
-        <h1 className="text-2xl font-semibold">Alertas e Reputação</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Alertas e Reputação</h1>
         {atualizado && <span className="text-xs text-muted">Atualizado às {atualizado}</span>}
       </div>
 
       <section className="rounded-xl border border-border bg-surface p-4">
         <div className="mb-3 flex items-center gap-3">
           <h2 className="text-sm font-semibold">Reputação no Mercado Livre</h2>
-          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${nivel.classe}`}>{nivel.nome}</span>
+          <Etiqueta tom={nivel.tom}>{nivel.nome}</Etiqueta>
         </div>
         {d.reputacao.length === 0 ? (
           <SemDados texto="Ainda não há leitura da reputação." />
         ) : (
           <div className="grid gap-3 sm:grid-cols-3">
             {d.reputacao.map((r) => {
-              const alvo = r.acima ? 'border-bad bg-red-50 dark:bg-red-950/30' : r.perto ? 'border-yellow-500 bg-yellow-50 dark:bg-yellow-950/30' : 'border-border';
+              const alvo = r.acima ? 'border-bad bg-bad/10' : r.perto ? 'border-warn bg-warn/10' : 'border-border';
               return (
                 <div key={r.indicador} className={`rounded-lg border p-3 ${alvo}`}>
                   <p className="text-xs text-muted">{ROTULO_INDICADOR[r.indicador] ?? r.indicador}</p>
@@ -179,7 +180,7 @@ export default async function AlertasPage({ searchParams }: { searchParams: SP }
                   </p>
                   {r.limite_pct == null && <p className="text-xs text-muted">limite não cadastrado</p>}
                   {r.acima && <p className="text-xs font-medium text-bad">acima do limite</p>}
-                  {!r.acima && r.perto && <p className="text-xs font-medium text-yellow-700 dark:text-yellow-400">perto do limite</p>}
+                  {!r.acima && r.perto && <p className="text-xs font-medium text-warn">perto do limite</p>}
                 </div>
               );
             })}

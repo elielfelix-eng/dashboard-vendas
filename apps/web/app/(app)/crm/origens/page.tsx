@@ -29,7 +29,7 @@ export default async function OrigensPage({ searchParams }: { searchParams: SP }
   await exigirPermissao('crm_origens');
   const { profile } = await requireUser();
   const f = lerFiltrosCrm(await searchParams, hojeBrasilia());
-  const titulo = <h1 className="mb-4 text-2xl font-semibold">Origens dos leads</h1>;
+  const titulo = <h1 className="mb-4 text-2xl font-bold tracking-tight">Origens dos leads</h1>;
 
   let d;
   try {

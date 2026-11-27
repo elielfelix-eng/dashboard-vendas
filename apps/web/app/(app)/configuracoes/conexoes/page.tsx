@@ -57,7 +57,7 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold">Conexões</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Conexões</h1>
       <p className="mt-1 text-sm text-muted">
         Os tokens de acesso ficam criptografados no banco e nunca aparecem nesta tela.
       </p>
@@ -75,7 +75,7 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
             </p>
           </div>
           {/* Link comum (GET) para iniciar o OAuth — precisa sair do site */}
-          <a href="/api/oauth/mercadolivre/start" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white">
+          <a href="/api/oauth/mercadolivre/start" className="rounded-lg bg-accent-strong px-4 py-2 text-sm font-medium text-on-accent-strong">
             {ml.length ? 'Reconectar' : 'Conectar Mercado Livre'}
           </a>
         </div>
@@ -92,7 +92,7 @@ export default async function ConexoesPage({ searchParams }: { searchParams: Pro
             </p>
           </div>
           {/* Link comum (GET) para iniciar a autorização — precisa sair do site */}
-          <a href="/api/oauth/shopee/start" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white">
+          <a href="/api/oauth/shopee/start" className="rounded-lg bg-accent-strong px-4 py-2 text-sm font-medium text-on-accent-strong">
             {shopee.length ? 'Reconectar' : 'Conectar Shopee'}
           </a>
         </div>

@@ -45,7 +45,7 @@ export function TabelaAbc<T extends Base>({ colunas, linhas, busca, nomeArquivo,
           <div className="flex overflow-hidden rounded-lg border border-border">
             {(['lucro', 'receita'] as const).map((m) => (
               <button key={m} type="button" onClick={() => { setModo(m); setClasse(''); }}
-                className={`px-2 py-1 ${modo === m ? 'bg-accent text-white' : 'hover:bg-accent-soft'}`}>
+                className={`px-2 py-1 ${modo === m ? 'bg-accent-strong text-on-accent-strong' : 'hover:bg-accent-soft'}`}>
                 ABC por {m}
               </button>
             ))}

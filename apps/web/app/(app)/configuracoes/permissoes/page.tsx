@@ -15,7 +15,7 @@ export default async function PermissoesPage() {
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-1 text-2xl font-semibold">Permissões</h1>
+      <h1 className="mb-1 text-2xl font-bold tracking-tight">Permissões</h1>
       <p className="mb-4 text-sm text-muted">
         Marque o que cada perfil pode ver. A mudança vale na hora para todos os usuários do perfil, e o banco também respeita:
         sem &quot;Vê custo/margem&quot;, custo e margem não são entregues nem pela API.

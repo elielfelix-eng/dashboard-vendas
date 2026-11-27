@@ -32,7 +32,7 @@ export default async function VendedoresPage({ searchParams }: { searchParams: S
   await exigirPermissao('crm_vendedores');
   const { profile } = await requireUser();
   const f = lerFiltrosCrm(await searchParams, hojeBrasilia());
-  const titulo = <h1 className="mb-4 text-2xl font-semibold">Vendedores</h1>;
+  const titulo = <h1 className="mb-4 text-2xl font-bold tracking-tight">Vendedores</h1>;
 
   let d;
   try {

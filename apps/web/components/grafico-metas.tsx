@@ -27,9 +27,9 @@ export function GraficoMetas({ linhas }: { linhas: LinhaMeta[] }) {
             contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
           />
           <Legend wrapperStyle={{ fontSize: 12 }} />
-          <Bar dataKey="realizado" name="Realizado" fill="var(--accent)" radius={[3, 3, 0, 0]} />
-          <Line dataKey="projecao" name="Projeção" stroke="var(--accent)" strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls={false} />
-          <Line dataKey="meta" name="Meta" stroke="var(--good)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
+          <Bar dataKey="realizado" name="Realizado" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+          <Line dataKey="projecao" name="Projeção" stroke="var(--chart-4)" strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls={false} />
+          <Line dataKey="meta" name="Meta" stroke="var(--chart-3)" strokeWidth={2} dot={{ r: 2 }} connectNulls={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

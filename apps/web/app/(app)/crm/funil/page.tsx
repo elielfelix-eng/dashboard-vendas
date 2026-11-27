@@ -32,7 +32,7 @@ function Barras({ itens }: { itens: { rotulo: string; texto: string; largura: nu
       {itens.map((i) => (
         <li key={i.rotulo} className="text-sm">
           <div className="mb-0.5 flex justify-between gap-2"><span>{i.rotulo}</span><span className="tabular-nums text-muted">{i.texto}</span></div>
-          <div className="h-3 rounded bg-accent-soft"><div className="h-3 rounded bg-accent" style={{ width: `${Math.max(0, Math.min(100, i.largura))}%` }} /></div>
+          <div className="h-3 rounded bg-accent-soft"><div className="h-3 rounded bg-brand-2" style={{ width: `${Math.max(0, Math.min(100, i.largura))}%` }} /></div>
         </li>
       ))}
     </ul>
@@ -44,7 +44,7 @@ export default async function FunilPage({ searchParams }: { searchParams: SP }) 
   const { profile } = await requireUser();
   const f = lerFiltrosCrm(await searchParams, hojeBrasilia());
   const p = f.periodo;
-  const titulo = <h1 className="mb-4 text-2xl font-semibold">Funil de vendas</h1>;
+  const titulo = <h1 className="mb-4 text-2xl font-bold tracking-tight">Funil de vendas</h1>;
 
   let d;
   try {

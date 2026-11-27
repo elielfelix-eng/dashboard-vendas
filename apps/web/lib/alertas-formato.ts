@@ -41,15 +41,16 @@ export function rotuloOrigem(origem: string | null): string {
   return (origem && ORIGENS[origem]) || '—';
 }
 
-const NIVEIS: Record<string, { nome: string; classe: string }> = {
-  '5_green': { nome: 'Verde', classe: 'bg-green-600 text-white' },
-  '4_light_green': { nome: 'Verde-claro', classe: 'bg-lime-500 text-white' },
-  '3_yellow': { nome: 'Amarelo', classe: 'bg-yellow-400 text-black' },
-  '2_orange': { nome: 'Laranja', classe: 'bg-orange-500 text-white' },
-  '1_red': { nome: 'Vermelho', classe: 'bg-red-600 text-white' },
+// Tom da etiqueta (components/etiqueta.tsx) por nível de reputação do Mercado Livre.
+const NIVEIS: Record<string, { nome: string; tom: 'bom' | 'alerta' | 'ruim' }> = {
+  '5_green': { nome: 'Verde', tom: 'bom' },
+  '4_light_green': { nome: 'Verde-claro', tom: 'bom' },
+  '3_yellow': { nome: 'Amarelo', tom: 'alerta' },
+  '2_orange': { nome: 'Laranja', tom: 'alerta' },
+  '1_red': { nome: 'Vermelho', tom: 'ruim' },
 };
 
-/** Nome e classe de cor do nível de reputação do Mercado Livre. */
-export function corDoNivel(levelId: string | null): { nome: string; classe: string } {
-  return (levelId && NIVEIS[levelId]) || { nome: 'Sem reputação', classe: 'bg-bg text-muted border border-border' };
+/** Nome e tom da etiqueta do nível de reputação do Mercado Livre. */
+export function corDoNivel(levelId: string | null): { nome: string; tom: 'neutro' | 'bom' | 'alerta' | 'ruim' } {
+  return (levelId && NIVEIS[levelId]) || { nome: 'Sem reputação', tom: 'neutro' };
 }

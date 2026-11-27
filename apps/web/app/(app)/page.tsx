@@ -45,7 +45,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
   } catch (e) {
     return (
       <div className="mx-auto max-w-6xl">
-        <h1 className="mb-4 text-2xl font-semibold">Visão Geral</h1>
+        <h1 className="mb-4 text-2xl font-bold tracking-tight">Visão Geral</h1>
         <ErroDados mensagem={(e as Error).message} />
       </div>
     );
@@ -64,7 +64,7 @@ export default async function VisaoGeralPage({ searchParams }: { searchParams: S
 
   return (
     <div className="mx-auto max-w-6xl">
-      <h1 className="mb-4 text-2xl font-semibold">Visão Geral</h1>
+      <h1 className="mb-4 text-2xl font-bold tracking-tight">Visão Geral</h1>
       <FiltroTopo canal={canal} chave={chave} periodo={periodo} shopeeAtiva={shopee.ativa}
         atualizadoEm={atualizadoEmCanal(canal, sinc, shopee.ativa)} />
 

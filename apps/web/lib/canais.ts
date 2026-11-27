@@ -125,7 +125,7 @@ export function textosEstimados(canal: Canal): { titulo: string; detalhe: string
   if (canal === 'mercadolivre') {
     return {
       titulo: 'Aguardando a fatura do ML',
-      detalhe: 'frete e comissão estimados; acertam sozinhos quando a fatura chegar',
+      detalhe: 'estimados até a fatura chegar',
       ajuda: 'Pedidos pagos que ainda não aparecem na fatura do Mercado Livre. Até lá, o frete e a comissão vêm do próprio pedido. Pedidos de meses já fechados sem fatura usam o frete que o ML descontou na própria venda e não entram aqui.',
       atencao: ' pedido(s) do período ainda não aparecem na fatura do Mercado Livre: o frete e a comissão deles foram estimados pelo próprio pedido e serão trocados pelos valores faturados nas próximas atualizações. Pedidos de meses já fechados sem fatura já usam o valor que o ML descontou na venda e não são contados.',
     };
@@ -133,14 +133,14 @@ export function textosEstimados(canal: Canal): { titulo: string; detalhe: string
   if (canal === 'shopee') {
     return {
       titulo: 'Aguardando o pagamento da Shopee',
-      detalhe: 'tarifas estimadas; acertam sozinhas quando a Shopee liberar o pagamento',
+      detalhe: 'estimadas até o pagamento',
       ajuda: 'Pedidos pagos cujo detalhe de pagamento a Shopee ainda não liberou. Até lá, as tarifas usam a média dos pedidos da Shopee dos 90 dias anteriores.',
       atencao: ' pedido(s) do período ainda não têm o detalhe de pagamento da Shopee: as tarifas deles foram estimadas pela média dos 90 dias anteriores e serão trocadas pelos valores reais nas próximas atualizações.',
     };
   }
   return {
     titulo: 'Tarifas estimadas',
-    detalhe: 'acertam sozinhas quando a fatura do ML ou o pagamento da Shopee chegar',
+    detalhe: 'estimadas até a fatura ou o pagamento',
     ajuda: 'Mercado Livre: pedidos pagos que ainda não aparecem na fatura (frete e comissão vêm do próprio pedido). Shopee: pedidos pagos sem o detalhe de pagamento (tarifas pela média dos 90 dias anteriores).',
     atencao: ' pedido(s) do período ainda têm tarifas estimadas (Mercado Livre: aguardando a fatura; Shopee: aguardando o detalhe de pagamento) e serão trocados pelos valores reais nas próximas atualizações.',
   };

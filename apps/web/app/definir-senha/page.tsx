@@ -24,7 +24,18 @@ export default function DefinirSenhaPage() {
         if (error) console.error('definir-senha: falha_troca_codigo', error.code ?? 'sem_codigo');
         window.history.replaceState(null, '', window.location.pathname);
       }
-      // Formato implicito: o link traz #access_token=... e o cliente le sozinho.
+      // Formato implicito (usado pelo convite do administrador): o link traz #access_token=...&refresh_token=...
+      // O cliente do @supabase/ssr usa PKCE e ignora esse formato, entao a sessao e gravada aqui.
+      const hash = new URLSearchParams(window.location.hash.slice(1));
+      const accessToken = hash.get('access_token');
+      const refreshToken = hash.get('refresh_token');
+      if (hash.get('error_code')) console.error('definir-senha: erro_no_link', hash.get('error_code'));
+      if (accessToken && refreshToken) {
+        const { error } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        if (error) console.error('definir-senha: falha_sessao', error.code ?? 'sem_codigo');
+      }
+      if (window.location.hash) window.history.replaceState(null, '', window.location.pathname);
+
       const { data } = await supabase.auth.getSession();
       setTemSessao(!!data.session);
     }

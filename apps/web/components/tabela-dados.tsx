@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Etiqueta, type TomEtiqueta } from '@/components/etiqueta';
 import { FotoProduto } from '@/components/foto-produto';
 import { exportarXlsx, type Coluna } from '@/lib/exportar';
@@ -69,6 +69,32 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
   const [texto, setTexto] = useState('');
   const [baixando, setBaixando] = useState(false);
 
+  // Colunas fixas: da primeira até o código do produto (modelo ou SKU), para ele continuar visível ao rolar.
+  const indiceFixo = colunas.findIndex((c) => c.chave === 'modelo' || c.chave === 'sku');
+  const cabecalhoRefs = useRef<(HTMLTableCellElement | null)[]>([]);
+  const [deslocamentos, setDeslocamentos] = useState<number[]>([]);
+
+  useLayoutEffect(() => {
+    if (indiceFixo < 0) return;
+    const medir = () => {
+      const d: number[] = [];
+      let acumulado = 0;
+      for (let i = 0; i <= indiceFixo; i++) {
+        d.push(acumulado);
+        acumulado += cabecalhoRefs.current[i]?.offsetWidth ?? 0;
+      }
+      setDeslocamentos(d);
+    };
+    medir();
+    window.addEventListener('resize', medir);
+    return () => window.removeEventListener('resize', medir);
+  }, [colunas, linhas, indiceFixo]);
+
+  const colunaFixa = (j: number) => indiceFixo >= 0 && j <= indiceFixo;
+  const classeFixa = (j: number) =>
+    colunaFixa(j) ? `sticky z-10 bg-surface ${j === indiceFixo ? 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.3)]' : ''}` : '';
+  const estiloFixo = (j: number) => (colunaFixa(j) ? { left: deslocamentos[j] ?? 0 } : undefined);
+
   const visiveis = useMemo(() => {
     const t = texto.trim().toLowerCase();
     let r = busca && t ? linhas.filter((l) => String((l as Record<string, unknown>)[busca] ?? '').toLowerCase().includes(t)) : linhas;
@@ -114,8 +140,9 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-border text-left text-[11px] font-semibold uppercase tracking-wider text-muted">
-              {colunas.map((c) => (
-                <th key={c.chave} className={`cursor-pointer select-none px-3 py-2.5 ${c.tipo === 'texto' ? '' : 'text-right'}`}
+              {colunas.map((c, j) => (
+                <th key={c.chave} ref={(el) => { cabecalhoRefs.current[j] = el; }} style={estiloFixo(j)}
+                  className={`cursor-pointer select-none px-3 py-2.5 ${c.tipo === 'texto' ? '' : 'text-right'} ${colunaFixa(j) ? `sticky z-20 bg-surface ${j === indiceFixo ? 'shadow-[4px_0_6px_-4px_rgba(0,0,0,0.3)]' : ''}` : ''}`}
                   onClick={() => setOrdem((o) => ({ chave: c.chave, desc: o?.chave === c.chave ? !o.desc : c.tipo !== 'texto' }))}>
                   {c.titulo}{ordem?.chave === c.chave ? (ordem.desc ? ' ▼' : ' ▲') : ''}
                 </th>
@@ -137,7 +164,7 @@ export function TabelaDados<T extends object>({ colunas, linhas, busca, nomeArqu
                     const txt = formatar(c.tipo, v);
                     const varCor = c.tipo === 'variacao' && v ? ((v as { valor: number | null }).valor ?? 0) : 0;
                     return (
-                      <td key={c.chave} className={`px-3 py-2.5 ${c.tipo === 'texto' ? '' : 'text-right tabular-nums'} ${varCor > 0 ? 'text-good' : varCor < 0 ? 'text-bad' : ''}`}>
+                      <td key={c.chave} style={estiloFixo(j)} className={`px-3 py-2.5 ${c.tipo === 'texto' ? '' : 'text-right tabular-nums'} ${varCor > 0 ? 'text-good' : varCor < 0 ? 'text-bad' : ''} ${classeFixa(j)}`}>
                         {c.tipo === 'sugestao' ? <CelulaSugestaoView v={v as CelulaSugestao | null} /> : j === 0 && 'foto' in l ? (
                           <span className="flex items-center gap-2">
                             <FotoProduto src={(l as { foto?: string | null }).foto} alt={txt} />

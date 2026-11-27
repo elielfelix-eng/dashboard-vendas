@@ -61,7 +61,7 @@ Painel conferido com o Seller Center, o Shopee Ads e o Mercado Ads.
 - **Consolidado:** é a soma exata dos dois canais em vendas, pedidos, margens, Ads e cancelados.
 - **Tarifas da Shopee:** o escrow de 327 pedidos fecha centavo a centavo com o valor repassado.
 - **Pontos anteriores ao projeto Shopee**, que não vêm desta mudança e ficam para decisão do dono:
-  - **Pedidos sem fatura no ML:** com a comissão isenta desde 10/2026, muitos pedidos do ML nunca recebem linha de fatura. O painel estima o frete desses pedidos: em outubro foram R$ 4.288,49, contra R$ 1.539,44 na fatura.
+  - **Pedidos sem fatura no ML:** com a comissão isenta desde 10/2026, muitos pedidos do ML nunca recebem linha de fatura. Conferido em 27/11 em 3 pedidos de outubro: o frete que o painel usa (`shipping_cost_seller`) é igual à "Tarifa do Mercado Envios (por sua conta)" descontada na própria venda. A margem está certa. Decisão do dono: depois que o mês fecha, esses pedidos contam como definitivos e saem de "Aguardando a fatura do ML".
   - **Seguidores pela data da fatura:** o painel mostra R$ 52,12 em outubro. O Mercado Ads mostra R$ 539, contado pelo dia do gasto.
   - **Imposto e embalagem sem cadastro:** estão em 0% no ML, e a Shopee não tem cadastro.
 

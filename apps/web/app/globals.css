@@ -109,3 +109,13 @@ body {
   color: var(--text);
   font-family: var(--font-marca), system-ui, "Segoe UI", sans-serif;
 }
+
+/* Logotipos: o modo escuro troca para a versão branca. Os dois <img> ficam no DOM e a classe decide qual aparece,
+   para respeitar a escolha de tema da pessoa (data-theme) e não só o tema do sistema. */
+.marca-escuro { display: none; }
+:root[data-theme="escuro"] .marca-claro { display: none; }
+:root[data-theme="escuro"] .marca-escuro { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="claro"]) .marca-claro { display: none; }
+  :root:not([data-theme="claro"]) .marca-escuro { display: block; }
+}

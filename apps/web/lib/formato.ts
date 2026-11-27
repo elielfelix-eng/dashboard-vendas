@@ -18,6 +18,16 @@ export function variacao(atual: number | null | undefined, anterior: number | nu
   return { valor, rotulo: `${valor >= 0 ? '▲' : '▼'} ${DEC1.format(Math.abs(valor))}%` };
 }
 
+/**
+ * Variação das vendas orgânicas (brutas do canal − vendas por Ads). `anteriorBruto` é a conta SEM truncar em zero:
+ * quando é <= 0 (na Shopee a plataforma atribui quase tudo ao Ads) não há base para comparar e o rótulo é "sem base",
+ * não "novo". Sem período anterior (undefined/null), segue o traço de `variacao`.
+ */
+export function variacaoOrganicas(atual: number | null | undefined, anteriorBruto: number | null | undefined): { valor: number | null; rotulo: string } {
+  if (anteriorBruto != null && anteriorBruto <= 0) return { valor: null, rotulo: 'sem base' };
+  return variacao(atual, anteriorBruto);
+}
+
 /** Diferença em pontos percentuais (para margens em %). */
 export function variacaoPp(atual: number | null | undefined, anterior: number | null | undefined): { valor: number | null; rotulo: string } {
   if (atual == null || anterior == null) return { valor: null, rotulo: '—' };

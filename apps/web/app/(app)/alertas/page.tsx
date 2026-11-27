@@ -11,7 +11,7 @@ const ROTULO_INDICADOR: Record<string, string> = { reclamacoes: 'Reclamações',
 const LINHAS = [
   { chave: 'reclamacoes', rotulo: 'Reclamações', cor: 'var(--bad)' },
   { chave: 'cancelamentos', rotulo: 'Cancelamentos', cor: 'var(--chart-3)' },
-  { chave: 'atrasos', rotulo: 'Atrasos', cor: 'var(--warn)' },
+  { chave: 'atrasos', rotulo: 'Atrasos', cor: 'var(--chart-5)' },
 ] as const;
 
 const hhmm = (iso: string | null) => {

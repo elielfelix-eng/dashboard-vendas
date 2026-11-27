@@ -72,7 +72,7 @@ export default async function ModeloPage({ params, searchParams }: { params: Pro
           <h1 className="text-2xl font-bold tracking-tight">{modelo}</h1>
           {info?.produto && <p className="text-sm text-muted">{info.produto}</p>}
           {info?.link && (
-            <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-accent hover:underline">
+            <a href={info.link} target="_blank" rel="noopener noreferrer" className="text-sm text-link hover:underline">
               {rotuloLinkAnuncio(info.link)}
             </a>
           )}

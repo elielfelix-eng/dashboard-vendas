@@ -71,7 +71,7 @@ export default async function MetasPage({ searchParams }: { searchParams: SP }) 
           </div>
         )}
         {perms.has('editar_metas') && (
-          <Link href="/configuracoes/metas" className="text-sm text-accent hover:underline">Subir planilha de metas</Link>
+          <Link href="/configuracoes/metas" className="text-sm text-link hover:underline">Subir planilha de metas</Link>
         )}
       </div>
 

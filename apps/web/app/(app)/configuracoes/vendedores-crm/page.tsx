@@ -120,7 +120,7 @@ export default async function VendedoresCrmPage({ searchParams }: { searchParams
                         <input type="hidden" name="source_id" value={o.source_id} />
                         <input type="hidden" name="ativo" value={on ? 'false' : 'true'} />
                         <span>{on ? 'Sim' : 'Não'}</span>
-                        <button className="text-xs text-accent hover:underline">{on ? 'Desativar' : 'Ativar'}</button>
+                        <button className="text-xs text-link hover:underline">{on ? 'Desativar' : 'Ativar'}</button>
                       </form>
                     </td>
                   </tr>

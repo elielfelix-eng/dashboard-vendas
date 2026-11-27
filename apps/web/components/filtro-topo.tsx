@@ -87,7 +87,7 @@ export function FiltroTopo({ canal, chave, periodo, atualizadoEm, mostrarCanal =
       <div className="flex flex-col text-xs text-muted md:items-end">
         <span>{periodo.rotulo}</span>
         {carregando
-          ? <span className="font-medium text-accent">Atualizando os números…</span>
+          ? <span className="font-medium text-link">Atualizando os números…</span>
           : <span>{hora ? `● Atualizado em ${hora}` : '● Ainda sem atualização'}</span>}
       </div>
     </div>

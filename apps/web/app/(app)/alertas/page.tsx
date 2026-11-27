@@ -60,7 +60,7 @@ function Tabela({ linhas, aba }: { linhas: alertas.AlertaEnvio[]; aba: 'despacho
   const celulas = (a: alertas.AlertaEnvio) => (
     <>
       <td className="px-3 py-2">
-        {a.order_id ? <a href={urlVenda(a.order_id)} target="_blank" rel="noopener noreferrer" className="text-accent underline">{a.order_id}</a> : '—'}
+        {a.order_id ? <a href={urlVenda(a.order_id)} target="_blank" rel="noopener noreferrer" className="text-link underline">{a.order_id}</a> : '—'}
       </td>
       <td className="px-3 py-2">{a.titulo ?? a.item_id ?? '—'}</td>
       <td className="px-3 py-2">{a.grupo ?? '—'}</td>
@@ -109,7 +109,7 @@ function TabelaProducao({ linhas }: { linhas: alertas.AlertaEnvio[] }) {
           {linhas.map((a) => (
             <tr key={a.shipment_id} className="border-b border-border last:border-0">
               <td className="px-3 py-2">
-                {a.order_id ? <a href={urlVenda(a.order_id)} target="_blank" rel="noopener noreferrer" className="text-accent underline">{a.order_id}</a> : '—'}
+                {a.order_id ? <a href={urlVenda(a.order_id)} target="_blank" rel="noopener noreferrer" className="text-link underline">{a.order_id}</a> : '—'}
               </td>
               <td className="px-3 py-2">{a.titulo ?? a.item_id ?? '—'}</td>
               <td className="px-3 py-2">{a.grupo ?? '—'}</td>

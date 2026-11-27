@@ -182,3 +182,12 @@ Pendente do usuário:
 - Confirmar se o código do modelo no ERP é igual ao modelo do SKU do ML
 - % de imposto por canal e custo de embalagem
 - Bitrix24: campo que liga o negócio ao ERP (nº pedido/NF ou CNPJ/CPF)
+
+## Visual da marca (ramo 003-visual-marca)
+- Cores: os papéis ficam em pps/web/lib/tema-cores.ts (claro e escuro) e são repetidos como variáveis CSS em pps/web/app/globals.css. Mudou uma cor, mude nos dois. pps/web/lib/contraste.test.ts exige 4,5:1 nos pares de texto.
+- Tema: data-theme em <html>, escolha salva em localStorage na chave db-tema (lib/tema.ts). Um script no <head> aplica antes de desenhar.
+- Logotipos e favicon: pps/web/public/marca/ (SVG oficiais, sem editar o desenho), pp/icon.svg e pp/apple-icon.png. Use o componente components/logo.tsx; nunca redigite o nome da marca.
+- Menu: lib/menu.ts (grupos, ícones, regras de permissão e item ativo). Cabeçalho, botão de tema e gaveta no celular ficam em components/shell-painel.tsx, cabecalho.tsx, otao-tema.tsx e sidebar.tsx.
+- Cartões: iconeDoCartao(titulo) em lib/icones.ts escolhe o ícone pelo título; CartaoIndicador e CartaoDuplo o usam sem mudança nas telas.
+- Gráficos usam --chart-1 … --chart-6. Botão primário usa --accent-strong (texto --on-accent-strong); a lima (--accent) é só fundo e detalhe.
+- Pasta identidade-visual/ fica fora do git (arquivos de trabalho e fontes de terceiros).

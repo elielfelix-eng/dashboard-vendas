@@ -423,36 +423,46 @@ export class MercadoLivreConnector implements MarketplaceConnector {
       .map((p) => ({ key: p.key!, dateFrom: p.period?.date_from ?? null, dateTo: p.period?.date_to ?? null, raw: p }));
   }
 
-  private async readBillingDetailsOnce(key: string): Promise<MlBillingDetail[]> {
+  private async readBillingDetailsOnce(key: string): Promise<{ rows: MlBillingDetail[]; total: number | null }> {
     const LIMIT = 1000;
     const out: MlBillingDetail[] = [];
+    let total: number | null = null;
     // Avança pelo que veio de fato (a API pode devolver menos que o limite por página)
     // e só para quando atingir o total informado ou receber uma página vazia.
-    for (let offset = 0; ; ) {
+    // Página vazia antes do total (em 27/11/2026 a 2a página do período veio vazia): tenta a mesma página
+    // mais 2 vezes antes de desistir desta leitura.
+    for (let offset = 0, vaziasSeguidas = 0; ; ) {
       const r = await this.api.get<{ results?: MlRawBillingDetail[]; total?: number; paging?: { total?: number } }>(
         `/billing/integration/periods/key/${encodeURIComponent(key)}/group/ML/details`,
         { document_type: 'BILL', limit: LIMIT, offset },
       );
       const page = r.results ?? [];
+      const t = r.total ?? r.paging?.total;
+      if (t != null) total = t;
+      if (!page.length && total != null && offset < total && vaziasSeguidas < 2) {
+        vaziasSeguidas++;
+        continue;
+      }
+      vaziasSeguidas = 0;
       page.forEach((x, i) => out.push(toBillingDetail(key, x, offset + i)));
       offset += page.length;
-      const total = r.total ?? r.paging?.total;
       if (!page.length || (total != null && offset >= total)) break;
     }
-    return out;
+    return { rows: out, total };
   }
 
   /**
-   * A API às vezes devolve um período incompleto: lê de novo até duas leituras
-   * seguidas terem o mesmo número de linhas e fica com a mais completa.
+   * A API às vezes devolve um período incompleto: lê de novo e fica com a leitura mais completa.
+   * Para quando uma leitura alcança o total informado pela API; sem total, quando duas leituras
+   * seguidas têm o mesmo número de linhas.
    */
   async getBillingDetails(key: string, maxReads = 5): Promise<MlBillingDetail[]> {
     let best: MlBillingDetail[] = [];
     let previous = -1;
     for (let i = 0; i < maxReads; i++) {
-      const rows = await this.readBillingDetailsOnce(key);
+      const { rows, total } = await this.readBillingDetailsOnce(key);
       if (rows.length > best.length) best = rows;
-      if (rows.length === previous) break;
+      if (total != null ? best.length >= total : rows.length === previous) break;
       previous = rows.length;
     }
     return best;

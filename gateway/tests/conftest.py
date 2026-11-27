@@ -27,10 +27,11 @@ def pg():
     if node is None:
         pytest.skip("node nao encontrado no PATH: testes de integracao com PGlite foram pulados")
     port = _free_port()
+    # stdout so para o aviso "pronto"; stderr vai direto para o log do pytest/CI (erros do servidor).
     proc = subprocess.Popen(
         [node, str(SERVER), str(port)],
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=None,
         text=True,
         cwd=str(SERVER.parent),
     )
@@ -48,6 +49,10 @@ def pg():
             "sslmode": "disable",
         }
     finally:
+        # Se o servidor morreu durante os testes, registra o código de saída no log.
+        codigo = proc.poll()
+        if codigo is not None:
+            print(f"\n[gateway tests] servidor PGlite encerrou antes do fim, codigo={codigo}", file=sys.stderr)
         proc.terminate()
         try:
             proc.wait(timeout=10)

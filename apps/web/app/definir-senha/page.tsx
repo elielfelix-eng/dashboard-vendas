@@ -16,7 +16,19 @@ export default function DefinirSenhaPage() {
   // O link do convite entrega a sessao pela URL; o cliente do navegador a le sozinho.
   useEffect(() => {
     const supabase = criarClienteNavegador();
-    supabase.auth.getSession().then(({ data }) => setTemSessao(!!data.session));
+    async function iniciar() {
+      // Formato PKCE: o link traz ?code=... e precisa ser trocado por sessao.
+      const codigo = new URLSearchParams(window.location.search).get('code');
+      if (codigo) {
+        const { error } = await supabase.auth.exchangeCodeForSession(codigo);
+        if (error) console.error('definir-senha: falha_troca_codigo', error.code ?? 'sem_codigo');
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+      // Formato implicito: o link traz #access_token=... e o cliente le sozinho.
+      const { data } = await supabase.auth.getSession();
+      setTemSessao(!!data.session);
+    }
+    iniciar();
   }, []);
 
   async function salvar(e: React.FormEvent) {

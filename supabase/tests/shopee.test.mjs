@@ -980,5 +980,130 @@ eq('0035: search_path vazio nas funcoes recriadas', await rows(`select p.proname
   [{ proname: 'dash_modelos', c: 'search_path=""' }, { proname: 'dash_skus', c: 'search_path=""' },
     { proname: 'foto_anuncio', c: 'search_path=""' }, { proname: 'link_anuncio', c: 'search_path=""' }]);
 
+// =====================================================================
+// 0037: desempenho (base so do canal pedido; metas com a receita mensal leve). Mesmo banco + 0036.
+// O retrato de TODAS as funcoes afetadas e tirado antes da 0037 para ML, Shopee e consolidado,
+// como admin e como 'comercial' (sem 'custos', com RLS), e conferido depois: nada pode mudar.
+// =====================================================================
+await perfil('admin'); await canais('mercadolivre,shopee,crm');
+await db.exec(mig('0036_ml_sem_fatura_definitivo.sql'));
+// Casos de borda para as metas: venda sem date_closed (usa date_created) na virada do mes em Brasilia,
+// ML nao pago, item sem preco, pedido sem item, Shopee paga em mes antigo com 2 itens, Shopee nao paga.
+await db.exec(`
+insert into mkt.orders (channel, order_id, status, date_created, date_closed, total_amount, raw) values
+ ('mercadolivre','X1','paid','2026-10-01 02:00+00',null,40,'{}'),
+ ('mercadolivre','X2','payment_required','2026-10-05 12:00+00',null,40,'{}'),
+ ('mercadolivre','X3','paid','2026-08-05 12:00+00','2026-08-05 12:00+00',40,'{}'),
+ ('mercadolivre','X4','paid','2026-08-06 12:00+00','2026-08-06 12:00+00',0,'{}'),
+ ('mercadolivre','X5','paid','2025-09-30 12:00+00','2025-09-30 12:00+00',90,'{}'),
+ ('shopee','Y1','paid','2025-11-03 10:00-03','2025-11-03 10:05-03',80,'{"order_status":"COMPLETED"}'),
+ ('shopee','Y2','unpaid','2025-11-04 10:00-03',null,80,'{"order_status":"UNPAID"}'),
+ ('shopee','Y3','paid','2026-11-02 10:00-03','2026-11-02 10:05-03',35,'{"order_status":"TO_RETURN"}');
+insert into mkt.order_items (channel, order_id, line_no, item_id, sku, title, quantity, unit_price) values
+ ('mercadolivre','X1',1,'MLB1','AAA11-AZU','Produto A',1,40),
+ ('mercadolivre','X2',1,'MLB1','AAA11-AZU','Produto A',1,40),
+ ('mercadolivre','X3',1,'MLB1','AAA11-AZU','Produto A',1,null),
+ ('mercadolivre','X5',1,'MLB1','AAA11-AZU','Produto A',3,30),
+ ('shopee','Y1',1,'SH1','AAA11-AZU','Produto Shopee',1,50),
+ ('shopee','Y1',2,'SH2','SHP01-X','Produto Shopee',2,15),
+ ('shopee','Y2',1,'SH2','SHP01-X','Produto Shopee',1,80),
+ ('shopee','Y3',1,'SH2','SHP01-X','Produto Shopee',1,35);
+insert into core.metas (channel, ano, mes, valor) values ('shopee', 2026, 11, 500), ('mercadolivre', 2026, 12, 900)
+on conflict do nothing;`);
+const CANAIS37 = ['mercadolivre', 'shopee', 'consolidado'];
+const R37 = {
+  base: (c) => `select * from analytics.dash_pedidos_base('2025-01-01', '2026-12-31') where '${c}' = 'consolidado' or channel = '${c}' order by channel, order_id`,
+  resumo_out: (c) => `select * from analytics.dash_resumo('${c}', ${OUT21})`,
+  resumo_ano: (c) => `select * from analytics.dash_resumo('${c}', '2025-01-01', '2026-12-31')`,
+  mensal: (c) => `select * from analytics.dash_resultado_mensal('${c}', '2025-09-01', '2026-11-30')`,
+  serie_dia: (c) => `select * from analytics.dash_serie('${c}', ${OUT21}, 'dia')`,
+  serie_semana: (c) => `select * from analytics.dash_serie('${c}', ${OUT21}, 'semana')`,
+  serie_mes: (c) => `select * from analytics.dash_serie('${c}', '2025-09-01', '2026-11-30', 'mes')`,
+  itens: (c) => `select * from analytics.dash_itens('${c}', '2025-01-01', '2026-12-31') order by order_id, item_id, sku`,
+  modelos: (c) => `select * from analytics.dash_modelos('${c}', ${OUT21})`,
+  skus: (c) => `select * from analytics.dash_skus('${c}', ${OUT21}, null)`,
+  skus_modelo: (c) => `select * from analytics.dash_skus('${c}', ${OUT21}, 'AAA11')`,
+  pedidos: (c) => `select * from analytics.dash_pedidos('${c}', '2025-01-01', '2026-12-31', null)`,
+  pedidos_modelo: (c) => `select * from analytics.dash_pedidos('${c}', ${OUT21}, 'AAA11')`,
+  alertas: (c) => `select * from analytics.dash_alertas('${c}', ${OUT21})`,
+  metas_out: (c) => `select * from analytics.dash_metas('${c}', 2026, '2026-10-20')`,
+  metas_nov: (c) => `select * from analytics.dash_metas('${c}', 2026, '2026-11-27')`,
+  metas_2027: (c) => `select * from analytics.dash_metas('${c}', 2027, '2026-11-27')`,
+};
+const retrato37 = async () => {
+  const r = {};
+  for (const c of CANAIS37) for (const [k, f] of Object.entries(R37)) r[`${c}:${k}`] = await rows(f(c));
+  return r;
+};
+const PERFIS37 = [['admin', 'mercadolivre,shopee,crm'], ['comercial', 'mercadolivre,shopee,crm'], ['comercial', 'mercadolivre'], ['visualizador', 'mercadolivre,shopee,crm']];
+const tirar37 = async () => {
+  const r = {};
+  for (const [p, c] of PERFIS37) {
+    await perfil(p); await canais(c);
+    r[`${p}/${c}`] = p === 'admin' ? await retrato37() : await comoAuth(retrato37);
+  }
+  await perfil('admin'); await canais('mercadolivre,shopee,crm');
+  return r;
+};
+const antes37 = await tirar37();
+eq('0037: retrato com dados (pedidos, metas e itens nos 3 canais)',
+  CANAIS37.map((c) => [antes37['admin/mercadolivre,shopee,crm'][`${c}:base`].length > 0, antes37['admin/mercadolivre,shopee,crm'][`${c}:metas_nov`].length,
+    antes37['admin/mercadolivre,shopee,crm'][`${c}:metas_out`].some((m) => Number(m.realizado) > 0)]),
+  [[true, 14, true], [true, 14, true], [true, 14, true]]);
+eq('0037: sem custos, a Shopee vem com tarifas nulas (o retrato cobre a regra)',
+  antes37['comercial/mercadolivre,shopee,crm']['shopee:resumo_out'].map((r) => [r.comissao, r.custo_produto]), [[null, null]]);
+await db.exec(mig('0037_desempenho_base_por_canal.sql'));
+await db.exec(mig('0037_desempenho_base_por_canal.sql')); // reexecutavel
+console.log('0037 aplicada (2x)');
+const depois37 = await tirar37();
+for (const pk of Object.keys(antes37)) {
+  for (const k of Object.keys(antes37[pk])) eq(`0037: igual antes/depois (${pk}) ${k}`, depois37[pk][k], antes37[pk][k]);
+}
+// Base nova (3 argumentos) = base antiga (2 argumentos) filtrada pelo canal
+for (const c of CANAIS37) {
+  const nova = await rows(`select * from analytics.dash_pedidos_base('2025-01-01', '2026-12-31', '${c}') order by channel, order_id`);
+  const velha = await rows(R37.base(c));
+  eq(`0037: dash_pedidos_base com canal = antiga filtrada (${c}; linhas iguais, quantidade)`,
+    [JSON.stringify(nova) === JSON.stringify(velha), nova.length > 0], [true, true]);
+}
+eq('0037: canal desconhecido ou nulo = nenhuma linha',
+  [(await rows(`select * from analytics.dash_pedidos_base('2025-01-01', '2026-12-31', 'brindedobem')`)).length,
+    (await rows(`select * from analytics.dash_pedidos_base('2025-01-01', '2026-12-31', null)`)).length], [0, 0]);
+// O canal fora do filtro NAO e executado: com a base da Shopee quebrada, o ML funciona (e vice-versa)
+const quebrada = (f) => `create or replace function analytics.${f}(p_de date, p_ate date)
+  returns table (order_id text, classe text, sale_ts timestamptz, data_venda date, sku text, sku_anuncio text,
+  qtd integer, unidades integer, valor_venda numeric, receita numeric, comissao numeric, frete numeric, parcelamento numeric,
+  product_ads numeric, seguidores numeric, estornos numeric, difal numeric, outras numeric, custo_produto numeric, alerta_custo text,
+  channel text, imposto numeric, embalagem numeric, frete_estimado boolean)
+  language plpgsql as $$ begin raise exception 'canal executado: ${f}'; end $$`;
+const pulaCanal = async (quebra, canal) => {
+  await db.exec('begin');
+  try {
+    await db.exec(quebra);
+    const r = [];
+    for (const sql of [`select * from analytics.dash_resumo('${canal}', ${OUT21})`, `select * from analytics.dash_modelos('${canal}', ${OUT21})`,
+      `select * from analytics.dash_serie('${canal}', ${OUT21}, 'dia')`, `select * from analytics.dash_pedidos('${canal}', ${OUT21}, null)`,
+      `select * from analytics.dash_metas('${canal}', 2026, '2026-10-20')`]) {
+      await db.exec('savepoint q');
+      try { await db.query(sql); r.push('ok'); } catch (e) { r.push(e.message); await db.exec('rollback to savepoint q'); }
+    }
+    return r;
+  } finally { await db.exec('rollback'); }
+};
+eq('0037: ML nao executa a base da Shopee', await pulaCanal(quebrada('dash_pedidos_base_shopee'), 'mercadolivre'), ['ok', 'ok', 'ok', 'ok', 'ok']);
+eq('0037: Shopee nao executa a base do ML', await pulaCanal(quebrada('dash_pedidos_base_ml'), 'shopee'), ['ok', 'ok', 'ok', 'ok', 'ok']);
+eq('0037: metas nao executam nenhuma base (consolidado)', await pulaCanal(quebrada('dash_pedidos_base_ml') + ';' + quebrada('dash_pedidos_base_shopee'), 'consolidado').then((r) => r[4]), 'ok');
+eq('0037: base antiga continua igual (ML + Shopee)', (await rows(`select channel, count(*)::int as n from analytics.dash_pedidos_base('2025-01-01', '2026-12-31') group by 1 order by 1`)).map((x) => x.channel),
+  ['mercadolivre', 'shopee']);
+eq('0037: search_path vazio e security invoker nas funcoes recriadas', await rows(`select p.proname, p.pronargs::int as n, array_to_string(p.proconfig, ',') as c, p.prosecdef as d
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+  where n.nspname = 'analytics' and p.proname in ('dash_pedidos_base', 'dash_resumo', 'dash_serie', 'dash_itens', 'dash_pedidos', 'dash_metas') order by p.proname, p.pronargs`),
+  [{ proname: 'dash_itens', n: 3, c: 'search_path=""', d: false }, { proname: 'dash_metas', n: 3, c: 'search_path=""', d: false },
+    { proname: 'dash_pedidos', n: 4, c: 'search_path=""', d: false }, { proname: 'dash_pedidos_base', n: 2, c: 'search_path=""', d: false },
+    { proname: 'dash_pedidos_base', n: 3, c: 'search_path=""', d: false }, { proname: 'dash_resumo', n: 3, c: 'search_path=""', d: false },
+    { proname: 'dash_serie', n: 4, c: 'search_path=""', d: false }]);
+eq('0037: base por canal executavel por authenticated e nao por anon', await rows(`select has_function_privilege('authenticated', 'analytics.dash_pedidos_base(date, date, text)', 'execute') as a,
+  has_function_privilege('anon', 'analytics.dash_pedidos_base(date, date, text)', 'execute') as n`), [{ a: true, n: false }]);
+
 console.log(fails ? `\n${fails} FALHA(S)` : '\nTodos os testes passaram');
 process.exit(fails ? 1 : 0);

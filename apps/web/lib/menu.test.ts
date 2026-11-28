@@ -13,9 +13,15 @@ test('item com permissão só aparece para quem tem a permissão', () => {
   assert.ok(!principal.includes('/rentabilidade'));
 });
 
-test('item sem permissão definida aparece para quem tem pelo menos uma permissão', () => {
-  const grupos = menuVisivel(['vendas'] as Permissao[]);
-  assert.ok((rotulosDo(grupos, 'Principal') ?? []).includes('/anuncios'));
+test('itens em desenvolvimento só aparecem para administradores', () => {
+  const comum = menuVisivel(['vendas'] as Permissao[]);
+  assert.ok(!(rotulosDo(comum, 'Principal') ?? []).includes('/anuncios'));
+  assert.ok(!(rotulosDo(comum, 'Principal') ?? []).includes('/novos-produtos'));
+  assert.equal(rotulosDo(comum, 'ERP'), null);
+
+  const admin = menuVisivel(['vendas', 'configuracoes'] as Permissao[]);
+  assert.ok((rotulosDo(admin, 'Principal') ?? []).includes('/anuncios'));
+  assert.deepEqual(rotulosDo(admin, 'ERP'), ['/estoque', '/financeiro']);
   assert.deepEqual(menuVisivel([] as Permissao[]), []);
 });
 

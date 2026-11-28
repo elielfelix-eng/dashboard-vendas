@@ -82,14 +82,16 @@ export const MENU: GrupoMenu[] = [
   },
 ];
 
-// Regra de sempre: item com permissão exige a permissão; item sem permissão aparece para quem tem alguma.
-// Grupo sem itens visíveis some.
+// Item com permissão exige a permissão. Item em desenvolvimento (pronto: false) só aparece
+// para administradores (permissão 'configuracoes'). Grupo sem itens visíveis some.
 export function menuVisivel(permissoes: Iterable<Permissao>): GrupoMenu[] {
   const perms = new Set(permissoes);
-  return MENU.map((grupo) => ({
-    ...grupo,
-    itens: grupo.itens.filter((item) => (item.perm ? perms.has(item.perm) : perms.size > 0)),
-  })).filter((grupo) => grupo.itens.length > 0);
+  const visivel = (item: ItemMenu) => {
+    if (!item.pronto) return perms.has('configuracoes');
+    return item.perm ? perms.has(item.perm) : perms.size > 0;
+  };
+  return MENU.map((grupo) => ({ ...grupo, itens: grupo.itens.filter(visivel) }))
+    .filter((grupo) => grupo.itens.length > 0);
 }
 
 // A raiz só fica ativa na rota exata; as demais, por prefixo de segmento.

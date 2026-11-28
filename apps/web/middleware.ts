@@ -3,8 +3,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import type { CookieToSet } from '@/lib/supabase/server';
 
 // Rotas sem login: entrar, pedir o primeiro acesso do vendedor, pedir o link de nova senha
-// e definir a senha pelo link do e-mail.
-const PUBLIC_PATHS = ['/login', '/cadastro', '/esqueci-senha', '/definir-senha'];
+// definir a senha pelo link do e-mail e a volta do login com Google.
+const PUBLIC_PATHS = ['/login', '/cadastro', '/esqueci-senha', '/definir-senha', '/auth/callback'];
 
 /** Página simples explicando o que falta configurar (mostra só NOMES, nunca valores). */
 function configError(problems: string[]) {

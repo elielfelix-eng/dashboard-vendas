@@ -1,10 +1,11 @@
 'use client';
 
-import { Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import Link from 'next/link';
+import { KeyRound, Menu, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { logout } from '@/app/login/actions';
 import { BotaoTema } from '@/components/botao-tema';
 
-// Cabeçalho do painel: botão da gaveta (só no celular), recolher o menu (só no desktop), usuário, tema e Sair.
+// Cabeçalho do painel: botão da gaveta (só no celular), recolher o menu (só no desktop), usuário, tema, Alterar senha e Sair.
 export function Cabecalho({
   nome,
   perfil,
@@ -49,6 +50,16 @@ export function Cabecalho({
       </div>
 
       <BotaoTema />
+
+      <Link
+        href="/conta/senha"
+        aria-label="Alterar senha"
+        title="Alterar senha"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm text-muted hover:bg-accent-soft hover:text-text"
+      >
+        <KeyRound className="size-4" aria-hidden="true" />
+        <span className="hidden sm:inline">Alterar senha</span>
+      </Link>
 
       <form action={logout}>
         <button type="submit" className="rounded-lg px-2 py-1 text-sm text-muted hover:bg-accent-soft hover:text-text">

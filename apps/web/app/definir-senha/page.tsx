@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { Logo } from '@/components/logo';
+import { validarNovaSenha } from '@/lib/senha';
 import { criarClienteNavegador } from '@/lib/supabase/browser';
 
 export default function DefinirSenhaPage() {
@@ -45,8 +46,8 @@ export default function DefinirSenhaPage() {
   async function salvar(e: React.FormEvent) {
     e.preventDefault();
     setErro(null);
-    if (senha.length < 8) return setErro('A senha precisa ter pelo menos 8 caracteres.');
-    if (senha !== confirmacao) return setErro('As senhas não conferem.');
+    const invalida = validarNovaSenha(senha, confirmacao);
+    if (invalida) return setErro(invalida);
     setEnviando(true);
     const { error } = await criarClienteNavegador().auth.updateUser({ password: senha });
     setEnviando(false);
@@ -69,10 +70,11 @@ export default function DefinirSenhaPage() {
         {temSessao === false && (
           <>
             <p className="mt-6 text-center text-sm text-muted" role="alert">
-              Este link não é válido ou expirou. Peça um novo em "Primeiro acesso".
+              Este link não é válido ou expirou. Peça um novo link.
             </p>
-            <p className="mt-6 text-center text-sm">
-              <Link href="/cadastro" className="text-link hover:underline">Pedir novo link</Link>
+            <p className="mt-6 flex justify-between gap-4 text-sm">
+              <Link href="/esqueci-senha" className="text-link hover:underline">Esqueci minha senha</Link>
+              <Link href="/cadastro" className="text-link hover:underline">Primeiro acesso do vendedor</Link>
             </p>
           </>
         )}

@@ -29,7 +29,8 @@ export default function LoginPage() {
 
         {state?.error && <p className="mt-4 text-sm text-bad" role="alert">{state.error}</p>}
 
-        <p className="mt-6 text-center text-sm">
+        <p className="mt-6 flex justify-between gap-4 text-sm">
+          <Link href="/esqueci-senha" className="text-link hover:underline">Esqueci minha senha</Link>
           <Link href="/cadastro" className="text-link hover:underline">Primeiro acesso do vendedor</Link>
         </p>
 
